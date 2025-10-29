@@ -4,19 +4,6 @@ from datetime import datetime
 from xylella_processor import process_pdf, write_to_template
 
 # ⬇️ IMPORTA o teu processador
-# Se o teu código estiver numa pasta "xylella", ajusta este import:
-# from xylella.processor import process_pdf, write_to_template
-#
-# Se tens só uma função process_pdf(pdf_path) que devolve rows
-# e write_to_template(rows, out_name, expected_count=None, source_pdf=None),
-# mantém a assinatura abaixo e substitui os pass:
-def process_pdf(pdf_path):
-    # TODO: substituir por import real do teu módulo
-    raise RuntimeError("Ligar ao teu módulo: from xylella.processor import process_pdf")
-
-def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
-    # TODO: substituir por import real do teu módulo
-    raise RuntimeError("Ligar ao teu módulo: from xylella.processor import write_to_template")
 
 st.set_page_config(page_title="Xylella Processor", page_icon="🧪", layout="centered")
 st.title("🧪 Xylella Processor (Cloud)")
