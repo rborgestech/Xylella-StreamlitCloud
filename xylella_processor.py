@@ -50,15 +50,18 @@ print(f"📂 TEMPLATE_PATH final: {TEMPLATE_PATH}")
 # ───────────────────────────────────────────────────────────────
 # Import do motor (core)
 # ───────────────────────────────────────────────────────────────
+# Garante que o diretório onde está o core é visível
+sys.path.append(str(Path(__file__).resolve().parent))
+
 _CORE_MODULE_NAME = "core_xylella"
 
 try:
     core = importlib.import_module(_CORE_MODULE_NAME)
-except Exception as e:  # erro de import claro para a UI
+except Exception as e:
     raise ImportError(
-        f"Não foi possível importar '{_CORE_MODULE_NAME}'. "
-        f"Garante que o ficheiro 'core_xylella.py' existe na raiz do projeto "
-        f"e que compila sem erros. Detalhe: {e!r}"
+        f"❌ Não foi possível importar '{_CORE_MODULE_NAME}'. "
+        f"Verifica se o ficheiro 'core_xylella.py' existe e está no mesmo diretório. "
+        f"Detalhe: {e!r}"
     )
 
 # Verificações suaves de interface
