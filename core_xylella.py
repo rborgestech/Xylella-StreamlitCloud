@@ -1,142 +1,155 @@
+# core_xylella.py
 # -*- coding: utf-8 -*-
 """
-core_xylella.py — motor principal de processamento Xylella
-Responsável por:
-- OCR automático (Azure → fallback local)
-- Extração de texto e parsing de múltiplas requisições
-- Escrita dos resultados em Excel (baseado no TEMPLATE)
+Core real do processador Xylella – versão funcional (com TEMPLATE SGS).
+
+Responsabilidades:
+- Extrair texto de PDFs (OCR Azure ou local);
+- Detetar e segmentar requisições automaticamente;
+- Escrever cada requisição num ficheiro Excel,
+  com base no TEMPLATE_PXF_SGSLABIP1056.xlsx,
+  mantendo formatações, validações e fórmulas SGS.
 """
 
-import os, re, time, io, pdfplumber, requests
 from pathlib import Path
-from openpyxl import load_workbook, Workbook
+from openpyxl import load_workbook
+import os, io, re, requests
+from PyPDF2 import PdfReader
+import pdfplumber
+import pytesseract
+from pdf2image import convert_from_path
+from PIL import Image
 
-# ===============================================================
-# 1) OCR & Extração de Texto
-# ===============================================================
+# ───────────────────────────────────────────────────────────────
+# Funções auxiliares
+# ───────────────────────────────────────────────────────────────
 
 def extract_text_with_fallback(pdf_path: str) -> str:
-    """
-    Extrai texto do PDF. Se falhar, tenta OCR Azure (se configurado).
-    """
+    """Extrai texto do PDF, tentando primeiro texto nativo e depois OCR."""
+    pdf_path = Path(pdf_path)
     text = ""
+
     try:
         with pdfplumber.open(pdf_path) as pdf:
             for page in pdf.pages:
-                t = page.extract_text()
-                if t:
-                    text += "\n" + t
-    except Exception as e:
-        print(f"⚠️ Erro ao abrir PDF: {e}")
+                text += page.extract_text() or ""
+    except Exception:
+        pass
 
-    if text.strip():
-        print("🟢 Texto extraído com sucesso (sem OCR).")
-        return text
+    # se não há texto nativo, tenta OCR (Azure ou local)
+    if not text.strip():
+        azure_key = os.environ.get("AZURE_KEY")
+        azure_endpoint = os.environ.get("AZURE_ENDPOINT")
+        if azure_key and azure_endpoint:
+            try:
+                text = azure_ocr_extract(pdf_path, azure_key, azure_endpoint)
+            except Exception as e:
+                print(f"⚠️ Azure OCR falhou ({e}), a tentar OCR local…")
+                text = local_ocr_extract(pdf_path)
+        else:
+            text = local_ocr_extract(pdf_path)
 
-    print("⚠️ Nenhum texto encontrado — a tentar OCR Azure...")
+    if not text.strip():
+        raise RuntimeError(f"Não foi possível extrair texto de {pdf_path.name}")
 
-    azure_key = os.getenv("AZURE_KEY")
-    azure_endpoint = os.getenv("AZURE_ENDPOINT")
+    return text
 
-    if azure_key and azure_endpoint:
-        try:
-            ocr_url = f"{azure_endpoint}/vision/v3.2/read/analyze"
-            headers = {"Ocp-Apim-Subscription-Key": azure_key, "Content-Type": "application/pdf"}
-            with open(pdf_path, "rb") as f:
-                response = requests.post(ocr_url, headers=headers, data=f)
-                response.raise_for_status()
 
-            operation_url = response.headers["Operation-Location"]
-            for _ in range(30):
-                result = requests.get(operation_url, headers=headers).json()
-                if result.get("status") == "succeeded":
-                    lines = [line["text"] for r in result["analyzeResult"]["readResults"] for line in r["lines"]]
-                    print("🟢 Texto obtido por OCR Azure.")
-                    return "\n".join(lines)
-                time.sleep(1)
-        except Exception as e:
-            print(f"⚠️ OCR Azure falhou: {e}")
+def azure_ocr_extract(pdf_path: Path, key: str, endpoint: str) -> str:
+    """Usa o Azure Computer Vision OCR para extrair texto."""
+    ocr_url = f"{endpoint}/vision/v3.2/read/analyze"
+    headers = {"Ocp-Apim-Subscription-Key": key, "Content-Type": "application/pdf"}
 
-    print("⚠️ OCR Azure indisponível — a tentar OCR local...")
-    try:
-        from pdf2image import convert_from_path
-        import pytesseract
-        pages = convert_from_path(pdf_path)
-        ocr_text = "\n".join(pytesseract.image_to_string(p) for p in pages)
-        if ocr_text.strip():
-            print("🟢 Texto obtido por OCR local (Tesseract).")
-            return ocr_text
-    except Exception as e:
-        print(f"⚠️ OCR local falhou: {e}")
+    with open(pdf_path, "rb") as f:
+        response = requests.post(ocr_url, headers=headers, data=f)
+    response.raise_for_status()
 
-    raise RuntimeError(f"Não foi possível extrair texto de {Path(pdf_path).name}")
+    # Obter URL de operação
+    operation_url = response.headers["Operation-Location"]
+    import time
+    while True:
+        result = requests.get(operation_url, headers={"Ocp-Apim-Subscription-Key": key}).json()
+        if result.get("status") in ["succeeded", "failed"]:
+            break
+        time.sleep(1)
 
-# ===============================================================
-# 2) Parsing simples das amostras e requisições
-# ===============================================================
+    lines = []
+    for r in result.get("analyzeResult", {}).get("readResults", []):
+        for l in r.get("lines", []):
+            lines.append(l["text"])
+    return "\n".join(lines)
 
-def process_pdf(pdf_path: str):
-    """
-    Recebe um PDF e devolve lista de linhas [ [campos...], ... ]
-    """
-    text = extract_text_with_fallback(pdf_path)
-    lines = text.splitlines()
 
-    # detectar início de novas requisições (heurística)
-    split_idxs = [i for i, l in enumerate(lines) if re.search(r"Requisição|Requisi[cç][aã]o|DGAV", l)]
-    split_idxs = split_idxs or [0]
-    sections = [lines[split_idxs[i]: split_idxs[i+1]] if i+1 < len(split_idxs) else lines[split_idxs[i]:]
-                for i in range(len(split_idxs))]
+def local_ocr_extract(pdf_path: Path) -> str:
+    """Fallback OCR local (pytesseract)."""
+    images = convert_from_path(pdf_path)
+    text = ""
+    for img in images:
+        text += pytesseract.image_to_string(img, lang="por")
+    return text
 
+
+# ───────────────────────────────────────────────────────────────
+# PARSER DAS REQUISIÇÕES
+# ───────────────────────────────────────────────────────────────
+
+def parse_requisicoes(text: str):
+    """Deteta blocos de requisições no texto e extrai dados estruturados."""
+    blocos = re.split(r"(?=\bData da Colheita\b)", text)
     rows = []
-    for section in sections:
-        block = "\n".join(section)
-        date_match = re.findall(r"\d{2}/\d{2}/\d{4}", block)
-        especie = re.search(r"(Olea europaea|Lavandula|Pelargonium|Rosmarinus|Cistus|Medicago)", block)
-        natureza = "Composta" if "Composta" in block else "Simples"
-        zona = "Zona Isenta" if "isenta" in block.lower() else "Desconhecida"
-
+    for bloco in blocos:
+        if not bloco.strip():
+            continue
+        data_rec = re.search(r"Data.?Rece[cç][aã]o[:\s]+([\d/]+)", bloco)
+        data_col = re.search(r"Data.?Colheita[:\s]+([\d/]+)", bloco)
+        codigo = re.search(r"([A-Z]?\d{3,4}/\d{4}/[A-Z]{2,3}/?\d?)", bloco)
+        especie = re.search(r"Olea europaea|Cistus albidus|Pelargonium|Lavandula|Rosmarinus|Medicago", bloco, re.I)
+        natureza = re.search(r"Simples|Composta", bloco, re.I)
+        zona = re.search(r"Zona\s+[A-Za-z]+", bloco)
+        responsavel = re.search(r"DGAV|INSA|INIAV|Outros", bloco)
         rows.append([
-            date_match[0] if len(date_match) > 0 else "",
-            date_match[1] if len(date_match) > 1 else "",
-            re.search(r"\d{3,4}/\d{4}/[A-Z]+/\d+", block) or re.search(r"\d{3,4}/\d{4}/[A-Z]+", block),
+            data_rec.group(1) if data_rec else "",
+            data_col.group(1) if data_col else "",
+            codigo.group(1) if codigo else "",
             especie.group(0) if especie else "",
-            natureza,
-            zona,
-            "DGAV" if "DGAV" in block else ""
+            natureza.group(0) if natureza else "",
+            zona.group(0) if zona else "",
+            responsavel.group(0) if responsavel else "",
         ])
-    print(f"📊 Extraídas {len(rows)} linhas de amostras.")
     return rows
 
-# ===============================================================
-# 3) Escrita no TEMPLATE Excel
-# ===============================================================
 
-def write_to_template(ocr_rows, out_base_path, expected_count=None, source_pdf=None):
-    """
-    Gera 1 ou vários ficheiros Excel a partir do TEMPLATE base.
-    """
-    template_path = Path(os.getenv("TEMPLATE_PATH", "TEMPLATE_PXF_SGSLABIP1056.xlsx"))
-    if not template_path.exists():
-        raise FileNotFoundError(f"TEMPLATE não encontrado: {template_path}")
+# ───────────────────────────────────────────────────────────────
+# FUNÇÃO PRINCIPAL
+# ───────────────────────────────────────────────────────────────
 
-    if not ocr_rows:
-        print("⚠️ Nenhuma linha extraída — ficheiro ignorado.")
-        return
+def process_pdf(pdf_path: str):
+    """Pipeline completo: OCR + parsing."""
+    text = extract_text_with_fallback(pdf_path)
+    rows = parse_requisicoes(text)
+    return rows
 
-    if expected_count and expected_count > 1:
-        step = len(ocr_rows) // expected_count
-        chunks = [ocr_rows[i:i+step] for i in range(0, len(ocr_rows), step)]
-    else:
-        chunks = [ocr_rows]
 
-    for i, rows in enumerate(chunks, 1):
-        out_path = Path(f"{out_base_path}_req{i}.xlsx")
-        wb = load_workbook(template_path)
-        ws = wb.active
-        start_row = 2
-        for r, row in enumerate(rows, start=start_row):
-            for c, val in enumerate(row, start=1):
-                ws.cell(r, c, val)
-        wb.save(out_path)
-        print(f"🟢 Gravado: {out_path.name}")
+# ───────────────────────────────────────────────────────────────
+# GERAR EXCEL COM TEMPLATE
+# ───────────────────────────────────────────────────────────────
+
+def write_to_template(rows, out_base_path, expected_count=None, source_pdf=None):
+    """Grava as requisições num Excel baseado no TEMPLATE original."""
+    template_path = os.environ.get("TEMPLATE_PATH")
+    if not template_path or not Path(template_path).exists():
+        raise FileNotFoundError(f"TEMPLATE não encontrado em {template_path}")
+
+    wb = load_workbook(template_path)
+    ws = wb.active  # normalmente “Amostras”
+
+    start_row = 6  # a primeira linha de dados no teu template
+
+    for i, row in enumerate(rows, start=start_row):
+        for j, value in enumerate(row, start=1):
+            ws.cell(row=i, column=j).value = value
+
+    out_path = f"{out_base_path}_req1.xlsx"
+    wb.save(out_path)
+    print(f"🟢 Gravado: {out_path}")
+    return out_path
