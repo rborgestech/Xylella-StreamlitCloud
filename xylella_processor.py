@@ -31,14 +31,12 @@ TEMPLATE_PATH = Path(__file__).with_name(TEMPLATE_FILENAME)
 # 🩹 Caso o ficheiro não exista no ambiente Streamlit Cloud, tenta obtê-lo via GitHub raw
 if not TEMPLATE_PATH.exists():
     print("⚠️ TEMPLATE não encontrado localmente — a tentar descarregar do GitHub...")
-    url = "https://raw.githubusercontent.com/rborgestech/Xylella-StreamlitCloud/main/TEMPLATE_PXF_SGSLABIP1056.xlsx"
+    url = "https://github.com/rborgestech/Xylella-StreamlitCloud/raw/main/TEMPLATE_PXF_SGSLABIP1056.xlsx"
     try:
         r = requests.get(url)
-        if r.status_code == 200:
-            TEMPLATE_PATH.write_bytes(r.content)
-            print(f"✅ TEMPLATE descarregado para {TEMPLATE_PATH}")
-        else:
-            raise FileNotFoundError(f"Falha ao descarregar template ({r.status_code})")
+        r.raise_for_status()
+        TEMPLATE_PATH.write_bytes(r.content)
+        print(f"✅ TEMPLATE descarregado para {TEMPLATE_PATH}")
     except Exception as e:
         raise FileNotFoundError(f"❌ Não foi possível obter o TEMPLATE: {e}")
 
