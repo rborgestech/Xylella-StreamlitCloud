@@ -24,29 +24,27 @@ from typing import Any, Optional
 # Caminho robusto do TEMPLATE (funciona local e no Streamlit Cloud)
 # 🔍 Caminho robusto para o TEMPLATE (funciona em local e no Streamlit Cloud)
 # Caminho robusto do TEMPLATE (funciona local, GitHub Codespaces e Streamlit Cloud)
+# Nome do ficheiro de template
 TEMPLATE_FILENAME = "TEMPLATE_PXF_SGSLABIP1056.xlsx"
+TEMPLATE_PATH = Path(__file__).with_name(TEMPLATE_FILENAME)
 
-possible_paths = [
-    Path(__file__).with_name(TEMPLATE_FILENAME),                        # ao lado deste ficheiro
-    Path.cwd() / TEMPLATE_FILENAME,                                     # diretório atual
-    Path(__file__).resolve().parent.parent / TEMPLATE_FILENAME,         # um nível acima
-    Path(__file__).resolve().parent.parent.parent / TEMPLATE_FILENAME,  # dois níveis acima (ex: /main/)
-]
+# 🩹 Caso o ficheiro não exista no ambiente Streamlit Cloud, tenta obtê-lo via GitHub raw
+if not TEMPLATE_PATH.exists():
+    print("⚠️ TEMPLATE não encontrado localmente — a tentar descarregar do GitHub...")
+    url = "https://raw.githubusercontent.com/rborgestech/Xylella-StreamlitCloud/main/TEMPLATE_PXF_SGSLABIP1056.xlsx"
+    try:
+        r = requests.get(url)
+        if r.status_code == 200:
+            TEMPLATE_PATH.write_bytes(r.content)
+            print(f"✅ TEMPLATE descarregado para {TEMPLATE_PATH}")
+        else:
+            raise FileNotFoundError(f"Falha ao descarregar template ({r.status_code})")
+    except Exception as e:
+        raise FileNotFoundError(f"❌ Não foi possível obter o TEMPLATE: {e}")
 
-TEMPLATE_PATH = None
-for p in possible_paths:
-    if p.exists():
-        TEMPLATE_PATH = p
-        break
-
-if not TEMPLATE_PATH:
-    raise FileNotFoundError(
-        "❌ TEMPLATE não encontrado.\nCaminhos testados:\n" +
-        "\n".join(str(p) for p in possible_paths)
-    )
-
+# Exporta o caminho final para o ambiente
 os.environ.setdefault("TEMPLATE_PATH", str(TEMPLATE_PATH))
-print(f"📂 TEMPLATE_PATH encontrado: {TEMPLATE_PATH}")
+print(f"📂 TEMPLATE_PATH final: {TEMPLATE_PATH}")
 
 
 # ───────────────────────────────────────────────────────────────
