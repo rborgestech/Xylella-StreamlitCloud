@@ -25,7 +25,7 @@ from openpyxl.styles import PatternFill
 # ── Caminhos globais ────────────────────────────────────────────────
 BASE_DIR = Path(__file__).parent
 OUTPUT_DIR = BASE_DIR / "Output"
-TEMPLATE_PATH = BASE_DIR / "TEMPLATE_PXF_SGS.xlsx"
+TEMPLATE_PATH = BASE_DIR / "TEMPLATE_PXf_SGSLABIP1056.xlsx"
 
 # Garantir que a pasta Output existe
 OUTPUT_DIR.mkdir(exist_ok=True)
@@ -454,3 +454,4 @@ def parse_xylella_from_result(result_json, pdf_path, txt_path=None):
     print(f"📂 Ficheiros guardados em: {OUTPUT_DIR}")
 
     return all_samples, num_blocks
+
