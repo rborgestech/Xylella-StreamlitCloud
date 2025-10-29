@@ -21,8 +21,17 @@ from typing import Any, Optional
 # ───────────────────────────────────────────────────────────────
 # Localização robusta do TEMPLATE (ao lado deste ficheiro)
 # ───────────────────────────────────────────────────────────────
+# Caminho robusto do TEMPLATE (funciona local e no Streamlit Cloud)
 TEMPLATE_FILENAME = "TEMPLATE_PXF_SGSLABIP1056.xlsx"
+
+# Primeiro tenta ao lado deste ficheiro
 TEMPLATE_PATH = Path(__file__).with_name(TEMPLATE_FILENAME)
+
+# Se não existir, tenta na raiz do repositório (nível acima)
+if not TEMPLATE_PATH.exists():
+    alt = Path(__file__).resolve().parent.parent / TEMPLATE_FILENAME
+    if alt.exists():
+        TEMPLATE_PATH = alt
 
 # Exporta para o ambiente caso o core use os.environ["TEMPLATE_PATH"]
 os.environ.setdefault("TEMPLATE_PATH", str(TEMPLATE_PATH))
