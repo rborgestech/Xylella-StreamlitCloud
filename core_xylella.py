@@ -1,19 +1,19 @@
 # core_xylella.py
 # -*- coding: utf-8 -*-
 """
-Core Xylella Processor – versão funcional com TEMPLATE SGS
+Core Xylella Processor – versão final (template SGS + split automático + OCR híbrido)
+Autor: Rosa Borges
 
 Funções:
  - Extrai texto (OCR Azure/local)
  - Deteta múltiplas requisições por PDF
- - Escreve resultados em cópias do TEMPLATE_PXF_SGSLABIP1056.xlsx
-   preservando fórmulas, validações e formatação
+ - Escreve resultados no TEMPLATE_PXF_SGSLABIP1056.xlsx
+   preservando fórmulas, validações e formatação SGS
 """
 
 import os, re, io, time, shutil, requests
 from pathlib import Path
 from openpyxl import load_workbook
-from PyPDF2 import PdfReader
 from pdf2image import convert_from_path
 from PIL import Image
 import pytesseract
@@ -86,49 +86,68 @@ def local_ocr_extract(pdf_path: Path) -> str:
 
 
 # ───────────────────────────────────────────────────────────────
-#  PARSER – deteta blocos de requisições
+#  PARSER – deteção de requisições
 # ───────────────────────────────────────────────────────────────
 
-def parse_requisicoes(text: str):
-    """Identifica blocos de requisições e extrai dados estruturados."""
-    blocos = re.split(r"(?=\bData da Colheita\b)", text)
-    all_reqs = []
+def parse_with_regex(text: str):
+    """Extrai blocos de amostras e campos relevantes usando regex."""
+    padrao = re.compile(
+        r"(?P<data_rec>\d{2}/\d{2}/\d{4}).*?"
+        r"(?P<data_col>\d{2}/\d{2}/\d{4}).*?"
+        r"(?P<codigo>\d{3,}\/\d{4}\/[A-Z]{2,}|[0-9]{5,})?.*?"
+        r"(?P<especie>[A-Z][a-zç]+(?: [a-z]+){0,2}).*?"
+        r"(?P<natureza>Simples|Composta).*?"
+        r"(?P<zona>Isenta|Contida|Desconhec[ia]do|Zona [A-Za-z]+)?.*?"
+        r"(?P<responsavel>DGAV|INIAV|INSA|Outros)?",
+        re.S,
+    )
 
-    for bloco in blocos:
-        if not bloco.strip():
-            continue
-
-        data_rec = re.search(r"Data.?Rece[cç][aã]o[:\s]+([\d/]+)", bloco)
-        data_col = re.search(r"Data.?Colheita[:\s]+([\d/]+)", bloco)
-        codigo = re.search(r"([A-Z]?\d{3,4}/\d{4}/[A-Z]{2,3}/?\d?)", bloco)
-        especie = re.search(r"Olea europaea|Cistus albidus|Pelargonium|Lavandula|Rosmarinus|Medicago", bloco, re.I)
-        natureza = re.search(r"Simples|Composta", bloco, re.I)
-        zona = re.search(r"Zona\s+[A-Za-z]+", bloco)
-        responsavel = re.search(r"DGAV|INIAV|INSA|Outros", bloco)
-
-        row = [
-            data_rec.group(1) if data_rec else "",
-            data_col.group(1) if data_col else "",
-            codigo.group(1) if codigo else "",
-            especie.group(0) if especie else "",
-            natureza.group(0) if natureza else "",
-            zona.group(0) if zona else "",
-            responsavel.group(0) if responsavel else "",
-        ]
-        all_reqs.append(row)
-
-    return all_reqs
+    resultados = []
+    for m in padrao.finditer(text):
+        resultados.append([
+            m.group("data_rec") or "",
+            m.group("data_col") or "",
+            m.group("codigo") or "",
+            m.group("especie") or "",
+            m.group("natureza") or "",
+            m.group("zona") or "",
+            m.group("responsavel") or ""
+        ])
+    return resultados
 
 
 # ───────────────────────────────────────────────────────────────
-#  PROCESSAMENTO PRINCIPAL
+#  SPLIT – múltiplas requisições no mesmo PDF
+# ───────────────────────────────────────────────────────────────
+
+def split_if_multiple_requisicoes(text: str):
+    """Divide o PDF em várias requisições (por cabeçalho de 'Data da Colheita')."""
+    indices = [m.start() for m in re.finditer(r"Data.?Colheita", text)]
+    if len(indices) <= 1:
+        return [text]
+
+    partes = []
+    for i in range(len(indices)):
+        start = indices[i]
+        end = indices[i + 1] if i + 1 < len(indices) else len(text)
+        partes.append(text[start:end])
+    return partes
+
+
+# ───────────────────────────────────────────────────────────────
+#  PROCESSAMENTO COMPLETO
 # ───────────────────────────────────────────────────────────────
 
 def process_pdf(pdf_path: str):
-    """Executa OCR + parsing completo."""
+    """Extrai o texto, divide em requisições e devolve listas de linhas."""
     text = extract_text_with_fallback(pdf_path)
-    rows = parse_requisicoes(text)
-    return rows
+    blocos = split_if_multiple_requisicoes(text)
+    todas = []
+    for bloco in blocos:
+        linhas = parse_with_regex(bloco)
+        if linhas:
+            todas.append(linhas)
+    return todas
 
 
 # ───────────────────────────────────────────────────────────────
@@ -137,44 +156,30 @@ def process_pdf(pdf_path: str):
 
 def write_to_template(ocr_rows, out_base_path, expected_count=None, source_pdf=None):
     """
-    Grava as requisições no TEMPLATE_PXF_SGSLABIP1056.xlsx,
-    mantendo fórmulas, validações e formato SGS.
+    Escreve as requisições no TEMPLATE_PXF_SGSLABIP1056.xlsx
+    mantendo fórmulas, validações e formatação SGS.
     """
     template_path = Path(os.environ["TEMPLATE_PATH"])
     if not template_path.exists():
         raise FileNotFoundError(f"TEMPLATE não encontrado: {template_path}")
 
     out_files = []
-    start_row = 6  # linha onde começam as amostras
-    sheet_name = "Amostras"  # nome da folha do template
+    start_row = 6
+    sheet_name = "Avaliação pré registo"
 
-    # Cada bloco corresponde a uma requisição → ficheiro novo
-    for idx, rowset in enumerate(split_requisicoes(ocr_rows), start=1):
+    for idx, req_rows in enumerate(ocr_rows, start=1):
         out_path = Path(f"{out_base_path}_req{idx}.xlsx")
         shutil.copy(template_path, out_path)
 
         wb = load_workbook(out_path)
         ws = wb[sheet_name]
 
-        for i, row in enumerate(rowset, start=start_row):
+        for i, row in enumerate(req_rows, start=start_row):
             for j, value in enumerate(row, start=1):
                 ws.cell(row=i, column=j).value = value
 
         wb.save(out_path)
-        print(f"🟢 Gravado: {out_path}")
+        print(f"🟢 Gravado com sucesso: {out_path}")
         out_files.append(out_path)
 
     return out_files
-
-
-# ───────────────────────────────────────────────────────────────
-#  SUPORTE – dividir blocos de requisições
-# ───────────────────────────────────────────────────────────────
-
-def split_requisicoes(rows):
-    """Divide o conjunto de linhas em blocos (1 por requisição)."""
-    if not rows:
-        return []
-    # Heurística: cada requisição contém até 50 linhas no máximo
-    step = 50 if len(rows) > 50 else len(rows)
-    return [rows[i:i + step] for i in range(0, len(rows), step)]
