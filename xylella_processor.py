@@ -26,22 +26,23 @@ import requests
 # 🔍 Caminho robusto para o TEMPLATE (funciona em local e no Streamlit Cloud)
 # Caminho robusto do TEMPLATE (funciona local, GitHub Codespaces e Streamlit Cloud)
 # Nome do ficheiro de template
+import openpyxl
+
 TEMPLATE_FILENAME = "TEMPLATE_PXF_SGSLABIP1056.xlsx"
 TEMPLATE_PATH = Path(__file__).with_name(TEMPLATE_FILENAME)
 
-# 🩹 Caso o ficheiro não exista no ambiente Streamlit Cloud, tenta obtê-lo via GitHub raw
 if not TEMPLATE_PATH.exists():
-    print("⚠️ TEMPLATE não encontrado localmente — a tentar descarregar do GitHub...")
-    url = "https://github.com/rborgestech/Xylella-StreamlitCloud/raw/main/TEMPLATE_PXF_SGSLABIP1056.xlsx"
+    print("⚠️ TEMPLATE não encontrado localmente — a criar versão mínima (dummy)...")
     try:
-        r = requests.get(url)
-        r.raise_for_status()
-        TEMPLATE_PATH.write_bytes(r.content)
-        print(f"✅ TEMPLATE descarregado para {TEMPLATE_PATH}")
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Amostras"
+        ws.append(["Data Receção", "Data Colheita", "Código", "Espécie", "Natureza", "Zona", "Responsável"])
+        wb.save(TEMPLATE_PATH)
+        print(f"✅ TEMPLATE dummy criado em {TEMPLATE_PATH}")
     except Exception as e:
-        raise FileNotFoundError(f"❌ Não foi possível obter o TEMPLATE: {e}")
+        raise FileNotFoundError(f"❌ Não foi possível criar o TEMPLATE: {e}")
 
-# Exporta o caminho final para o ambiente
 os.environ.setdefault("TEMPLATE_PATH", str(TEMPLATE_PATH))
 print(f"📂 TEMPLATE_PATH final: {TEMPLATE_PATH}")
 
