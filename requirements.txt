@@ -3,7 +3,7 @@
 # OCR + PDF + Excel + Streamlit
 # ─────────────────────────────
 
-# App base (UI)
+# App base
 streamlit==1.39.0
 
 # Processamento de PDFs e OCR
@@ -14,11 +14,18 @@ Pillow==11.0.0
 opencv-python-headless==4.10.0.84
 requests==2.32.3
 
-# Manipulação de Excel
+# Manipulação de Excel e dados
 openpyxl==3.1.5
 pandas==2.2.3
+numpy==1.26.4
 
 # Utilitários
 python-dotenv==1.0.1
 tqdm==4.66.4
-numpy==1.26.4
+
+# 🔧 Fixes para compatibilidade com o ambiente Streamlit Cloud
+# Estas versões evitam o erro "installer returned a non-zero exit code"
+rich==13.7.1
+markdown-it-py==3.0.0
+pygments==2.17.2
+mdurl==0.1.2
