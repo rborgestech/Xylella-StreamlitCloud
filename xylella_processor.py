@@ -17,6 +17,7 @@ from pathlib import Path
 import os
 import importlib
 from typing import Any, Optional
+import requests
 
 # ───────────────────────────────────────────────────────────────
 # Localização robusta do TEMPLATE (ao lado deste ficheiro)
