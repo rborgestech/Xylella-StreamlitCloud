@@ -27,7 +27,9 @@ TEMPLATE_PATH = BASE_DIR / TEMPLATE_FILENAME
 # ───────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Xylella Processor", page_icon="🧬", layout="centered")
 st.title("🧬 Xylella Processor")
-st.markdown("Plataforma automática de **processamento de requisições Xylella fastidiosa** com geração de relatórios Excel.")
+st.markdown(
+    "Plataforma automática de **processamento de requisições Xylella fastidiosa** com geração de relatórios Excel."
+)
 
 uploaded_files = st.file_uploader(
     "📤 Carrega um ou mais ficheiros PDF:",
@@ -59,7 +61,6 @@ if uploaded_files:
                         )
                 else:
                     st.warning("⚠️ Ficheiro Excel não encontrado após o processamento.")
-
             except Exception as e:
                 st.error(f"❌ Erro ao processar {uploaded_file.name}: {e}")
 
