@@ -24,17 +24,24 @@ from typing import Any, Optional
 # Caminho robusto do TEMPLATE (funciona local e no Streamlit Cloud)
 TEMPLATE_FILENAME = "TEMPLATE_PXF_SGSLABIP1056.xlsx"
 
-# Primeiro tenta ao lado deste ficheiro
-TEMPLATE_PATH = Path(__file__).with_name(TEMPLATE_FILENAME)
+# Determina a raiz do projeto (subpasta onde está app.py)
+PROJECT_ROOT = Path(__file__).resolve().parent
+while PROJECT_ROOT.parent != PROJECT_ROOT:
+    if (PROJECT_ROOT / TEMPLATE_FILENAME).exists():
+        break
+    PROJECT_ROOT = PROJECT_ROOT.parent
 
-# Se não existir, tenta na raiz do repositório (nível acima)
+TEMPLATE_PATH = PROJECT_ROOT / TEMPLATE_FILENAME
+
 if not TEMPLATE_PATH.exists():
-    alt = Path(__file__).resolve().parent.parent / TEMPLATE_FILENAME
-    if alt.exists():
-        TEMPLATE_PATH = alt
+    raise FileNotFoundError(
+        f"❌ TEMPLATE não encontrado. Caminho testado: {TEMPLATE_PATH}\n"
+        f"Confirma que o ficheiro '{TEMPLATE_FILENAME}' está versionado no GitHub e acessível no Streamlit Cloud."
+    )
 
 # Exporta para o ambiente caso o core use os.environ["TEMPLATE_PATH"]
 os.environ.setdefault("TEMPLATE_PATH", str(TEMPLATE_PATH))
+print(f"📂 TEMPLATE_PATH usado: {TEMPLATE_PATH}")
 
 # ───────────────────────────────────────────────────────────────
 # Import do motor (core)
