@@ -1,6 +1,7 @@
 import streamlit as st
 import tempfile, os, zipfile
 from datetime import datetime
+from xylella_processor import process_pdf, write_to_template
 
 # ⬇️ IMPORTA o teu processador
 # Se o teu código estiver numa pasta "xylella", ajusta este import:
