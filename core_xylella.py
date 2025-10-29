@@ -19,19 +19,6 @@ from PIL import Image
 import pytesseract
 import pdfplumber
 
-# Garante que o diretório onde está o core é visível
-sys.path.append(str(Path(__file__).resolve().parent))
-
-_CORE_MODULE_NAME = "core_xylella"
-
-try:
-    core = importlib.import_module(_CORE_MODULE_NAME)
-except Exception as e:
-    raise ImportError(
-        f"❌ Não foi possível importar '{_CORE_MODULE_NAME}'. "
-        f"Verifica se o ficheiro 'core_xylella.py' existe e está no mesmo diretório. "
-        f"Detalhe: {e!r}"
-    )
 # ───────────────────────────────────────────────────────────────
 #  OCR – Azure ou local
 # ───────────────────────────────────────────────────────────────
