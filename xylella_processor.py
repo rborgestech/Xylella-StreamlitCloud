@@ -23,13 +23,14 @@ from typing import Any, Optional
 # ───────────────────────────────────────────────────────────────
 # Caminho robusto do TEMPLATE (funciona local e no Streamlit Cloud)
 # 🔍 Caminho robusto para o TEMPLATE (funciona em local e no Streamlit Cloud)
+# Caminho robusto do TEMPLATE (funciona local, GitHub Codespaces e Streamlit Cloud)
 TEMPLATE_FILENAME = "TEMPLATE_PXF_SGSLABIP1056.xlsx"
 
-# tenta várias localizações possíveis
 possible_paths = [
-    Path(__file__).with_name(TEMPLATE_FILENAME),                  # ao lado deste ficheiro
-    Path.cwd() / TEMPLATE_FILENAME,                               # diretório de execução
-    Path(__file__).resolve().parent.parent / TEMPLATE_FILENAME,   # raiz do projeto
+    Path(__file__).with_name(TEMPLATE_FILENAME),                        # ao lado deste ficheiro
+    Path.cwd() / TEMPLATE_FILENAME,                                     # diretório atual
+    Path(__file__).resolve().parent.parent / TEMPLATE_FILENAME,         # um nível acima
+    Path(__file__).resolve().parent.parent.parent / TEMPLATE_FILENAME,  # dois níveis acima (ex: /main/)
 ]
 
 TEMPLATE_PATH = None
@@ -40,12 +41,13 @@ for p in possible_paths:
 
 if not TEMPLATE_PATH:
     raise FileNotFoundError(
-        f"❌ TEMPLATE não encontrado. Caminhos testados:\n" +
+        "❌ TEMPLATE não encontrado.\nCaminhos testados:\n" +
         "\n".join(str(p) for p in possible_paths)
     )
 
 os.environ.setdefault("TEMPLATE_PATH", str(TEMPLATE_PATH))
 print(f"📂 TEMPLATE_PATH encontrado: {TEMPLATE_PATH}")
+
 
 # ───────────────────────────────────────────────────────────────
 # Import do motor (core)
