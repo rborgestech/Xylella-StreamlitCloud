@@ -1,8 +1,7 @@
 import streamlit as st
-import tempfile, os, zipfile
+import tempfile, os, zipfile, traceback   # ← adiciona traceback
 from datetime import datetime
 
-# ⬇️ IMPORTA o teu processador
 from xylella_processor import process_pdf, write_to_template
 
 st.set_page_config(page_title="Xylella Processor", page_icon="🧪", layout="centered")
@@ -19,10 +18,12 @@ if start:
         outdir = os.path.join(tmp, "output")
         os.makedirs(outdir, exist_ok=True)
         logs, ok, fail = [], 0, 0
+
         for up in uploaded:
             try:
                 in_path = os.path.join(tmp, up.name)
-                with open(in_path, "wb") as f: f.write(up.read())
+                with open(in_path, "wb") as f:
+                    f.write(up.read())
                 rows = process_pdf(in_path)
                 exp = int(expected) if expected.strip().isdigit() else None
                 base = os.path.splitext(up.name)[0]
@@ -44,5 +45,4 @@ if start:
     with open(zip_path, "rb") as f:
         st.download_button("⬇️ Descarregar resultados (ZIP)", f, file_name=os.path.basename(zip_path))
     with st.expander("Registo de execução"):
-        st.code("\n".join(logs))
-
+        st.code("\n".join(logs) if logs else "Sem logs a apresentar.")
