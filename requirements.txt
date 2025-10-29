@@ -10,7 +10,7 @@ streamlit==1.39.0
 pdfplumber==0.11.4
 pytesseract==0.3.13
 pdf2image==1.17.0
-Pillow==11.0.0
+Pillow==10.3.0
 opencv-python-headless==4.10.0.84
 requests==2.32.3
 
@@ -24,7 +24,6 @@ python-dotenv==1.0.1
 tqdm==4.66.4
 
 # 🔧 Fixes para compatibilidade com o ambiente Streamlit Cloud
-# Estas versões evitam o erro "installer returned a non-zero exit code"
 rich==13.7.1
 markdown-it-py==3.0.0
 pygments==2.17.2
