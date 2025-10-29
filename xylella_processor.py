@@ -22,26 +22,30 @@ from typing import Any, Optional
 # Localização robusta do TEMPLATE (ao lado deste ficheiro)
 # ───────────────────────────────────────────────────────────────
 # Caminho robusto do TEMPLATE (funciona local e no Streamlit Cloud)
+# 🔍 Caminho robusto para o TEMPLATE (funciona em local e no Streamlit Cloud)
 TEMPLATE_FILENAME = "TEMPLATE_PXF_SGSLABIP1056.xlsx"
 
-# Determina a raiz do projeto (subpasta onde está app.py)
-PROJECT_ROOT = Path(__file__).resolve().parent
-while PROJECT_ROOT.parent != PROJECT_ROOT:
-    if (PROJECT_ROOT / TEMPLATE_FILENAME).exists():
+# tenta várias localizações possíveis
+possible_paths = [
+    Path(__file__).with_name(TEMPLATE_FILENAME),                  # ao lado deste ficheiro
+    Path.cwd() / TEMPLATE_FILENAME,                               # diretório de execução
+    Path(__file__).resolve().parent.parent / TEMPLATE_FILENAME,   # raiz do projeto
+]
+
+TEMPLATE_PATH = None
+for p in possible_paths:
+    if p.exists():
+        TEMPLATE_PATH = p
         break
-    PROJECT_ROOT = PROJECT_ROOT.parent
 
-TEMPLATE_PATH = PROJECT_ROOT / TEMPLATE_FILENAME
-
-if not TEMPLATE_PATH.exists():
+if not TEMPLATE_PATH:
     raise FileNotFoundError(
-        f"❌ TEMPLATE não encontrado. Caminho testado: {TEMPLATE_PATH}\n"
-        f"Confirma que o ficheiro '{TEMPLATE_FILENAME}' está versionado no GitHub e acessível no Streamlit Cloud."
+        f"❌ TEMPLATE não encontrado. Caminhos testados:\n" +
+        "\n".join(str(p) for p in possible_paths)
     )
 
-# Exporta para o ambiente caso o core use os.environ["TEMPLATE_PATH"]
 os.environ.setdefault("TEMPLATE_PATH", str(TEMPLATE_PATH))
-print(f"📂 TEMPLATE_PATH usado: {TEMPLATE_PATH}")
+print(f"📂 TEMPLATE_PATH encontrado: {TEMPLATE_PATH}")
 
 # ───────────────────────────────────────────────────────────────
 # Import do motor (core)
