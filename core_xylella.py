@@ -1,186 +1,456 @@
-# core_xylella.py
 # -*- coding: utf-8 -*-
 """
-Core Xylella Processor – versão final (template SGS + split automático + OCR híbrido)
-Autor: Rosa Borges
+CORE_XYLELLA.PY — Motor principal do processamento Xylella
 
-Funções:
- - Extrai texto (OCR Azure/local)
- - Deteta múltiplas requisições por PDF
- - Escreve resultados no TEMPLATE_PXF_SGSLABIP1056.xlsx
-   preservando fórmulas, validações e formatação SGS
+Responsável por:
+ - Executar OCR via Azure (página a página)
+ - Extrair tabelas e texto global
+ - Analisar blocos de requisição
+ - Exportar resultados para o TEMPLATE Excel
+
+Funções principais expostas:
+    • process_pdf_sync(pdf_path) → rows
+    • write_to_template(rows, pdf_name)
 """
 
-import os, re, io, time, shutil, requests
+from __future__ import annotations
+import os, re
 from pathlib import Path
-from openpyxl import load_workbook
-from pdf2image import convert_from_path
-from PIL import Image
-import pytesseract
-import pdfplumber
-
-# ───────────────────────────────────────────────────────────────
-#  OCR – Azure ou local
-# ───────────────────────────────────────────────────────────────
-
-def extract_text_with_fallback(pdf_path: str) -> str:
-    """Extrai texto de um PDF via texto nativo, Azure OCR ou Tesseract local."""
-    pdf_path = Path(pdf_path)
-    text = ""
-
-    try:
-        with pdfplumber.open(pdf_path) as pdf:
-            for page in pdf.pages:
-                text += page.extract_text() or ""
-    except Exception:
-        pass
-
-    if not text.strip():
-        azure_key = os.environ.get("AZURE_KEY")
-        azure_endpoint = os.environ.get("AZURE_ENDPOINT")
-        if azure_key and azure_endpoint:
-            try:
-                text = azure_ocr_extract(pdf_path, azure_key, azure_endpoint)
-            except Exception as e:
-                print(f"⚠️ Azure OCR falhou ({e}), a tentar OCR local…")
-                text = local_ocr_extract(pdf_path)
-        else:
-            text = local_ocr_extract(pdf_path)
-
-    if not text.strip():
-        raise RuntimeError(f"Não foi possível extrair texto de {pdf_path.name}")
-
-    return text
+from datetime import datetime
+from openpyxl import load_workbook, Workbook
+from openpyxl.styles import PatternFill
 
 
-def azure_ocr_extract(pdf_path: Path, key: str, endpoint: str) -> str:
-    """Usa Azure Computer Vision (OCR)"""
-    ocr_url = f"{endpoint}/vision/v3.2/read/analyze"
-    headers = {"Ocp-Apim-Subscription-Key": key, "Content-Type": "application/pdf"}
 
-    with open(pdf_path, "rb") as f:
-        response = requests.post(ocr_url, headers=headers, data=f)
-    response.raise_for_status()
+# ── Caminhos globais ────────────────────────────────────────────────
+BASE_DIR = Path(__file__).parent
+OUTPUT_DIR = BASE_DIR / "Output"
+TEMPLATE_PATH = BASE_DIR / "TEMPLATE_PXF_SGS.xlsx"
 
-    operation_url = response.headers["Operation-Location"]
-    while True:
-        result = requests.get(operation_url, headers=headers).json()
-        if result.get("status") in ["succeeded", "failed"]:
-            break
-        time.sleep(1)
-
-    lines = []
-    for r in result.get("analyzeResult", {}).get("readResults", []):
-        for l in r.get("lines", []):
-            lines.append(l["text"])
-    return "\n".join(lines)
-
-
-def local_ocr_extract(pdf_path: Path) -> str:
-    """OCR local com Tesseract"""
-    images = convert_from_path(pdf_path)
-    text = ""
-    for img in images:
-        text += pytesseract.image_to_string(img, lang="por")
-    return text
+# Garantir que a pasta Output existe
+OUTPUT_DIR.mkdir(exist_ok=True)
 
 
 # ───────────────────────────────────────────────────────────────
-#  PARSER – deteção de requisições
+#  Funções auxiliares externas (OCR Azure)
 # ───────────────────────────────────────────────────────────────
+# Estas devem estar definidas noutro módulo (azure_ocr.py):
+#  • pdf_to_images(pdf_path)
+#  • extract_text_from_image_azure(image_path)
+#  • get_analysis_result_azure(result_url)
+#  • extract_all_text(result_json)
+#  • validate_plants(rows)
 
-def parse_with_regex(text: str):
-    """Extrai blocos de amostras e campos relevantes usando regex."""
-    padrao = re.compile(
-        r"(?P<data_rec>\d{2}/\d{2}/\d{4}).*?"
-        r"(?P<data_col>\d{2}/\d{2}/\d{4}).*?"
-        r"(?P<codigo>\d{3,}\/\d{4}\/[A-Z]{2,}|[0-9]{5,})?.*?"
-        r"(?P<especie>[A-Z][a-zç]+(?: [a-z]+){0,2}).*?"
-        r"(?P<natureza>Simples|Composta).*?"
-        r"(?P<zona>Isenta|Contida|Desconhec[ia]do|Zona [A-Za-z]+)?.*?"
-        r"(?P<responsavel>DGAV|INIAV|INSA|Outros)?",
-        re.S,
+# ----------------------------------------------------------------
+#  Funções utilitárias e normalização
+# ----------------------------------------------------------------
+
+def normalize_dedup(rows):
+    """Remove duplicados e normaliza nomes."""
+    cleaned = []
+    seen = set()
+    for r in rows:
+        if not r.get("referencia"):
+            continue
+        r["hospedeiro"] = re.sub(r"[%\.,;:]+$", "", str(r.get("hospedeiro", ""))).strip()
+        r["hospedeiro"] = re.sub(r"\s+", " ", r["hospedeiro"])
+        key = (r["referencia"], r["hospedeiro"].lower(), r["tipo"].lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(r)
+    return cleaned
+
+
+# ----------------------------------------------------------------
+#  Escrever resultado no TEMPLATE Excel
+# ----------------------------------------------------------------
+def write_to_template(ocr_rows, pdf_name):
+    """Escreve as linhas extraídas no template Excel."""
+    if not ocr_rows:
+        print(f"⚠️ {pdf_name}: sem linhas para escrever.")
+        return None
+
+    if not os.path.exists(TEMPLATE_PATH):
+        raise FileNotFoundError(f"Template não encontrado: {TEMPLATE_PATH}")
+
+    wb = load_workbook(TEMPLATE_PATH)
+    ws = wb.worksheets[0]
+    start_row = 4
+    yellow_fill = PatternFill(start_color="FFFACD", end_color="FFFACD", fill_type="solid")
+
+    # Limpar linhas anteriores
+    for row in range(start_row, 201):
+        for col in range(1, 13):
+            cell = ws.cell(row=row, column=col)
+            cell.value = None
+            cell.fill = PatternFill(fill_type=None)
+        ws[f"I{row}"].value = None
+
+    # Escrever novas linhas
+    for idx, row in enumerate(ocr_rows, start=start_row):
+        ws[f"A{idx}"] = row.get("datarececao", "")
+        ws[f"B{idx}"] = row.get("datacolheita", "")
+        ws[f"C{idx}"] = row.get("referencia", "")
+        ws[f"D{idx}"] = row.get("hospedeiro", "")
+        ws[f"E{idx}"] = row.get("tipo", "")
+        ws[f"F{idx}"] = row.get("zona", "")
+        ws[f"G{idx}"] = row.get("responsavelamostra", "")
+        ws[f"H{idx}"] = row.get("responsavelcolheita", "")
+        ws[f"I{idx}"] = ""
+        ws[f"K{idx}"] = row.get("procedure", "")
+        ws[f"L{idx}"] = row.get("datarequerido", "")
+
+        if row.get("WasCorrected") or row.get("ValidationStatus") in ("review", "unknown", "no_list"):
+            ws[f"D{idx}"].fill = yellow_fill
+
+    base_name = os.path.splitext(os.path.basename(pdf_name))[0]
+    out_path = os.path.join(OUTPUT_DIR, f"{base_name}.xlsx")
+    wb.save(out_path)
+    print(f"🟢 Gravado (coluna de observações vazia): {out_path}")
+    return out_path
+
+
+# ----------------------------------------------------------------
+#  Função principal: Processamento do PDF (síncrono)
+# ----------------------------------------------------------------
+def process_pdf_sync(pdf_path):
+    """
+    Processa um PDF Xylella completo:
+     - Executa OCR Azure página a página;
+     - Junta texto global;
+     - Passa ao parser;
+     - Exporta 1 ficheiro por bloco (ou único se 1).
+    """
+    from azure_ocr import (
+        pdf_to_images,
+        extract_text_from_image_azure,
+        get_analysis_result_azure,
+        extract_all_text,
     )
 
-    resultados = []
-    for m in padrao.finditer(text):
-        resultados.append([
-            m.group("data_rec") or "",
-            m.group("data_col") or "",
-            m.group("codigo") or "",
-            m.group("especie") or "",
-            m.group("natureza") or "",
-            m.group("zona") or "",
-            m.group("responsavel") or ""
-        ])
-    return resultados
+    images = pdf_to_images(pdf_path)
+    all_tables = []
+    full_text = ""
+
+    for i, img in enumerate(images, start=1):
+        tmp_png = f"/content/page_{i}.png"
+        img.save(tmp_png, "PNG")
+        try:
+            res_url = extract_text_from_image_azure(tmp_png)
+            res_json = get_analysis_result_azure(res_url)
+            page_text = extract_all_text(res_json)
+            full_text += f"\n\n--- PÁGINA {i} ---\n" + page_text
+            tables = res_json.get("analyzeResult", {}).get("tables", [])
+            if tables:
+                all_tables.extend(tables)
+        finally:
+            try:
+                os.remove(tmp_png)
+            except:
+                pass
+
+    base_name = os.path.splitext(os.path.basename(pdf_path))[0]
+    txt_path = os.path.join(OUTPUT_DIR, base_name + "_ocr_debug.txt")
+    with open(txt_path, "w", encoding="utf-8") as f:
+        f.write(full_text)
+    print(f"📝 Texto OCR bruto guardado em: {txt_path}")
+
+    combined_json = {"analyzeResult": {"tables": all_tables, "pages": []}}
+
+    print("🔍 A extrair amostras e contexto global...")
+    rows, num_blocks = parse_xylella_from_result(combined_json, pdf_path, txt_path)
+    print(f"✅ {len(rows)} linhas extraídas brutas do OCR.")
+
+    try:
+        rows = validate_plants(rows)
+    except Exception:
+        print("⚙️ Validação de hospedeiros DESATIVADA — a lista de espécies não está atualizada.")
+
+    rows = normalize_dedup(rows)
+
+    print("📋 Resumo das amostras extraídas:")
+    for i, r in enumerate(rows, 1):
+        print(f"   {i}) {r['datarececao']} | {r['datacolheita']} | {r['referencia']} | "
+              f"{r['hospedeiro']} | {r['tipo']} | {r['zona']} | {r['responsavelamostra']}")
+
+    write_to_template(rows, pdf_path)
+    print(f"🏁 Ficheiro final gravado para {base_name}.xlsx\n")
+
+    return rows
+
+
+# ----------------------------------------------------------------
+#  Parser Xylella (secção 5)
+# ----------------------------------------------------------------
+
+NATUREZA_KEYWORDS = [
+    "ramos", "folhas", "ramosefolhas", "ramosc/folhas",
+    "material", "materialherbalho", "materialherbário", "materialherbalo",
+    "natureza", "insetos", "sementes", "solo"
+]
+
+REF_SLASH_RE = re.compile(
+    r"\b\d{1,4}\s*/\s*[A-Za-z0-9]{1,10}(?:\s*/\s*[A-Za-z0-9\-]{1,12})+\b",
+    re.I
+)
+REF_NUM_RE = re.compile(r"\b\d{7,8}\b")
+TIPO_RE = re.compile(r"\b(Composta|Simples|Individual)\b", re.I)
+ONLY_DATE_RE = re.compile(r"^\d{1,2}/\d{1,2}/\d{4}$")
+NATUREZA_RE = re.compile(r"\bpartes?\s+de?\s*vegetais?\b|\bnatureza\s+da\s+amostra\b", re.I)
+
+
+def _clean_ref(raw: str) -> str:
+    s = raw.strip()
+    s = re.sub(r"[\s\t]+", "", s)
+    s = re.sub(r"[|,;]+", "/", s)
+    s = re.sub(r"[^\w/]", "", s)
+    s = re.sub(r"/{2,}", "/", s)
+    return s.upper()
+
+
+def _is_natureza_line(s: str) -> bool:
+    t = re.sub(r"\s+", " ", s.strip().lower())
+    if NATUREZA_RE.search(t):
+        return True
+    return any(k in t.replace(" ", "") for k in NATUREZA_KEYWORDS)
+
+
+def _merge_host(lines, j):
+    def ok_host(txt):
+        return (re.search(r"[A-Za-zÀ-ÿ]", txt)
+                and not _is_natureza_line(txt)
+                and not TIPO_RE.search(txt))
+    a = lines[j].strip()
+    if not ok_host(a):
+        return "", 0
+    if j + 1 < len(lines):
+        b = lines[j+1].strip()
+        if ok_host(b) and re.match(r"^[A-Za-zÀ-ÿ\.\-]+$", b):
+            return f"{a} {b}".strip(), 2
+    return a, 1
 
 
 # ───────────────────────────────────────────────────────────────
-#  SPLIT – múltiplas requisições no mesmo PDF
+#  PARSER DE TABELAS COM CONTEXTO GLOBAL
 # ───────────────────────────────────────────────────────────────
+def parse_xylella_tables_from_text(full_text: str, context: dict, req_id=None):
+    out = []
+    lines = [l.strip() for l in full_text.splitlines() if l.strip()]
+    n = len(lines)
+    i = 0
 
-def split_if_multiple_requisicoes(text: str):
-    """Divide o PDF em várias requisições (por cabeçalho de 'Data da Colheita')."""
-    indices = [m.start() for m in re.finditer(r"Data.?Colheita", text)]
-    if len(indices) <= 1:
+    while i < n:
+        line = lines[i]
+        if (ONLY_DATE_RE.match(line) or
+            re.search(r"^(Data\s+(de|do)\s+(envio|colheita)|N[º°]\s*de\s*amostras|PROGRAMA\s+DE|Refer|Observa|SGS)", line, re.I)):
+            i += 1
+            continue
+
+        mref = REF_SLASH_RE.search(line) or REF_NUM_RE.search(line)
+        if not mref:
+            i += 1
+            continue
+
+        ref = _clean_ref(mref.group(0))
+
+        if i + 1 < n:
+            nxt = lines[i+1].strip()
+            if re.match(r"^(?:EDM|LVT|ALG|NRT|DGAV)[\w\-]*/\d{2,4}\b", nxt, re.I):
+                ref = _clean_ref(ref + "/" + nxt)
+                i += 1
+
+        if ONLY_DATE_RE.fullmatch(ref):
+            i += 1
+            continue
+
+        hospedeiro = ""
+        tipo = ""
+        datacolheita = context.get("default_colheita", "")
+        j = i + 1
+        end = min(n, i + 8)
+
+        while j < end:
+            ln = lines[j]
+            mt = TIPO_RE.search(ln)
+            if mt and not tipo:
+                tipo = mt.group(1).capitalize()
+
+            for look_ahead in range(0, 3):
+                if j + look_ahead < n:
+                    ln_date = lines[j + look_ahead]
+                    mast = re.search(r"\(\s*(\*+)\s*\)", ln_date)
+                    if mast and context.get("colheita_map"):
+                        mark = "(" + mast.group(1).replace(" ", "") + ")"
+                        datacolheita = context["colheita_map"].get(mark, datacolheita)
+                        break
+
+            if not hospedeiro and not _is_natureza_line(ln) and not TIPO_RE.search(ln):
+                cand, consumed = _merge_host(lines, j)
+                if cand:
+                    hospedeiro = re.sub(r"\s{2,}", " ", cand).strip()
+                    j += consumed
+                    for k in range(j, min(n, j + 2)):
+                        mt2 = TIPO_RE.search(lines[k])
+                        if mt2:
+                            tipo = mt2.group(1).capitalize()
+                    break
+            j += 1
+
+        if TIPO_RE.fullmatch(hospedeiro):
+            hospedeiro = ""
+        if re.match(r"^(?:EDM|LVT|ALG|NRT|DGAV)[\w\-]*/\d{2,4}\b", (hospedeiro or ""), re.I):
+            hospedeiro = ""
+
+        out.append({
+            "requisicao_id": req_id,
+            "datarececao": context.get("data_envio", ""),
+            "datacolheita": datacolheita,
+            "referencia": ref,
+            "hospedeiro": hospedeiro,
+            "tipo": tipo,
+            "zona": context.get("zona", ""),
+            "responsavelamostra": context.get("dgav", ""),
+            "responsavelcolheita": "",
+            "observacoes": "",
+            "procedure": "XYLELLA",
+            "datarequerido": context.get("data_envio", ""),
+            "Score": ""
+        })
+        i = max(i + 1, j)
+
+    print(f"✅ {len(out)} amostras extraídas (req_id={req_id}) do texto OCR.")
+    return out
+
+
+# ----------------------------------------------------------------
+#  SPLIT E CONTEXTO GLOBAL
+# ----------------------------------------------------------------
+
+def split_if_multiple_requisicoes(full_text: str):
+    import re
+    text = re.sub(r"[ \t]+", " ", full_text)
+    text = re.sub(r"\n{2,}", "\n", text)
+    pattern = re.compile(
+        r"(?:(?:^|\n)\s*(?:PROGRAMA\s+DE\s+PROSPE|Amostra\s+colhida\s+por\s+DGAV|Refer[eê]ncia\s+da\s+amostra))",
+        re.IGNORECASE
+    )
+    matches = list(pattern.finditer(text))
+    if not matches:
+        print("🔍 Nenhum marcador de nova requisição detetado.")
         return [text]
-
-    partes = []
-    for i in range(len(indices)):
-        start = indices[i]
-        end = indices[i + 1] if i + 1 < len(indices) else len(text)
-        partes.append(text[start:end])
-    return partes
-
-
-# ───────────────────────────────────────────────────────────────
-#  PROCESSAMENTO COMPLETO
-# ───────────────────────────────────────────────────────────────
-
-def process_pdf(pdf_path: str):
-    """Extrai o texto, divide em requisições e devolve listas de linhas."""
-    text = extract_text_with_fallback(pdf_path)
-    blocos = split_if_multiple_requisicoes(text)
-    todas = []
-    for bloco in blocos:
-        linhas = parse_with_regex(bloco)
-        if linhas:
-            todas.append(linhas)
-    return todas
+    positions = []
+    last_pos = -9999
+    for m in matches:
+        if m.start() - last_pos > 1200:
+            positions.append(m.start())
+            last_pos = m.start()
+    if len(positions) == 1:
+        print(f"🔍 Detetada 1 requisição (posições: {positions})")
+        return [text]
+    blocos = []
+    for i, start in enumerate(positions):
+        end = positions[i + 1] if i + 1 < len(positions) else len(text)
+        blocos.append(text[start:end].strip())
+    print(f"📄 Documento dividido em {len(blocos)} requisições distintas.")
+    return blocos
 
 
-# ───────────────────────────────────────────────────────────────
-#  ESCREVER NO TEMPLATE SGS
-# ───────────────────────────────────────────────────────────────
+def extract_context_from_text(full_text: str):
+    import re
+    from datetime import datetime
+    context = {}
+    m_zona = re.search(r"Xylella\s+fastidiosa\s*\(([^)]+)\)", full_text, re.I)
+    context["zona"] = m_zona.group(1).strip() if m_zona else "Zona Isenta"
 
-def write_to_template(ocr_rows, out_base_path, expected_count=None, source_pdf=None):
-    """
-    Escreve as requisições no TEMPLATE_PXF_SGSLABIP1056.xlsx
-    mantendo fórmulas, validações e formatação SGS.
-    """
-    template_path = Path(os.environ["TEMPLATE_PATH"])
-    if not template_path.exists():
-        raise FileNotFoundError(f"TEMPLATE não encontrado: {template_path}")
+    responsavel = None
+    m_base = re.search(
+        r"Amostra.{0,40}?colhida.{0,15}?por.{0,10}?DGAV\s*[:\-]?",
+        full_text, re.IGNORECASE | re.DOTALL,
+    )
+    if m_base:
+        sub = full_text[m_base.end():]
+        for ln in sub.strip().splitlines():
+            ln = ln.strip()
+            if not ln or re.search(r"Data|Refer", ln, re.I):
+                break
+            responsavel = re.sub(r"[\.:\-;,]+$", "", ln.strip())
+            break
+    context["responsavel_colheita"] = responsavel
+    if responsavel and re.match(r"^DGAV\b", responsavel, re.I):
+        context["dgav"] = responsavel
+    elif responsavel:
+        context["dgav"] = f"DGAV {responsavel}"
+    else:
+        m_dgav = re.search(r"DGAV\s+[A-ZÀ-ÿ\- ]{2,30}", full_text, re.I)
+        context["dgav"] = m_dgav.group(0).strip() if m_dgav else "DGAV"
 
-    out_files = []
-    start_row = 6
-    sheet_name = "Avaliação pré registo"
+    colheita_map = {}
+    text_norm = re.sub(r"\s+(?:e|ou)\s+", " ", full_text)
+    text_norm = text_norm.replace(",", " ")
+    for m in re.finditer(r"(\d{1,2}/\d{1,2}/\d{4})\s*\(\s*(\*+)\s*\)", text_norm):
+        mark = "(" + m.group(2).replace(" ", "") + ")"
+        colheita_map[mark] = m.group(1)
+    if not colheita_map:
+        m_simple = re.search(r"Data\s+de\s+colheita.*?([\d/]{8,10})", full_text, re.I)
+        if m_simple:
+            d = m_simple.group(1)
+            colheita_map["(*)"] = d
+            colheita_map["(**)"] = d
+    context["colheita_map"] = colheita_map
+    context["default_colheita"] = next(iter(colheita_map.values()), "")
+    m_envio = re.search(r"Data\s+(?:do|de)\s+envio.*?([\d/]{8,10})", full_text, re.I)
+    context["data_envio"] = m_envio.group(1) if m_envio else context["default_colheita"] or datetime.now().strftime("%d/%m/%Y")
 
-    for idx, req_rows in enumerate(ocr_rows, start=1):
-        out_path = Path(f"{out_base_path}_req{idx}.xlsx")
-        shutil.copy(template_path, out_path)
+    print(f"🌍 Zona de origem: {context['zona']}")
+    print(f"👤 Responsável DGAV: {context['dgav']}")
+    print(f"👷 Responsável pela colheita: {context['responsavel_colheita'] or '(não identificado)'}")
+    print(f"📅 Datas de colheita: {colheita_map or '(nenhuma)'} (padrão: {context['default_colheita'] or 'nenhuma'})")
+    print(f"📬 Data do envio ao laboratório: {context['data_envio']}")
+    return context
 
-        wb = load_workbook(out_path)
-        ws = wb[sheet_name]
 
-        for i, row in enumerate(req_rows, start=start_row):
-            for j, value in enumerate(row, start=1):
-                ws.cell(row=i, column=j).value = value
+def parse_xylella_from_result(result_json, pdf_path, txt_path=None):
+    base_name = os.path.splitext(os.path.basename(pdf_path))[0]
+    if txt_path and os.path.exists(txt_path):
+        with open(txt_path, "r", encoding="utf-8") as f:
+            full_text = f.read()
+        print(f"📝 Contexto extraído a partir de {os.path.basename(txt_path)}")
+    else:
+        print("⚠️ Ficheiro texto não encontrado — fallback.")
+        first_page_text = "\n".join(line.get("content", "") for line in result_json.get("analyzeResult", {}).get("pages", [])[0].get("lines", []))
+        full_text = first_page_text
 
-        wb.save(out_path)
-        print(f"🟢 Gravado com sucesso: {out_path}")
-        out_files.append(out_path)
+    blocos = split_if_multiple_requisicoes(full_text)
+    num_blocks = len(blocos)
+    print(f"📄 Documento contém {num_blocks} bloco(s) de requisição.")
 
-    return out_files
+    total_validos, total_ignorados = 0, 0
+    all_samples = []
 
+    for i, bloco in enumerate(blocos, start=1):
+        print(f"\n🔹 A processar requisição {i}/{num_blocks}...")
+        context = extract_context_from_text(bloco)
+        amostras = parse_xylella_tables_from_text(bloco, context, req_id=i)
+        if not amostras:
+            print(f"⚠️ Requisição {i} ignorada — sem referências válidas.")
+            total_ignorados += 1
+            continue
+        total_validos += 1
+        all_samples.extend(amostras)
+        output_name = f"{base_name}_req{i}.xlsx" if num_blocks > 1 else f"{base_name}.xlsx"
+        output_path = os.path.join(OUTPUT_DIR, output_name)
+        wb = Workbook(); ws = wb.active
+        ws.append(list(amostras[0].keys()))
+        for a in amostras: ws.append(list(a.values()))
+        wb.save(output_path)
+        print(f"✅ Exportado: {output_path}")
+
+    print("\n📊 Resumo de processamento:")
+    print(f"   • Total de blocos: {num_blocks}")
+    print(f"   • Válidos: {total_validos}")
+    print(f"   • Ignorados: {total_ignorados}")
+    print(f"✅ Total global: {len(all_samples)} amostras extraídas.")
+    print(f"📂 Ficheiros guardados em: {OUTPUT_DIR}")
+
+    return all_samples, num_blocks
