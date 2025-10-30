@@ -343,84 +343,30 @@ def extract_context_from_text(full_text: str):
 
 def parse_xylella_tables_from_text(full_text: str, context: dict, req_id=None):
     """
-    Parser principal: extrai linhas (dict) no formato do template, com contexto enriquecido.
+    Parser robusto: deteta várias amostras consecutivas no bloco.
+    Considera cada linha com referência válida (xxxx/aaaa/LAB/...) como nova amostra.
     """
     out = []
     lines = [l.strip() for l in full_text.splitlines() if l.strip()]
     n = len(lines)
-    i = 0
-
-    while i < n:
-        line = lines[i]
-
-        # Ignorar cabeçalhos/rotulagem
-        if (ONLY_DATE_RE.match(line) or
-            re.search(r"^(Data\s+(de|do)\s+(envio|colheita)|N[º°]\s*de\s*amostras|PROGRAMA\s+DE|Refer|Observa|SGS)", line, re.I)):
-            i += 1
-            continue
-
-        # Encontrar referência
-        mref = REF_SLASH_RE.search(line) or REF_NUM_RE.search(line)
+    for i, line in enumerate(lines):
+        # referência válida (padrões SGS: 123/2025/LVT/1, 63020083, etc.)
+        mref = re.search(r"\b(\d{1,4}/\d{4}/[A-Z]{2,4}/?\d*|\d{7,8})\b", line)
         if not mref:
-            i += 1
-            continue
-        ref = _clean_ref(mref.group(0))
-
-        # Referências partidas na linha seguinte (ex.: EDM/LVT/…)
-        if i + 1 < n:
-            nxt = lines[i+1].strip()
-            if re.match(r"^(?:EDM|LVT|ALG|NRT|DGAV)[\w\-]*/\d{2,4}\b", nxt, re.I):
-                ref = _clean_ref(ref + "/" + nxt)
-                i += 1
-
-        # evitar confusão com datas isoladas
-        if ONLY_DATE_RE.fullmatch(ref):
-            i += 1
             continue
 
-        hospedeiro = ""
-        tipo = ""
+        ref = _clean_ref(mref.group(1))
+        hospedeiro, tipo = "", ""
         datacolheita = context.get("default_colheita", "")
-        j = i + 1
-        end = min(n, i + 8)  # janela curta de procura
 
-        while j < end:
-            ln = lines[j]
-
-            # Tipo (Simples/Composta/Individual)
-            mt = TIPO_RE.search(ln)
-            if mt and not tipo:
-                tipo = mt.group(1).capitalize()
-
-            # Datas com marcas (*), (**)
-            for look in range(0, 3):
-                if j + look < n:
-                    ln_date = lines[j + look]
-                    mast = re.search(r"\(\s*(\*+)\s*\)", ln_date)
-                    if mast and context.get("colheita_map"):
-                        mark = "(" + mast.group(1).replace(" ", "") + ")"
-                        datacolheita = context["colheita_map"].get(mark, datacolheita)
-                        break
-
-            # Hospedeiro
-            if not hospedeiro and not _is_natureza_line(ln) and not TIPO_RE.search(ln):
-                cand, consumed = _merge_host(lines, j)
-                if cand:
-                    hospedeiro = re.sub(r"\s{2,}", " ", cand).strip()
-                    j += consumed
-                    # re-checar tipo nas 2 próximas
-                    for k in range(j, min(n, j + 2)):
-                        mt2 = TIPO_RE.search(lines[k])
-                        if mt2:
-                            tipo = mt2.group(1).capitalize()
-                    break
-            j += 1
-
-        # Limpezas
-        if TIPO_RE.fullmatch(hospedeiro or ""):
-            hospedeiro = ""
-        if re.match(r"^(?:EDM|LVT|ALG|NRT|DGAV)[\w\-]*/\d{2,4}\b", (hospedeiro or ""), re.I):
-            hospedeiro = ""
+        # procura hospedeiro nas 3 linhas seguintes
+        for j in range(1, 4):
+            if i + j >= n: break
+            ln = lines[i + j]
+            if TIPO_RE.search(ln):
+                tipo = TIPO_RE.search(ln).group(1).capitalize()
+            elif not hospedeiro and re.search(r"[A-Za-zÀ-ÿ]", ln) and not _is_natureza_line(ln):
+                hospedeiro = re.sub(r"\s{2,}", " ", ln.strip())
 
         out.append({
             "requisicao_id": req_id,
@@ -431,16 +377,16 @@ def parse_xylella_tables_from_text(full_text: str, context: dict, req_id=None):
             "tipo": tipo,
             "zona": context.get("zona", ""),
             "responsavelamostra": context.get("dgav", ""),
-            "responsavelcolheita": "",   # pedido: não preencher por agora
+            "responsavelcolheita": "",
             "observacoes": "",
             "procedure": "XYLELLA",
             "datarequerido": context.get("data_envio", ""),
-            "Score": "",
+            "Score": ""
         })
-        i = max(i + 1, j)
 
     print(f"✅ {len(out)} amostras extraídas (req_id={req_id}) do texto OCR.")
     return out
+
 
 
 # ----------------------------------------------------------------
@@ -554,3 +500,4 @@ if __name__ == "__main__":
     print("\n📂 Saídas geradas:")
     for f in files:
         print("   -", f)
+
