@@ -432,48 +432,64 @@ def parse_xylella_from_result(result_json, pdf_name, txt_path=None):
 
     print(f"\n🏁 Concluído: {len(blocos)} requisições processadas, {len(all_samples)} amostras no total.")
     return all_samples
+    
+# ───────────────────────────────────────────────
+# Parser: dividir e extrair requisições
+# ───────────────────────────────────────────────
 def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path: str | None) -> List[List[Dict[str, Any]]]:
     """Divide o documento em blocos (requisições) e extrai amostras por bloco."""
-    # Texto global
+    # Texto global do OCR
     if txt_path and os.path.exists(txt_path):
         full_text = Path(txt_path).read_text(encoding="utf-8")
         print(f"📝 Contexto extraído de {os.path.basename(txt_path)}")
     else:
         full_text = extract_all_text(result_json)
+        print("⚠️ Ficheiro OCR não encontrado — a usar texto direto do OCR.")
 
+    # Deteção de requisições (cabeçalhos)
     count, _ = detect_requisicoes(full_text)
-    all_tables = result_json.get("analyzeResult", {}).get("tables", []) or []
+    if count == 0:
+        print("⚠️ Nenhum cabeçalho detectado — assumido 1 requisição.")
+        count = 1
 
-    # Documento simples
+    all_tables = result_json.get("analyzeResult", {}).get("tables", []) or []
+    out: List[List[Dict[str, Any]]] = []
+
+    # Documento simples (1 requisição)
     if count <= 1:
         context = extract_context_from_text(full_text)
         amostras = parse_xylella_tables(result_json, context, req_id=1)
         return [amostras] if amostras else []
 
-    # Múltiplas requisições
+    # Documento com múltiplas requisições
     blocos = split_if_multiple_requisicoes(full_text)
-    out: List[List[Dict[str, Any]]] = []
+    print(f"📄 Documento dividido em {len(blocos)} requisições distintas.")
 
     for i, bloco in enumerate(blocos, start=1):
         try:
             context = extract_context_from_text(bloco)
-
-            # refs usadas para filtrar tabelas do Azure para este bloco
             refs_bloco = re.findall(r"\b\d{7,8}\b|\b\d{2,4}/\d{2,4}/[A-Z0-9\-]+\b", bloco, re.I)
+
+            # Filtra tabelas correspondentes a esta requisição
             tables_filtradas = []
             for t in all_tables:
                 joined = " ".join(c.get("content", "") for c in t.get("cells", []))
                 if any(ref in joined for ref in refs_bloco):
                     tables_filtradas.append(t)
 
-            if not tables_filtradas:
-                print(f"⚠️ Sem correspondência de tabelas na requisição {i}. Ignorado.")
-                continue
+            if not tables_filtradas and i == 1:
+                print("⚠️ Nenhuma tabela filtrada — usar todas por segurança.")
+                tables_filtradas = all_tables
 
             local = {"analyzeResult": {"tables": tables_filtradas}}
             amostras = parse_xylella_tables(local, context, req_id=i)
+
             if amostras:
+                print(f"✅ Requisição {i}: {len(amostras)} amostras.")
                 out.append(amostras)
+            else:
+                print(f"⚠️ Requisição {i} sem amostras extraídas.")
+
         except Exception as e:
             print(f"❌ Erro na requisição {i}: {e}")
 
@@ -823,7 +839,7 @@ async def process_folder_async(input_dir):
     print("──────────────────────────────\n")
 
 # ───────────────────────────────────────────────
-# API pública usada pela app Streamlit
+# API pública — processamento síncrono
 # ───────────────────────────────────────────────
 def process_pdf_sync(pdf_path: str):
     """
@@ -832,22 +848,30 @@ def process_pdf_sync(pdf_path: str):
     """
     print(f"\n🧪 Início de processamento: {os.path.basename(pdf_path)}")
 
-    # 1️⃣ Executa OCR Azure
+    # 1️⃣ OCR Azure
     result_json = azure_analyze_pdf(pdf_path)
 
-    # 2️⃣ Guarda texto OCR para debug
+    # 2️⃣ Gera texto OCR detalhado (para permitir deteção de cabeçalhos)
     base = os.path.splitext(os.path.basename(pdf_path))[0]
     txt_path = OUTPUT_DIR / f"{base}_ocr_debug.txt"
-    txt_path.write_text(extract_all_text(result_json), encoding="utf-8")
 
-    # 3️⃣ Processa todas as requisições (usa o parser Colab)
+    full_text = extract_all_text(result_json)
+    txt_path.write_text(full_text, encoding="utf-8")
+
+    if len(full_text) < 2000:
+        print("⚠️ OCR curto — pode não conter todos os cabeçalhos. Verifica se o PDF tem imagens digitalizadas.")
+
+    # 3️⃣ Parser completo (com deteção de múltiplas requisições)
     rows_per_req = parse_all_requisitions(result_json, pdf_path, str(txt_path))
 
+    # 4️⃣ Estatísticas finais
     total_amostras = sum(len(r) for r in rows_per_req)
     print(f"✅ {os.path.basename(pdf_path)}: {len(rows_per_req)} requisições, {total_amostras} amostras extraídas.")
+
     return rows_per_req
 
 pass
+
 
 
 
