@@ -29,9 +29,11 @@ def process_pdf_with_stats(pdf_path: str):
       - Lista de ficheiros gerados
       - Estatísticas detalhadas de requisições e amostras
     """
-    stats = {"pdf": os.path.basename(pdf_path), "req_count": 0, "samples_total": 0, "per_req": []}
+    import re
 
+    stats = {"pdf": os.path.basename(pdf_path), "req_count": 0, "samples_total": 0, "per_req": []}
     print(f"\n🧪 Início de processamento: {os.path.basename(pdf_path)}")
+
     try:
         rows_per_req = core.process_pdf_sync(pdf_path)
         if not rows_per_req:
@@ -40,6 +42,10 @@ def process_pdf_with_stats(pdf_path: str):
 
         created_files = []
         base_name = Path(pdf_path).stem
+
+        # 🔒 Sanitize do nome base (sem espaços, acentos, etc.)
+        safe_base_name = re.sub(r'[^\w\-_.]', '_', base_name)
+
         output_dir = Path(os.environ.get("OUTPUT_DIR", Path(__file__).parent / "Output"))
         output_dir.mkdir(exist_ok=True)
 
@@ -49,8 +55,7 @@ def process_pdf_with_stats(pdf_path: str):
             if not req_rows:
                 continue
 
-            # Nome: sem _req1 se for único
-            out_name = f"{base_name}.xlsx" if len(rows_per_req) == 1 else f"{base_name}_req{i}.xlsx"
+            out_name = f"{safe_base_name}.xlsx" if len(rows_per_req) == 1 else f"{safe_base_name}_req{i}.xlsx"
             out_path = output_dir / out_name
 
             expected = getattr(req_rows, "expected_count", None)
@@ -59,11 +64,18 @@ def process_pdf_with_stats(pdf_path: str):
 
             core.write_to_template(req_rows, out_path, expected_count=expected, source_pdf=pdf_path)
 
+            # 🔍 Verificar se o ficheiro foi mesmo gravado
+            if not out_path.exists():
+                print(f"❌ Falha ao gravar: {out_path}")
+                continue
+
             created_files.append(str(out_path))
             stats["samples_total"] += len(req_rows)
+
             discrepancy = None
             if expected and expected != len(req_rows):
                 discrepancy = expected - len(req_rows)
+
             stats["per_req"].append({
                 "req": i,
                 "samples": len(req_rows),
@@ -81,6 +93,7 @@ def process_pdf_with_stats(pdf_path: str):
         print(f"❌ Erro a processar {pdf_path}: {e}")
         traceback.print_exc()
         return [], stats
+
 
 
 # ───────────────────────────────────────────────
