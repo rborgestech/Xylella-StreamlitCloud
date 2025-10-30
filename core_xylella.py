@@ -643,7 +643,32 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
 # ───────────────────────────────────────────────
 # OCR + Parsing (devolve listas por requisição)
 # ───────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+# 6. UTILITÁRIOS GERAIS
+# ──────────────────────────────────────────────────────────────────────────────
+def clean_value(s: str) -> str:
+    """Limpa e normaliza um valor OCR."""
+    if s is None:
+        return ""
+    if isinstance(s, (int, float)):
+        return str(s)
+    s = re.sub(r"[\u200b\t\r\f\v]+", " ", s)
+    s = (s.strip()
+           .replace("N/A", "")
+           .replace("%", "")
+           .replace("\n", " ")
+           .replace("  ", " "))
+    return s.strip()
 
+def to_datetime(value: str):
+    try:
+        return datetime.strptime(str(value).strip(), "%d/%m/%Y")
+    except Exception:
+        return None
+
+def pdf_to_images(pdf_path):
+    """Converte PDF em imagens."""
+    return convert_from_path(pdf_path, dpi=150)
 # ───────────────────────────────────────────────
 # 11. FUNÇÕES ASSÍNCRONAS DE OCR (Azure)
 # ───────────────────────────────────────────────
@@ -817,5 +842,6 @@ def process_pdf_sync(pdf_path: str):
     return rows_per_req
 
 pass
+
 
 
