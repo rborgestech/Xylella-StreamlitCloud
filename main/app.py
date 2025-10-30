@@ -1,7 +1,7 @@
 import streamlit as st
 import tempfile, os, zipfile, traceback
 from datetime import datetime
-from xylella_processor import process_pdf, write_to_template
+from xylella_processor import process_pdf_sync, write_to_template
 
 # ───────────────────────────────────────────────
 # Configuração base do Streamlit
