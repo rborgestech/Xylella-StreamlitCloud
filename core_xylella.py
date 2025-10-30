@@ -41,7 +41,8 @@ except Exception:
 
 # ── Caminhos globais ────────────────────────────────────────────────
 BASE_DIR = Path(__file__).parent
-OUTPUT_DIR = BASE_DIR / "Output"
+OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", BASE_DIR / "Output"))
+OUTPUT_DIR.mkdir(exist_ok=True)
 TEMPLATE_PATH = BASE_DIR / "TEMPLATE_PXf_SGSLABIP1056.xlsx"  # mantém o teu template por defeito
 
 # Garantir que a pasta Output existe
@@ -500,4 +501,5 @@ if __name__ == "__main__":
     print("\n📂 Saídas geradas:")
     for f in files:
         print("   -", f)
+
 
