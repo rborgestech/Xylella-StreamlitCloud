@@ -1,8 +1,8 @@
 import streamlit as st
-import tempfile, os, shutil, time
+import tempfile, os, shutil, time, io, zipfile
 from pathlib import Path
 from datetime import datetime
-from xylella_processor import process_pdf_with_stats, build_zip
+from xylella_processor import process_pdf_with_stats
 
 # ───────────────────────────────────────────────
 # Configuração base
@@ -12,7 +12,7 @@ st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# CSS — cores consistentes (#CA4300) e sem vermelhos
+# CSS — Cores consistentes (laranja) e sem vermelhos
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -76,6 +76,34 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ───────────────────────────────────────────────
+# Função utilitária — criar ZIP com summary.txt
+# ───────────────────────────────────────────────
+def build_zip_with_summary(files: list[str], stats: list[dict]) -> bytes:
+    """Cria um ZIP com todos os ficheiros Excel e um summary.txt."""
+    mem = io.BytesIO()
+    with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as z:
+        summary_lines = []
+        for pdf_stats in stats:
+            summary_lines.append(f"{pdf_stats['pdf']}: {pdf_stats['req_count']} requisições, {pdf_stats['samples_total']} amostras")
+            for req in pdf_stats["per_req"]:
+                line = f"  • Req {req['req']}: {req['samples']} amostras → {Path(req['file']).name}"
+                if req.get("diff"):
+                    sign = "+" if req['diff'] > 0 else ""
+                    line += f" ⚠️ discrepância {sign}{req['diff']} (decl={req['expected']})"
+                summary_lines.append(line)
+            summary_lines.append("")
+
+        summary = "\n".join(summary_lines)
+        z.writestr("summary.txt", summary)
+
+        for f in files:
+            if os.path.exists(f):
+                z.write(f, arcname=Path(f).name)
+
+    mem.seek(0)
+    return mem.getvalue()
+
+# ───────────────────────────────────────────────
 # Interface de Upload
 # ───────────────────────────────────────────────
 uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True)
@@ -85,9 +113,6 @@ if "processing" not in st.session_state:
 
 start = st.button("📄 Processar ficheiros de Input", type="primary", disabled=st.session_state.processing)
 
-# ───────────────────────────────────────────────
-# Execução principal
-# ───────────────────────────────────────────────
 # ───────────────────────────────────────────────
 # Execução principal
 # ───────────────────────────────────────────────
@@ -103,33 +128,37 @@ if start and uploads:
 
         progress = st.progress(0)
         total = len(uploads)
-        log_area = st.empty()
 
         for i, up in enumerate(uploads, start=1):
-            log_area.markdown(f"### 📄 {up.name}")
+            st.markdown(f"### 📄 {up.name}")
             st.write("⏳ Início de processamento...")
 
-            tmpdir = tempfile.mkdtemp()
-            tmp_path = os.path.join(tmpdir, up.name)
+            # Diretório de trabalho persistente
+            run_dir = final_dir / f"run_{datetime.now():%Y%m%d_%H%M%S}_{i}"
+            run_dir.mkdir(parents=True, exist_ok=True)
+
+            tmp_path = run_dir / up.name
             with open(tmp_path, "wb") as f:
                 f.write(up.getbuffer())
 
-            os.environ["OUTPUT_DIR"] = tmpdir
-            files, stats = process_pdf_with_stats(tmp_path)
+            # Definir diretório de saída para o core
+            os.environ["OUTPUT_DIR"] = str(run_dir)
 
-            # copiar ficheiros gerados
+            files, stats = process_pdf_with_stats(str(tmp_path))
+            all_stats.append(stats)
+
+            # Copiar ficheiros gerados
             for fp in files:
                 if os.path.exists(fp):
                     dest = final_dir / Path(fp).name
                     shutil.copy(fp, dest)
                     all_excel.append(str(dest))
 
-            all_stats.append(stats)
-
+            # Mostrar resumo por PDF
             st.write(f"✅ {up.name}: {stats['req_count']} requisições, {stats['samples_total']} amostras.")
             for item in stats["per_req"]:
                 msg = f" • Requisição {item['req']}: {item['samples']} amostras → {Path(item['file']).name}"
-                if item["diff"]:
+                if item.get("diff"):
                     sign = "+" if item["diff"] > 0 else ""
                     msg += f" ⚠️ discrepância {sign}{item['diff']} (decl={item['expected']})"
                 st.write(msg)
@@ -137,13 +166,11 @@ if start and uploads:
             progress.progress(i / total)
             time.sleep(0.2)
 
-        # 🔹 Verifica ficheiros válidos antes do ZIP
+        # 🔹 Criar ZIP final com summary.txt
         valid_files = [str(f) for f in all_excel if os.path.exists(f)]
-
         if valid_files:
             zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
-            zip_bytes = build_zip(valid_files, all_stats)
-
+            zip_bytes = build_zip_with_summary(valid_files, all_stats)
             st.success(f"🏁 Processamento concluído ({len(valid_files)} ficheiros Excel gerados).")
             st.download_button(
                 "⬇️ Descarregar resultados (ZIP)",
@@ -156,26 +183,7 @@ if start and uploads:
             st.warning("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
 
     finally:
-        # Garantir que os ficheiros existem antes de tentar reler
-        valid_files = [str(f) for f in all_excel if os.path.exists(f)]
-
-        if valid_files:
-            zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
-            zip_bytes = build_zip(valid_files, all_stats)
-            st.success(f"🏁 Processamento concluído ({len(valid_files)} ficheiros Excel gerados).")
-            st.download_button(
-                "⬇️ Descarregar resultados (ZIP)",
-                data=zip_bytes,
-                file_name=zip_name,
-                mime="application/zip"
-            )
-            st.balloons()
-        else:
-            st.warning("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
-
-        # Libertar estado, mas sem forçar reload imediato
         st.session_state.processing = False
-
 
 else:
     st.info("💡 Carrega um ficheiro PDF e clica em **Processar ficheiros de Input**.")
