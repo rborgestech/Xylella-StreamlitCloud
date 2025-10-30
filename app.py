@@ -133,7 +133,7 @@ if start and uploads:
             st.markdown(f"### 📄 {up.name}")
             st.write("⏳ Início de processamento...")
 
-            # Diretório de trabalho persistente
+            # Diretório de trabalho por ficheiro
             run_dir = final_dir / f"run_{datetime.now():%Y%m%d_%H%M%S}_{i}"
             run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -141,20 +141,27 @@ if start and uploads:
             with open(tmp_path, "wb") as f:
                 f.write(up.getbuffer())
 
-            # Definir diretório de saída para o core
+            # Garantir diretório de output
             os.environ["OUTPUT_DIR"] = str(run_dir)
 
+            # 🧪 Processar PDF
             files, stats = process_pdf_with_stats(str(tmp_path))
             all_stats.append(stats)
 
-            # Copiar ficheiros gerados
+            # 🔎 DEBUG: ficheiros gerados e existência
+            st.subheader("📂 Ficheiros gerados:")
+            st.write(files)
+            for fp in files:
+                st.write(f" 🔍 {fp} → Existe? `{os.path.exists(fp)}`")
+
+            # Copiar ficheiros para final_dir
             for fp in files:
                 if os.path.exists(fp):
                     dest = final_dir / Path(fp).name
                     shutil.copy(fp, dest)
                     all_excel.append(str(dest))
 
-            # Mostrar resumo por PDF
+            # Mostrar resumo
             st.write(f"✅ {up.name}: {stats['req_count']} requisições, {stats['samples_total']} amostras.")
             for item in stats["per_req"]:
                 msg = f" • Requisição {item['req']}: {item['samples']} amostras → {Path(item['file']).name}"
@@ -166,8 +173,12 @@ if start and uploads:
             progress.progress(i / total)
             time.sleep(0.2)
 
-        # 🔹 Criar ZIP final com summary.txt
+        # 🔎 DEBUG: ficheiros válidos
         valid_files = [str(f) for f in all_excel if os.path.exists(f)]
+        st.subheader("📦 Ficheiros válidos para incluir no ZIP:")
+        st.write(valid_files)
+
+        # 📦 Criar ZIP
         if valid_files:
             zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
             zip_bytes = build_zip_with_summary(valid_files, all_stats)
@@ -180,10 +191,9 @@ if start and uploads:
             )
             st.balloons()
         else:
-            st.warning("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
+            st.error("❌ Nenhum ficheiro Excel encontrado para incluir no ZIP.")
 
     finally:
         st.session_state.processing = False
-
 else:
     st.info("💡 Carrega um ficheiro PDF e clica em **Processar ficheiros de Input**.")
