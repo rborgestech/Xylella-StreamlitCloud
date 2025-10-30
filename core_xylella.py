@@ -791,5 +791,31 @@ async def process_folder_async(input_dir):
     print(f"📂 Saída: {OUTPUT_DIR}")
     print("──────────────────────────────\n")
 
+# ───────────────────────────────────────────────
+# API pública usada pela app Streamlit
+# ───────────────────────────────────────────────
+def process_pdf_sync(pdf_path: str):
+    """
+    Executa o OCR Azure e o parser Colab de forma síncrona.
+    Devolve listas de amostras por requisição.
+    """
+    print(f"\n🧪 Início de processamento: {os.path.basename(pdf_path)}")
+
+    # 1️⃣ Executa OCR Azure
+    result_json = azure_analyze_pdf(pdf_path)
+
+    # 2️⃣ Guarda texto OCR para debug
+    base = os.path.splitext(os.path.basename(pdf_path))[0]
+    txt_path = OUTPUT_DIR / f"{base}_ocr_debug.txt"
+    txt_path.write_text(extract_all_text(result_json), encoding="utf-8")
+
+    # 3️⃣ Processa todas as requisições (usa o parser Colab)
+    rows_per_req = parse_all_requisitions(result_json, pdf_path, str(txt_path))
+
+    total_amostras = sum(len(r) for r in rows_per_req)
+    print(f"✅ {os.path.basename(pdf_path)}: {len(rows_per_req)} requisições, {total_amostras} amostras extraídas.")
+    return rows_per_req
+
 pass
+
 
