@@ -1,5 +1,5 @@
 import streamlit as st
-import tempfile, os
+import tempfile, os, shutil
 from pathlib import Path
 from xylella_processor import process_pdf_with_stats, build_zip
 
@@ -11,14 +11,14 @@ st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# CSS — estilo moderno (laranja + cinza desativado)
+# CSS — estilo laranja (#CA4300) sem vermelhos
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
 /* 🔸 Botão principal laranja */
 .stButton > button[kind="primary"] {
-  background: #f28c28 !important;
-  border-color: #f28c28 !important;
+  background: #CA4300 !important;
+  border-color: #CA4300 !important;
   color: #ffffff !important;
   box-shadow: none !important;
   border-radius: 6px !important;
@@ -29,8 +29,8 @@ st.markdown("""
 .stButton > button[kind="primary"]:hover,
 .stButton > button[kind="primary"]:focus,
 .stButton > button[kind="primary"]:active {
-  background: #d37822 !important;
-  border-color: #d37822 !important;
+  background: #A13700 !important;
+  border-color: #A13700 !important;
   color: #ffffff !important;
   outline: none !important;
   box-shadow: none !important;
@@ -46,26 +46,29 @@ st.markdown("""
   box-shadow: none !important;
 }
 
-/* 🔸 File uploader sem vermelho nem foco visível */
+/* 🔸 File uploader (sem vermelho nem foco) */
 [data-testid="stFileUploader"] > div:first-child {
-  border: 2px dashed #f28c28 !important;
+  border: 2px dashed #CA4300 !important;
   border-radius: 10px !important;
   padding: 1rem !important;
   transition: border-color 0.3s ease-in-out;
 }
 
 [data-testid="stFileUploader"] > div:first-child:hover {
-  border-color: #d37822 !important;
+  border-color: #A13700 !important;
 }
 
 [data-testid="stFileUploader"] > div:focus-within {
-  border-color: #f28c28 !important;
+  border-color: #CA4300 !important;
   box-shadow: none !important;
   outline: none !important;
 }
 
-/* Remover foco vermelho global */
+/* 🔸 Remover foco vermelho global */
 :root {
+  --primary-color: #CA4300 !important;
+  --text-selection-color: #CA4300 !important;
+  --accent-color: #CA4300 !important;
   --focus-ring: 0 0 0 0 rgba(0,0,0,0) !important;
 }
 </style>
@@ -82,7 +85,7 @@ if "processing" not in st.session_state:
 btn = st.button("📄 Processar ficheiros de Input", type="primary", disabled=st.session_state.processing)
 
 # ───────────────────────────────────────────────
-# Execução
+# Execução principal
 # ───────────────────────────────────────────────
 if btn and uploads:
     st.session_state.processing = True
@@ -90,6 +93,10 @@ if btn and uploads:
         st.info("⚙️ A processar... aguarda alguns segundos.")
         all_excel = []
         all_stats = []
+
+        # Criar diretório persistente
+        final_dir = Path.cwd() / "output_final"
+        final_dir.mkdir(exist_ok=True)
 
         for up in uploads:
             st.markdown(f"### 📄 {up.name}")
@@ -102,12 +109,16 @@ if btn and uploads:
 
             os.environ["OUTPUT_DIR"] = tmpdir
             files, stats = process_pdf_with_stats(tmp_path)
-            all_excel.extend(files)
+
+            # copiar ficheiros Excel para diretório persistente
+            for fp in files:
+                dest = final_dir / Path(fp).name
+                if os.path.exists(fp):
+                    shutil.copy(fp, dest)
+                    all_excel.append(str(dest))
+
             all_stats.append(stats)
-
-            # resumo PDF
             st.write(f"✅ {up.name}: {stats['req_count']} requisições, {stats['samples_total']} amostras.")
-
             for item in stats["per_req"]:
                 msg = f" • Requisição {item['req']}: {item['samples']} amostras → {Path(item['file']).name}"
                 if item["diff"]:
