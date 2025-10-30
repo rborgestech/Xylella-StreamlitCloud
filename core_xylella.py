@@ -158,7 +158,7 @@ def process_pdf_sync(pdf_path):
             # fallback para OCR local
             print(f"⚠️ Erro no OCR Azure (página {idx}: {e}) — a usar Tesseract local.")
             import pytesseract
-            text_total += pytesseract.image_to_string(img, lang="por") + "\n"
+            text_total += pytesseract.image_to_string(img) + "\n
 
     if not text_total.strip():
         raise RuntimeError(f"Não foi possível extrair texto de {os.path.basename(pdf_path)}")
@@ -448,6 +448,7 @@ def parse_xylella_from_result(result_json, pdf_path, txt_path=None):
     print(f"📂 Ficheiros guardados em: {OUTPUT_DIR}")
 
     return all_samples, num_blocks
+
 
 
 
