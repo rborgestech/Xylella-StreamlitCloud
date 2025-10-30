@@ -118,68 +118,58 @@ def write_to_template(ocr_rows, pdf_name):
 # ----------------------------------------------------------------
 def process_pdf_sync(pdf_path):
     """
-    Processa um PDF Xylella completo:
-     - Executa OCR Azure página a página;
-     - Junta texto global;
-     - Passa ao parser;
-     - Exporta 1 ficheiro por bloco (ou único se 1).
+    Extrai texto de um PDF usando OCR Azure (se configurado) ou OCR local como fallback.
+    Divide automaticamente o texto por requisições e devolve listas de linhas.
     """
+    import tempfile
     from azure_ocr import (
         pdf_to_images,
         extract_text_from_image_azure,
         get_analysis_result_azure,
-        extract_all_text,
     )
 
-    images = pdf_to_images(pdf_path)
-    all_tables = []
-    full_text = ""
+    pdf_path = str(pdf_path)
+    text_total = ""
 
-    for i, img in enumerate(images, start=1):
+    # 1️⃣ Converte o PDF em imagens (usando PyMuPDF via azure_ocr)
+    try:
+        images = pdf_to_images(pdf_path)
+        print(f"📄 PDF convertido em {len(images)} imagem(ns).")
+    except Exception as e:
+        raise RuntimeError(f"Falha ao converter PDF em imagens: {e}")
+
+    # 2️⃣ Tenta OCR (Azure ou local) página a página
+    for idx, img in enumerate(images, start=1):
         tmp_path = os.path.join(tempfile.gettempdir(), f"page_{idx}.png")
         img.save(tmp_path, "PNG")
+
         try:
-            res_url = extract_text_from_image_azure(tmp_png)
-            res_json = get_analysis_result_azure(res_url)
-            page_text = extract_all_text(res_json)
-            full_text += f"\n\n--- PÁGINA {i} ---\n" + page_text
-            tables = res_json.get("analyzeResult", {}).get("tables", [])
-            if tables:
-                all_tables.extend(tables)
-        finally:
-            try:
-                os.remove(tmp_png)
-            except:
-                pass
+            # tenta Azure
+            result = extract_text_from_image_azure(tmp_path)
+            data = get_analysis_result_azure(result)
 
-    base_name = os.path.splitext(os.path.basename(pdf_path))[0]
-    txt_path = os.path.join(OUTPUT_DIR, base_name + "_ocr_debug.txt")
-    with open(txt_path, "w", encoding="utf-8") as f:
-        f.write(full_text)
-    print(f"📝 Texto OCR bruto guardado em: {txt_path}")
+            for block in data.get("analyzeResult", {}).get("readResult", []):
+                for line in block.get("lines", []):
+                    text_total += line.get("text", "") + "\n"
 
-    combined_json = {"analyzeResult": {"tables": all_tables, "pages": []}}
+        except Exception as e:
+            # fallback para OCR local
+            print(f"⚠️ Erro no OCR Azure (página {idx}: {e}) — a usar Tesseract local.")
+            import pytesseract
+            text_total += pytesseract.image_to_string(img, lang="por") + "\n"
 
-    print("🔍 A extrair amostras e contexto global...")
-    rows, num_blocks = parse_xylella_from_result(combined_json, pdf_path, txt_path)
-    print(f"✅ {len(rows)} linhas extraídas brutas do OCR.")
+    if not text_total.strip():
+        raise RuntimeError(f"Não foi possível extrair texto de {os.path.basename(pdf_path)}")
 
-    try:
-        rows = validate_plants(rows)
-    except Exception:
-        print("⚙️ Validação de hospedeiros DESATIVADA — a lista de espécies não está atualizada.")
+    # 3️⃣ Divide o texto em requisições (usando o parser existente)
+    blocos = split_if_multiple_requisicoes(text_total)
+    todas = []
+    for bloco in blocos:
+        linhas = parse_with_regex(bloco)
+        if linhas:
+            todas.append(linhas)
 
-    rows = normalize_dedup(rows)
-
-    print("📋 Resumo das amostras extraídas:")
-    for i, r in enumerate(rows, 1):
-        print(f"   {i}) {r['datarececao']} | {r['datacolheita']} | {r['referencia']} | "
-              f"{r['hospedeiro']} | {r['tipo']} | {r['zona']} | {r['responsavelamostra']}")
-
-    write_to_template(rows, pdf_path)
-    print(f"🏁 Ficheiro final gravado para {base_name}.xlsx\n")
-
-    return rows
+    return todas
 
 
 # ----------------------------------------------------------------
@@ -456,5 +446,6 @@ def parse_xylella_from_result(result_json, pdf_path, txt_path=None):
     print(f"📂 Ficheiros guardados em: {OUTPUT_DIR}")
 
     return all_samples, num_blocks
+
 
 
