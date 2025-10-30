@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-core_xylella.py — Cloud/Streamlit (OCR Azure + Parser Colab + Writer por requisição)
+core_xylella.py — Cloud/Streamlit (OCR Azure direto + Parser Colab + Writer por requisição)
 
-API esperada pela UI (xylella_processor.py):
-    • process_pdf_sync(pdf_path) -> List[List[Dict]]   # devolve listas de amostras por requisição
-    • write_to_template(rows_per_req, out_base_path, expected_count=None, source_pdf=None) -> List[str]
+API exposta e usada pela UI (xylella_processor.py):
+    • process_pdf_sync(pdf_path) -> List[List[Dict]]]   # devolve lista de requisições; cada requisição = lista de amostras (dict)
+    • write_to_template(rows, out_name, expected_count=None, source_pdf=None) -> str  # escreve 1 XLSX com base no template
 
 Requer:
   - AZURE_API_KEY, AZURE_ENDPOINT (env)
@@ -13,10 +13,10 @@ Requer:
 """
 
 from __future__ import annotations
-import os, re, io, time, json, shutil, requests
+import os, re, io, time, json, csv, requests
 from pathlib import Path
-from datetime import datetime
-from typing import List, Dict, Any, Tuple
+from datetime import datetime, timedelta
+from typing import List, Dict, Any
 
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill, Font, Alignment
@@ -30,7 +30,6 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 
 TEMPLATE_PATH = Path(os.environ.get("TEMPLATE_PATH", BASE_DIR / "TEMPLATE_PXf_SGSLABIP1056.xlsx"))
 if not TEMPLATE_PATH.exists():
-    # não falha já — o app.py normalmente garante isto; fazemos só aviso
     print(f"ℹ️ Aviso: TEMPLATE não encontrado em {TEMPLATE_PATH}. Será verificado no momento da escrita.")
 
 AZURE_API_KEY = os.environ.get("AZURE_API_KEY", "")
@@ -47,7 +46,7 @@ BOLD  = Font(bold=True, color="000000")
 ITALIC= Font(italic=True, color="555555")
 
 # ───────────────────────────────────────────────
-# Utilitários
+# Utilitários genéricos
 # ───────────────────────────────────────────────
 def _is_valid_date(v) -> bool:
     try:
@@ -62,7 +61,21 @@ def _to_dt(v):
     except Exception:
         return v
 
+def clean_value(s: str) -> str:
+    if s is None:
+        return ""
+    if isinstance(s, (int, float)):
+        return str(s)
+    s = re.sub(r"[\u200b\t\r\f\v]+", " ", str(s))
+    s = (s.strip()
+           .replace("N/A", "")
+           .replace("%", "")
+           .replace("\n", " ")
+           .replace("  ", " "))
+    return s.strip()
+
 def extract_all_text(result_json: Dict[str, Any]) -> str:
+    """Concatena todo o texto linha a linha de todas as páginas."""
     lines = []
     for pg in result_json.get("analyzeResult", {}).get("pages", []):
         for ln in pg.get("lines", []):
@@ -82,7 +95,7 @@ def azure_analyze_pdf(pdf_path: str) -> Dict[str, Any]:
     headers = {"Ocp-Apim-Subscription-Key": AZURE_API_KEY, "Content-Type": "application/pdf"}
 
     with open(pdf_path, "rb") as f:
-        resp = requests.post(url, data=f.read(), headers=headers, timeout=90)
+        resp = requests.post(url, data=f.read(), headers=headers, timeout=120)
     if resp.status_code != 202:
         raise RuntimeError(f"Azure analyze falhou: {resp.status_code} {resp.text}")
 
@@ -90,18 +103,22 @@ def azure_analyze_pdf(pdf_path: str) -> Dict[str, Any]:
     if not op:
         raise RuntimeError("Azure não devolveu Operation-Location.")
 
-    for _ in range(60):
-        time.sleep(1.2)
-        r = requests.get(op, headers={"Ocp-Apim-Subscription-Key": AZURE_API_KEY}, timeout=30)
+    # Polling
+    start = time.time()
+    while True:
+        r = requests.get(op, headers={"Ocp-Apim-Subscription-Key": AZURE_API_KEY}, timeout=60)
         j = r.json()
-        if j.get("status") == "succeeded":
+        st = j.get("status")
+        if st == "succeeded":
             return j
-        if j.get("status") == "failed":
+        if st == "failed":
             raise RuntimeError(f"OCR Azure falhou: {j}")
-    raise RuntimeError("Timeout a aguardar OCR Azure.")
+        if time.time() - start > 180:
+            raise RuntimeError("Timeout a aguardar OCR Azure.")
+        time.sleep(1.2)
 
 # ───────────────────────────────────────────────
-# Parser — Secções do Colab (adaptadas)
+# Parser — blocos do Colab (integrado)
 # ───────────────────────────────────────────────
 NATUREZA_KEYWORDS = [
     "ramos","folhas","ramosefolhas","ramosc/folhas","material","materialherbalho",
@@ -139,56 +156,41 @@ def detect_requisicoes(full_text: str):
         print(f"🔍 Detetadas {count} requisições no ficheiro (posições: {positions})")
     return count, positions
 
-
-def split_if_multiple_requisicoes(full_text: str):
-    """
-    Divide o texto OCR em blocos distintos (requisições DGAV→SGS).
-    Se não encontrar cabeçalhos oficiais, tenta padrões alternativos (fallback).
-    """
-    text = re.sub(r"[ \t]+", " ", full_text)
+def split_if_multiple_requisicoes(full_text: str) -> List[str]:
+    """Divide o texto OCR em blocos distintos, um por requisição DGAV→SGS."""
+    # Limpeza leve (como no Colab) para juntar tokens partidos por \n
+    text = full_text.replace("\r", "")
+    text = re.sub(r"(\w)[\n\s]+(\w)", r"\1 \2", text)              # junta palavras quebradas
+    text = re.sub(r"(\d+)\s*/\s*([Xx][Ff])", r"\1/\2", text)       # "01 /Xf" → "01/Xf"
+    text = re.sub(r"([Dd][Gg][Aa][Vv])[\s\n]*-", r"\1-", text)     # "DGAV -" → "DGAV-"
+    text = re.sub(r"([Ee][Dd][Mm])\s*/\s*(\d+)", r"\1/\2", text)   # "EDM /25" → "EDM/25"
+    text = re.sub(r"[ \t]+", " ", text)                            # espaços múltiplos
     text = re.sub(r"\n{2,}", "\n", text)
 
-    # 🧩 Padrão principal (cabeçalho completo)
-    pattern_main = re.compile(
-        r"PROGRAMA\s+NACIONAL\s+DE\s+PROSPE[ÇC][AÃ]O\s+DE\s+PRAGAS\s+DE\s+QUARENTENA",
+    pattern = re.compile(
+        r"(?:PROGRAMA\s+NACIONAL\s+DE\s+PROSPE[ÇC][AÃ]O\s+DE\s+PRAGAS\s+DE\s+QUARENTENA)",
         re.IGNORECASE,
     )
+    marks = [m.start() for m in pattern.finditer(text)]
 
-    marks = [m.start() for m in pattern_main.finditer(text)]
-
-    # 🚨 Fallback: tenta "Amostra colhida por DGAV" ou "Referência da amostra"
-    if len(marks) <= 1:
-        alt_pattern = re.compile(
-            r"AMOSTRA\S*\s+COLHIDA\S*\s+POR\s+DGAV|REFER[EÊ]NCIA\s+DA\s+AMOSTRA",
-            re.IGNORECASE,
-        )
-        alt_marks = [m.start() for m in alt_pattern.finditer(text)]
-        if len(alt_marks) > 1:
-            print(f"🔍 Usado fallback DGAV — {len(alt_marks)} blocos detetados.")
-            marks = alt_marks
-
-    # Se ainda assim nada
     if not marks:
         print("🔍 Nenhum cabeçalho encontrado — tratado como 1 requisição.")
         return [text]
-
     if len(marks) == 1:
-        print("🔍 Apenas 1 cabeçalho detectado — 1 requisição.")
+        print("🔍 Apenas 1 cabeçalho — 1 requisição detectada.")
         return [text]
 
-    # Divide o texto em blocos (com padding para incluir contexto)
     marks.append(len(text))
     blocos = []
     for i in range(len(marks) - 1):
-        start = max(0, marks[i] - 200)
-        end = min(len(text), marks[i + 1] + 200)
+        start = max(0, marks[i] - 200)            # padding antes
+        end = min(len(text), marks[i + 1] + 200)  # padding depois
         bloco = text[start:end].strip()
         if len(bloco) > 400:
             blocos.append(bloco)
         else:
-            print(f"⚠️ Bloco {i+1} demasiado pequeno ({len(bloco)} chars).")
-
-    print(f"🔍 Detetadas {len(blocos)} requisições distintas (padrão híbrido).")
+            print(f"⚠️ Bloco {i+1} demasiado pequeno ({len(bloco)} chars) — possivelmente OCR truncado.")
+    print(f"🔍 Detetadas {len(blocos)} requisições distintas (por cabeçalho).")
     return blocos
 
 def extract_context_from_text(full_text: str):
@@ -227,7 +229,7 @@ def extract_context_from_text(full_text: str):
     ctx["dgav"] = dgav
     ctx["responsavel_colheita"] = None
 
-    # Datas de colheita
+    # Datas de colheita (mapa de asteriscos, se existir)
     colheita_map = {}
     for m in re.finditer(r"(\d{1,2}/\d{1,2}/\d{4})\s*\(\s*(\*+)\s*\)", full_text):
         colheita_map[f"({m.group(2).replace(' ', '')})"] = m.group(1)
@@ -253,16 +255,16 @@ def extract_context_from_text(full_text: str):
     else:
         ctx["data_envio"] = datetime.now().strftime("%d/%m/%Y")
 
-    # Nº de amostras declaradas
+    # Nº de amostras declaradas (se existir no cabeçalho)
     flat = re.sub(r"\s+", " ", full_text)
     m_decl = re.search(r"N[º°]?\s*de\s*amostras(?:\s+neste\s+envio)?\s*[:\-]?\s*(\d{1,4})", flat, re.I)
     ctx["declared_samples"] = int(m_decl.group(1)) if m_decl else None
 
     return ctx
 
-def parse_xylella_tables(result_json, context, req_id=None):
+def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, Any]]:
     """Extrai as amostras das tabelas Azure OCR, aplicando o contexto da requisição."""
-    out = []
+    out: List[Dict[str, Any]] = []
     tables = result_json.get("analyzeResult", {}).get("tables", [])
     if not tables:
         print("⚠️ Nenhuma tabela encontrada.")
@@ -322,65 +324,48 @@ def parse_xylella_tables(result_json, context, req_id=None):
 
     print(f"✅ {len(out)} amostras extraídas no total (req_id={req_id}).")
     return out
-    
-def parse_xylella_from_result(result_json, pdf_name, txt_path=None):
-    """
-    Analisa o resultado OCR e extrai todas as requisições de um PDF Xylella.
-    Divide o documento em blocos e associa as tabelas a cada bloco.
-    """
-    import os
 
-    print(f"📄 A processar: {pdf_name}")
-
-    # 1️⃣ Ler texto global do OCR
+# ───────────────────────────────────────────────
+# Dividir em requisições e extrair por bloco
+# ───────────────────────────────────────────────
+def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path: str | None) -> List[List[Dict[str, Any]]]:
+    """
+    Divide o documento em blocos (requisições) e devolve uma lista onde cada elemento
+    é a lista de amostras dessa requisição.
+    """
+    # Texto global
     if txt_path and os.path.exists(txt_path):
-        with open(txt_path, "r", encoding="utf-8") as f:
-            full_text = f.read()
+        full_text = Path(txt_path).read_text(encoding="utf-8")
         print(f"📝 Contexto extraído de {os.path.basename(txt_path)}")
     else:
-        print("⚠️ Ficheiro de texto global não encontrado — fallback: 1.ª página.")
-        first_page_text = "\n".join(
-            line.get("content", "")
-            for line in result_json.get("analyzeResult", {}).get("pages", [])[0].get("lines", [])
-        )
-        full_text = first_page_text
+        full_text = extract_all_text(result_json)
 
-    # 2️⃣ Detetar requisições
+    # Detetar nº de requisições
     count, _ = detect_requisicoes(full_text)
+    all_tables = result_json.get("analyzeResult", {}).get("tables", []) or []
 
-    # 3️⃣ Documento com apenas uma requisição
+    # Caso simples (1 requisição)
     if count <= 1:
-        print("📄 Documento contém apenas uma requisição.")
         context = extract_context_from_text(full_text)
         amostras = parse_xylella_tables(result_json, context, req_id=1)
+        return [amostras] if amostras else []
 
-        if not amostras:
-            append_process_log(pdf_name, 1, 0, context.get("declared_samples"),
-                               out_path=None, status="Vazia",
-                               error_msg="Sem amostras válidas.")
-            return []
-
-        out_path = write_to_template(amostras, os.path.basename(pdf_name),
-                                     expected_count=context.get("declared_samples"),
-                                     source_pdf=pdf_name)
-        append_process_log(pdf_name, 1, len(amostras),
-                           context.get("declared_samples"), out_path=out_path, status="OK")
-        return amostras
-
-    # 4️⃣ Documento com múltiplas requisições
+    # Múltiplas requisições — segmentar por cabeçalhos
     blocos = split_if_multiple_requisicoes(full_text)
-    print(f"📄 Documento dividido em {len(blocos)} requisições.")
+    out: List[List[Dict[str, Any]]] = []
 
-    all_samples = []
-    all_tables = result_json.get("analyzeResult", {}).get("tables", [])
+    # Pré-extrair todas as refs existentes nas tabelas (para cruzamento leve)
+    all_table_texts = []
+    for t in all_tables:
+        table_text = " ".join(c.get("content", "") for c in t.get("cells", []))
+        all_table_texts.append((t, table_text))
 
     for i, bloco in enumerate(blocos, start=1):
         print(f"\n🔹 A processar requisição {i}/{len(blocos)}...")
-
         try:
-            bloco = re.sub(r"[ \t]+", " ", bloco.replace("\r", ""))
             context = extract_context_from_text(bloco)
 
+            # refs usadas para filtrar tabelas do Azure para este bloco
             refs_bloco = re.findall(
                 r"\b\d{1,3}/[A-Z]{0,2}/DGAV(?:-[A-Z0-9/]+)?|\b\d{2,4}/\d{2,4}/[A-Z0-9\-]+",
                 bloco, re.I
@@ -388,151 +373,49 @@ def parse_xylella_from_result(result_json, pdf_name, txt_path=None):
             refs_bloco = [r.strip() for r in refs_bloco if len(r.strip()) > 4]
             print(f"   ↳ {len(refs_bloco)} referências detetadas no bloco {i}")
 
-            tables_filtradas = [
-                t for t in all_tables
-                if any(ref in " ".join(c.get("content", "") for c in t.get("cells", []))
-                       for ref in refs_bloco)
-            ] or all_tables
-
-            result_local = {"analyzeResult": {"tables": tables_filtradas}}
-            amostras = parse_xylella_tables(result_local, context, req_id=i)
-
-            if not amostras:
-                append_process_log(pdf_name, i, 0, context.get("declared_samples"),
-                                   out_path=None, status="Vazia",
-                                   error_msg="Sem amostras válidas (OCR incompleto).")
-                continue
-
-            base = os.path.splitext(os.path.basename(pdf_name))[0]
-            out_name = f"{base}_req{i}.xlsx"
-            out_path = write_to_template(amostras, out_name,
-                                         expected_count=context.get("declared_samples"),
-                                         source_pdf=pdf_name)
-            append_process_log(pdf_name, i, len(amostras),
-                               context.get("declared_samples"), out_path=out_path, status="OK")
-            print(f"✅ Requisição {i} gravada em: {out_path}")
-            all_samples.extend(amostras)
-
-        except Exception as e:
-            print(f"❌ Erro na requisição {i}: {e}")
-            append_process_log(pdf_name, i, 0, None,
-                               out_path=None, status="Erro", error_msg=str(e))
-
-    print(f"\n🏁 Concluído: {len(blocos)} requisições processadas, {len(all_samples)} amostras no total.")
-    return all_samples
-    
-# ───────────────────────────────────────────────
-# Parser: dividir e extrair requisições
-# ───────────────────────────────────────────────
-def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path: str | None) -> List[List[Dict[str, Any]]]:
-    """
-    Divide o documento em blocos (requisições) e extrai amostras por bloco,
-    mostrando progresso detalhado no log.
-    """
-    import time
-    t0 = time.time()
-
-    # Texto global do OCR
-    if txt_path and os.path.exists(txt_path):
-        full_text = Path(txt_path).read_text(encoding="utf-8")
-        print(f"📝 Contexto extraído de {os.path.basename(txt_path)}")
-    else:
-        full_text = extract_all_text(result_json)
-        print("⚠️ Ficheiro OCR não encontrado — a usar texto direto do OCR.")
-
-    # Deteção de requisições (cabeçalhos)
-    count, _ = detect_requisicoes(full_text)
-    if count == 0:
-        print("⚠️ Nenhum cabeçalho detectado — assumido 1 requisição.")
-        count = 1
-
-    all_tables = result_json.get("analyzeResult", {}).get("tables", []) or []
-    out: List[List[Dict[str, Any]]] = []
-
-    # Documento simples (1 requisição)
-    if count <= 1:
-        context = extract_context_from_text(full_text)
-        amostras = parse_xylella_tables(result_json, context, req_id=1)
-        return [amostras] if amostras else []
-
-    # Documento com múltiplas requisições
-    blocos = split_if_multiple_requisicoes(full_text)
-    total = len(blocos)
-    print(f"📄 Documento dividido em {total} requisições distintas.\n")
-
-    for i, bloco in enumerate(blocos, start=1):
-        try:
-            start_time = time.time()
-            print(f"🔹 [{i}/{total}] A processar requisição {i}...")
-
-            context = extract_context_from_text(bloco)
-            refs_bloco = re.findall(r"\b\d{7,8}\b|\b\d{2,4}/\d{2,4}/[A-Z0-9\-]+\b", bloco, re.I)
-
-            # Filtra tabelas correspondentes
             tables_filtradas = []
-            for t in all_tables:
-                joined = " ".join(c.get("content", "") for c in t.get("cells", []))
-                if any(ref in joined for ref in refs_bloco):
-                    tables_filtradas.append(t)
+            if refs_bloco:
+                for t, txt in all_table_texts:
+                    if any(ref in txt for ref in refs_bloco):
+                        tables_filtradas.append(t)
 
-            if not tables_filtradas and i == 1:
-                print("⚠️ Nenhuma tabela filtrada — usar todas por segurança.")
+            # fallback: se não consegui filtrar, usa todas as tabelas (evita perder amostras)
+            if not tables_filtradas:
                 tables_filtradas = all_tables
 
             local = {"analyzeResult": {"tables": tables_filtradas}}
             amostras = parse_xylella_tables(local, context, req_id=i)
-
             if amostras:
                 out.append(amostras)
-                print(f"✅ Requisição {i} concluída ({len(amostras)} amostras).")
             else:
-                print(f"⚠️ Requisição {i} sem amostras extraídas.")
-
-            elapsed = time.time() - start_time
-            pct = round(i / total * 100)
-            print(f"⏱️ {pct}% concluído ({elapsed:.1f}s desde início)\n")
+                print(f"⚠️ Requisição {i} sem amostras válidas (possível OCR incompleto).")
 
         except Exception as e:
             print(f"❌ Erro na requisição {i}: {e}")
 
-    total_time = time.time() - t0
-    print(f"🏁 Fim do parsing — {len(out)} requisições processadas em {total_time:.1f}s.\n")
+    print(f"\n🏁 Concluído: {len(out)} requisições com amostras extraídas.")
     return out
 
 # ───────────────────────────────────────────────
 # Escrita no TEMPLATE — 1 ficheiro por requisição
 # ───────────────────────────────────────────────
-
-def to_datetime(value: str):
-    """Converte string dd/mm/yyyy para objeto datetime (ou devolve None se inválida)."""
-    try:
-        return datetime.strptime(str(value).strip(), "%d/%m/%Y")
-    except Exception:
-        return None
-        
 def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
     """
-    Escreve as linhas extraídas no template base.
-    Cria um ficheiro Excel no diretório OUTPUT_DIR com o nome indicado.
-    Campo de observações (coluna I) é sempre deixado vazio.
+    Escreve as linhas extraídas no template base (1 ficheiro).
+    Campo de observações (coluna I) é sempre vazio.
     Inclui:
       • Validação do nº de amostras (E1:F1)
       • Origem real do PDF (G1:J1)
       • Data/hora de processamento (K1:L1)
       • Conversão automática de datas
       • Validação de campos obrigatórios
-      • Fórmula Data requerido = Data Receção + 30 dias
+      • Fórmula Data requerido = Data receção + 30 dias
     """
-    from openpyxl import load_workbook
-    from openpyxl.styles import PatternFill, Font, Alignment
-    from datetime import datetime
-    import os
-
     if not ocr_rows:
         print(f"⚠️ {out_name}: sem linhas para escrever.")
         return None
 
-    if not os.path.exists(TEMPLATE_PATH):
+    if not TEMPLATE_PATH.exists():
         raise FileNotFoundError(f"Template não encontrado: {TEMPLATE_PATH}")
 
     wb = load_workbook(TEMPLATE_PATH)
@@ -541,12 +424,21 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
 
     # 🎨 Estilos
     yellow_fill = PatternFill(start_color="FFFACD", end_color="FFFACD", fill_type="solid")
-    green_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-    red_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
-    gray_fill = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")
+    green_fill  = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+    red_fill    = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+    gray_fill   = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")
     bold_center = Font(bold=True, color="000000")
 
-    def is_valid_date(value: str) -> bool:
+    # 🧹 Limpar linhas anteriores (A→L; observa a coluna I/observações)
+    for row in range(start_row, 201):
+        for col in range(1, 13):
+            cell = ws.cell(row=row, column=col)
+            cell.value = None
+            cell.fill = PatternFill(fill_type=None)
+        ws[f"I{row}"].value = None
+
+    # ✍️ Escrever novas linhas
+    def _is_valid_date(value: str) -> bool:
         try:
             if isinstance(value, datetime):
                 return True
@@ -555,34 +447,27 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
         except Exception:
             return False
 
-    def to_datetime(value: str):
+    def _to_datetime(value: str):
         try:
             return datetime.strptime(str(value).strip(), "%d/%m/%Y")
         except Exception:
             return None
 
-    # 🧹 Limpar linhas anteriores (mantém apenas cabeçalhos)
-    for row in range(start_row, 201):
-        for col in range(1, 13):
-            ws.cell(row=row, column=col).value = None
-            ws.cell(row=row, column=col).fill = PatternFill(fill_type=None)
-
-    # ✍️ Escrever novas linhas
     for idx, row in enumerate(ocr_rows, start=start_row):
-        rececao_val = row.get("datarececao", "")
+        rececao_val  = row.get("datarececao", "")
         colheita_val = row.get("datacolheita", "")
 
         cell_A = ws[f"A{idx}"]
         cell_B = ws[f"B{idx}"]
 
-        if is_valid_date(rececao_val):
-            cell_A.value = to_datetime(rececao_val)
+        if _is_valid_date(rececao_val):
+            cell_A.value = _to_datetime(rececao_val)
         else:
             cell_A.value = rececao_val
             cell_A.fill = red_fill
 
-        if is_valid_date(colheita_val):
-            cell_B.value = to_datetime(colheita_val)
+        if _is_valid_date(colheita_val):
+            cell_B.value = _to_datetime(colheita_val)
         else:
             cell_B.value = colheita_val
             cell_B.fill = red_fill
@@ -595,276 +480,100 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
         ws[f"H{idx}"] = row.get("responsavelcolheita", "")
         ws[f"I{idx}"] = ""  # Observações
         ws[f"K{idx}"] = row.get("procedure", "")
-        ws[f"L{idx}"] = f"=A{idx}+30"  # Data requerido = Data receção + 30 dias
+        ws[f"L{idx}"] = f"=A{idx}+30"  # Data requerido
 
-        # Campos obrigatórios
-        for col in ["A", "B", "C", "D", "E", "F", "G"]:
-            cell = ws[f"{col}{idx}"]
-            if not cell.value or str(cell.value).strip() == "":
-                cell.fill = red_fill
+        # Campos obrigatórios (A→G)
+        for col in ("A","B","C","D","E","F","G"):
+            c = ws[f"{col}{idx}"]
+            if not c.value or str(c.value).strip() == "":
+                c.fill = red_fill
 
-        # Destaque amarelo (revisão)
+        # Destaque amarelo (se houver flags de validação)
         if row.get("WasCorrected") or row.get("ValidationStatus") in ("review", "unknown", "no_list"):
             ws[f"D{idx}"].fill = yellow_fill
 
-    # ────────────────────────────────────────────────
-    # 📊 Validação E1:F1 — Nº Amostras declaradas / processadas
-    # ────────────────────────────────────────────────
+    # 📊 Validação E1:F1
     processed = len(ocr_rows)
-    expected = expected_count if expected_count is not None else "?"
+    expected  = expected_count
     ws.merge_cells("E1:F1")
     cell = ws["E1"]
-    cell.value = f"Nº Amostras: {expected} / {processed}"
+    val_str = f"{expected if expected is not None else '?'} / {processed}"
+    cell.value = f"Nº Amostras: {val_str}"
     cell.font = bold_center
     cell.alignment = Alignment(horizontal="center", vertical="center")
-    cell.fill = green_fill if expected == processed else red_fill
+    cell.fill = red_fill if (expected is not None and expected != processed) else green_fill
+    if expected is not None and expected != processed:
+        print(f"⚠️ Diferença de nº de amostras: esperado={expected}, processado={processed}")
 
-    # ────────────────────────────────────────────────
-    # 🗂️ Origem do PDF
-    # ────────────────────────────────────────────────
+    # 🗂️ Origem do PDF (G1:J1)
     ws.merge_cells("G1:J1")
     pdf_orig_name = os.path.basename(source_pdf) if source_pdf else "(desconhecida)"
     ws["G1"].value = f"Origem: {pdf_orig_name}"
     ws["G1"].font = Font(italic=True, color="555555")
     ws["G1"].alignment = Alignment(horizontal="left", vertical="center")
-    ws["G1"].fill = gray_fill
+    ws["G1"].fill = GRAY
 
-    # ────────────────────────────────────────────────
-    # 🕒 Data/hora de processamento
-    # ────────────────────────────────────────────────
+    # 🕒 Data/hora de processamento (K1:L1)
     ws.merge_cells("K1:L1")
     timestamp = datetime.now().strftime("%d/%m/%Y %H:%M")
     ws["K1"].value = f"Processado em: {timestamp}"
     ws["K1"].font = Font(italic=True, color="555555")
     ws["K1"].alignment = Alignment(horizontal="right", vertical="center")
-    ws["K1"].fill = gray_fill
+    ws["K1"].fill = GRAY
 
     # 💾 Guardar ficheiro
     base_name = os.path.splitext(os.path.basename(out_name))[0]
     out_path = os.path.join(OUTPUT_DIR, f"{base_name}.xlsx")
     wb.save(out_path)
-    print(f"🟢 Gravado com sucesso: {out_path}")
-
+    print(f"🟢 Gravado (com validação E1/F1, origem G1:J1 e timestamp K1:L1): {out_path}")
     return out_path
 
 # ───────────────────────────────────────────────
-# OCR + Parsing (devolve listas por requisição)
+# Log opcional (compatível com o teu Colab)
 # ───────────────────────────────────────────────
-# ──────────────────────────────────────────────────────────────────────────────
-# 6. UTILITÁRIOS GERAIS
-# ──────────────────────────────────────────────────────────────────────────────
-def clean_value(s: str) -> str:
-    """Limpa e normaliza um valor OCR."""
-    if s is None:
-        return ""
-    if isinstance(s, (int, float)):
-        return str(s)
-    s = re.sub(r"[\u200b\t\r\f\v]+", " ", s)
-    s = (s.strip()
-           .replace("N/A", "")
-           .replace("%", "")
-           .replace("\n", " ")
-           .replace("  ", " "))
-    return s.strip()
+def append_process_log(pdf_name, req_id, processed, expected, out_path=None, status="OK", error_msg=None):
+    log_path = os.path.join(OUTPUT_DIR, "process_log.csv")
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    summary_path = os.path.join(OUTPUT_DIR, f"process_summary_{today_str}.txt")
 
-def to_datetime(value: str):
+    exists = os.path.exists(log_path)
+    with open(log_path, "a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f, delimiter=";")
+        if not exists:
+            writer.writerow(["DataHora","PDF","ReqID","Processadas","Requisitadas","OutputExcel","Status","Mensagem"])
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        writer.writerow([ts, os.path.basename(pdf_name), req_id, processed, expected or "", out_path or "", status, error_msg or ""])
+
     try:
-        return datetime.strptime(str(value).strip(), "%d/%m/%Y")
+        with open(summary_path, "a", encoding="utf-8") as f:
+            f.write(f"[{datetime.now().strftime('%H:%M:%S')}] {os.path.basename(pdf_name)} | Req {req_id} | {processed}/{expected or '?'} | {status} {os.path.basename(out_path or '')}\n")
     except Exception:
-        return None
-
-def pdf_to_images(pdf_path):
-    """Converte PDF em imagens."""
-    return convert_from_path(pdf_path, dpi=150)
-# ───────────────────────────────────────────────
-# 11. FUNÇÕES ASSÍNCRONAS DE OCR (Azure)
-# ───────────────────────────────────────────────
-
-async def azure_ocr_page(session, img_bytes, page_idx, pdf_name, cache_dir):
-    """OCR de uma página (Azure Form Recognizer)."""
-    cache_file = os.path.join(cache_dir, f"{os.path.basename(pdf_name)}_p{page_idx}.json")
-    if os.path.exists(cache_file):
-        with open(cache_file, "r", encoding="utf-8") as f:
-            result_json = json.load(f)
-        print(f"📦 OCR cache usado (página {page_idx})")
-    else:
-        url = f"{AZURE_ENDPOINT}formrecognizer/documentModels/{MODEL_ID}:analyze?api-version=2023-07-31"
-        headers = {"Ocp-Apim-Subscription-Key": AZURE_API_KEY, "Content-Type": "application/octet-stream"}
-        async with session.post(url, data=img_bytes, headers=headers) as resp:
-            if resp.status != 202:
-                print(f"❌ Erro Azure ({page_idx}): {await resp.text()}")
-                return None
-            result_url = resp.headers.get("Operation-Location")
-
-        # Polling até OCR estar concluído
-        for _ in range(20):
-            await asyncio.sleep(2)
-            async with session.get(result_url, headers=headers) as r:
-                j = await r.json()
-                if j.get("status") == "succeeded":
-                    result_json = j
-                    break
-        else:
-            print(f"⚠️ Timeout OCR página {page_idx}")
-            return None
-
-        with open(cache_file, "w", encoding="utf-8") as f:
-            json.dump(result_json, f, ensure_ascii=False)
-
-    text = extract_all_text(result_json)
-    if len(text.strip()) < 100:
-        return None
-    tables = result_json.get("analyzeResult", {}).get("tables", [])
-    return (page_idx, text, tables)
-
-def extract_all_text(result_json):
-    """Extrai texto completo de um resultado Azure OCR."""
-    lines = []
-    for page in result_json.get("analyzeResult", {}).get("pages", []):
-        for line in page.get("lines", []):
-            lines.append(line.get("content", ""))
-    return "\n".join(lines)
-# ───────────────────────────────────────────────
-#  OCR + PARSING COMPLETO PARA UM PDF
-# ───────────────────────────────────────────────
-
-async def process_pdf_async(pdf_path, session):
-    print(f"\n📄 A processar async: {os.path.basename(pdf_path)}")
-    t0 = asyncio.get_event_loop().time()
-
-    cache_dir = os.path.join(OUTPUT_DIR, "_ocr_cache")
-    os.makedirs(cache_dir, exist_ok=True)
-
-    # Converter PDF em imagens (thread pool)
-    with ThreadPoolExecutor() as pool:
-        images = await asyncio.get_event_loop().run_in_executor(pool, lambda: pdf_to_images(pdf_path))
-
-    # OCR paralelo das páginas
-    tasks = []
-    for i, img in enumerate(images, start=1):
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        img_bytes = buf.getvalue()
-        tasks.append(azure_ocr_page(session, img_bytes, i, pdf_path, cache_dir))
-
-    results = await asyncio.gather(*tasks)
-    results = [r for r in results if r]
-
-    if not results:
-        print("⚠️ Nenhuma página útil após OCR.")
-        return
-
-    results.sort(key=lambda x: x[0])
-    full_text = "\n".join([f"\n\n--- PÁGINA {i} ---\n{text}" for i, text, _ in results])
-    all_tables = [t for _, _, tbls in results for t in tbls]
-
-    t_ocr = asyncio.get_event_loop().time() - t0
-    print(f"⏱️ OCR paralelo total: {timedelta(seconds=round(t_ocr))}")
-
-    # Guardar texto global
-    base_name = os.path.splitext(os.path.basename(pdf_path))[0]
-    txt_path = os.path.join(OUTPUT_DIR, base_name + "_ocr_debug.txt")
-    with open(txt_path, "w", encoding="utf-8") as f:
-        f.write(full_text)
-
-    # Parsing normal (usa função já existente)
-    t_parse_start = asyncio.get_event_loop().time()
-    combined_json = {"analyzeResult": {"tables": all_tables, "pages": []}}
-    rows = parse_xylella_from_result(combined_json, pdf_path, txt_path)
-    t_parse = asyncio.get_event_loop().time() - t_parse_start
-
-    print(f"⏱️ Parsing + geração Excel: {timedelta(seconds=round(t_parse))}")
-    print(f"🏁 Total: {timedelta(seconds=round(asyncio.get_event_loop().time() - t0))}")
-
-    return rows
-
+        pass
 
 # ───────────────────────────────────────────────
-#  PROCESSAMENTO ASSÍNCRONO DE TODOS OS PDFs
+# API pública usada pela app Streamlit
 # ───────────────────────────────────────────────
-
-async def process_folder_async(input_dir):
+def process_pdf_sync(pdf_path: str) -> List[List[Dict[str, Any]]]:
     """
-    Processa todos os PDFs de forma assíncrona e gera um resumo final
-    com tempos médios, totais e nº de amostras extraídas.
+    Executa o OCR Azure direto ao PDF e o parser Colab integrado.
+    Devolve: lista de requisições (cada item = lista de amostras dict).
+    A escrita do Excel é feita a jusante (no xylella_processor.py), 1 ficheiro por requisição.
     """
-    pdfs = [os.path.join(input_dir, f) for f in os.listdir(input_dir) if f.lower().endswith(".pdf")]
-    if not pdfs:
-        print("ℹ️ Não há PDFs na pasta de entrada.")
-        return
+    base = os.path.basename(pdf_path)
+    print(f"\n🧪 Início de processamento: {base}")
 
-    start_time = asyncio.get_event_loop().time()
-    summary = []
-
-    async with aiohttp.ClientSession() as session:
-        tasks = [process_pdf_async(pdf, session) for pdf in pdfs]
-        results = await asyncio.gather(*tasks)
-
-    # Montar resumo de desempenho
-    total_time = asyncio.get_event_loop().time() - start_time
-    total_pdfs = len(pdfs)
-    total_rows = 0
-    total_time_ocr = 0
-    total_time_parse = 0
-
-    # Cada resultado é o "rows" retornado por process_pdf_async
-    for pdf, res in zip(pdfs, results):
-        if not res:
-            continue
-        total_rows += len(res)
-
-    avg_time_per_pdf = total_time / total_pdfs if total_pdfs else 0
-
-    print("\n📊 Resumo Final")
-    print("──────────────────────────────")
-    print(f"📄 PDFs processados: {total_pdfs}")
-    print(f"🧾 Total de amostras extraídas: {total_rows}")
-    print(f"⏱️ Tempo total: {timedelta(seconds=round(total_time))}")
-    print(f"⚙️ Tempo médio por PDF: {timedelta(seconds=round(avg_time_per_pdf))}")
-    print(f"📂 Saída: {OUTPUT_DIR}")
-    print("──────────────────────────────\n")
-
-# ───────────────────────────────────────────────
-# API pública — processamento síncrono
-# ───────────────────────────────────────────────
-def process_pdf_sync(pdf_path: str):
-    """
-    Executa o OCR Azure e o parser Colab de forma síncrona.
-    Devolve listas de amostras por requisição.
-    """
-    print(f"\n🧪 Início de processamento: {os.path.basename(pdf_path)}")
-
-    # 1️⃣ OCR Azure
+    # 1) OCR Azure direto
     result_json = azure_analyze_pdf(pdf_path)
 
-    # 2️⃣ Gera texto OCR detalhado (para permitir deteção de cabeçalhos)
-    base = os.path.splitext(os.path.basename(pdf_path))[0]
-    txt_path = OUTPUT_DIR / f"{base}_ocr_debug.txt"
+    # 2) Guardar texto OCR global (debug)
+    txt_path = OUTPUT_DIR / f"{os.path.splitext(base)[0]}_ocr_debug.txt"
+    txt_path.write_text(extract_all_text(result_json), encoding="utf-8")
+    print(f"📝 Texto OCR bruto guardado em: {txt_path}")
 
-    full_text = extract_all_text(result_json)
-    txt_path.write_text(full_text, encoding="utf-8")
-
-    if len(full_text) < 2000:
-        print("⚠️ OCR curto — pode não conter todos os cabeçalhos. Verifica se o PDF tem imagens digitalizadas.")
-
-    # 3️⃣ Parser completo (com deteção de múltiplas requisições)
+    # 3) Parser — dividir em requisições e extrair amostras
     rows_per_req = parse_all_requisitions(result_json, pdf_path, str(txt_path))
 
-    # 4️⃣ Estatísticas finais
+    # Log de resumo
     total_amostras = sum(len(r) for r in rows_per_req)
-    print(f"✅ {os.path.basename(pdf_path)}: {len(rows_per_req)} requisições, {total_amostras} amostras extraídas.")
-
+    print(f"✅ {base}: {len(rows_per_req)} requisições, {total_amostras} amostras extraídas.")
     return rows_per_req
-
-pass
-
-
-
-
-
-
-
-
-
-
-
