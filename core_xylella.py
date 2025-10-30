@@ -69,50 +69,50 @@ def normalize_dedup(rows):
 # ----------------------------------------------------------------
 #  Escrever resultado no TEMPLATE Excel
 # ----------------------------------------------------------------
-def write_to_template(ocr_rows, pdf_name):
-    """Escreve as linhas extraídas no template Excel."""
-    if not ocr_rows:
-        print(f"⚠️ {pdf_name}: sem linhas para escrever.")
-        return None
+def write_to_template(ocr_rows, out_base_path, expected_count=None, source_pdf=None):
+    """
+    Escreve as requisições no TEMPLATE_PXF_SGSLABIP1056.xlsx
+    mantendo fórmulas, validações e formatação SGS.
+    """
+    from openpyxl import load_workbook
+    import shutil
 
-    if not os.path.exists(TEMPLATE_PATH):
-        raise FileNotFoundError(f"Template não encontrado: {TEMPLATE_PATH}")
+    template_path = Path(os.environ["TEMPLATE_PATH"])
+    if not template_path.exists():
+        raise FileNotFoundError(f"TEMPLATE não encontrado: {template_path}")
 
-    wb = load_workbook(TEMPLATE_PATH)
-    ws = wb.worksheets[0]
-    start_row = 4
-    yellow_fill = PatternFill(start_color="FFFACD", end_color="FFFACD", fill_type="solid")
+    out_files = []
+    start_row = 6
+    sheet_name = "Avaliação pré registo"
 
-    # Limpar linhas anteriores
-    for row in range(start_row, 201):
-        for col in range(1, 13):
-            cell = ws.cell(row=row, column=col)
-            cell.value = None
-            cell.fill = PatternFill(fill_type=None)
-        ws[f"I{row}"].value = None
+    for idx, req_rows in enumerate(ocr_rows, start=1):
+        out_path = Path(f"{out_base_path}_req{idx}.xlsx")
+        shutil.copy(template_path, out_path)
 
-    # Escrever novas linhas
-    for idx, row in enumerate(ocr_rows, start=start_row):
-        ws[f"A{idx}"] = row.get("datarececao", "")
-        ws[f"B{idx}"] = row.get("datacolheita", "")
-        ws[f"C{idx}"] = row.get("referencia", "")
-        ws[f"D{idx}"] = row.get("hospedeiro", "")
-        ws[f"E{idx}"] = row.get("tipo", "")
-        ws[f"F{idx}"] = row.get("zona", "")
-        ws[f"G{idx}"] = row.get("responsavelamostra", "")
-        ws[f"H{idx}"] = row.get("responsavelcolheita", "")
-        ws[f"I{idx}"] = ""
-        ws[f"K{idx}"] = row.get("procedure", "")
-        ws[f"L{idx}"] = row.get("datarequerido", "")
+        wb = load_workbook(out_path)
+        ws = wb[sheet_name]
 
-        if row.get("WasCorrected") or row.get("ValidationStatus") in ("review", "unknown", "no_list"):
-            ws[f"D{idx}"].fill = yellow_fill
+        # escreve as linhas extraídas sem tocar nas fórmulas existentes
+        for i, row in enumerate(req_rows, start=start_row):
+            for j, value in enumerate(row, start=1):
+                ws.cell(row=i, column=j).value = value
 
-    base_name = os.path.splitext(os.path.basename(pdf_name))[0]
-    out_path = os.path.join(OUTPUT_DIR, f"{base_name}.xlsx")
-    wb.save(out_path)
-    print(f"🟢 Gravado (coluna de observações vazia): {out_path}")
-    return out_path
+        # validação opcional: destaca se o nº de amostras for diferente do esperado
+        if expected_count and len(req_rows) != expected_count:
+            from openpyxl.styles import PatternFill
+            fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+            ws["E1"].fill = fill
+            ws["E1"].value = f"Atenção: {len(req_rows)} amostras, esperado {expected_count}"
+
+        # metadata
+        if source_pdf:
+            ws["F1"].value = f"Origem: {source_pdf}"
+
+        wb.save(out_path)
+        print(f"🟢 Gravado com sucesso: {out_path}")
+        out_files.append(out_path)
+
+    return out_files
 
 
 # ----------------------------------------------------------------
@@ -448,6 +448,7 @@ def parse_xylella_from_result(result_json, pdf_path, txt_path=None):
     print(f"📂 Ficheiros guardados em: {OUTPUT_DIR}")
 
     return all_samples, num_blocks
+
 
 
 
