@@ -3,6 +3,7 @@
 # Compatível com Streamlit Cloud (usa secrets automaticamente)
 
 import os, requests
+from pdf2image import convert_from_path
 
 # Lê as variáveis diretamente do ambiente Streamlit
 AZURE_KEY = os.environ.get("AZURE_KEY")
@@ -14,6 +15,10 @@ if not AZURE_KEY or not AZURE_ENDPOINT:
 # URL base do serviço OCR (Azure Cognitive Services)
 READ_URL = f"{AZURE_ENDPOINT}/computervision/imageanalysis:analyze?api-version=2023-02-01-preview&features=read"
 
+def pdf_to_images(pdf_path):
+    """Converte um PDF em lista de imagens (PIL.Image)."""
+    return convert_from_path(pdf_path)
+    
 def extract_text_from_image_azure(image_path: str):
     """Envia a imagem para o endpoint OCR da Azure e retorna o resultado JSON."""
     headers = {
@@ -34,3 +39,5 @@ def get_analysis_result_azure(result_json):
     if "analyzeResult" in result_json:
         return result_json
     return {"analyzeResult": result_json}
+
+
