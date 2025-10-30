@@ -2,6 +2,10 @@ import streamlit as st
 import tempfile, os, zipfile, traceback
 from datetime import datetime
 from pathlib import Path
+
+# ⚙️ Garante que o core grava dentro da pasta temporária
+os.environ["OUTPUT_DIR"] = tempfile.mkdtemp()
+
 from xylella_processor import process_pdf, write_to_template
 
 # ───────────────────────────────────────────────
@@ -37,7 +41,7 @@ if start:
 
                 base = os.path.splitext(up.name)[0]
 
-                # 🔧 Garante que o core_xylella usa a pasta temporária correta
+                # 🔧 Atualiza o OUTPUT_DIR do core para este ciclo
                 os.environ["OUTPUT_DIR"] = outdir
 
                 # 🔍 Processa o PDF (OCR + parser)
