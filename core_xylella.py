@@ -172,37 +172,6 @@ def split_if_multiple_requisicoes(full_text: str):
     return blocos
 
 
-def split_if_multiple_requisicoes(full_text: str):
-    """Divide o texto OCR em blocos distintos, um por requisição DGAV→SGS."""
-    text = re.sub(r"[ \t]+", " ", full_text)
-    text = re.sub(r"\n{2,}", "\n", text)
-    pattern = re.compile(
-        r"(?:PROGRAMA\s+NACIONAL\s+DE\s+PROSPE[ÇC][AÃ]O\s+DE\s+PRAGAS\s+DE\s+QUARENTENA)",
-        re.IGNORECASE,
-    )
-
-    marks = [m.start() for m in pattern.finditer(text)]
-    if not marks:
-        print("🔍 Nenhum cabeçalho encontrado — tratado como 1 requisição.")
-        return [text]
-    if len(marks) == 1:
-        print("🔍 Apenas 1 cabeçalho — 1 requisição detectada.")
-        return [text]
-
-    marks.append(len(text))
-    blocos = []
-    for i in range(len(marks) - 1):
-        start = max(0, marks[i] - 200)           # padding antes
-        end = min(len(text), marks[i + 1] + 200) # padding depois
-        bloco = text[start:end].strip()
-        if len(bloco) > 400:
-            blocos.append(bloco)
-        else:
-            print(f"⚠️ Bloco {i+1} demasiado pequeno ({len(bloco)} chars) — possivelmente OCR truncado.")
-
-    print(f"🔍 Detetadas {len(blocos)} requisições distintas (por cabeçalho).")
-    return blocos
-
 def extract_context_from_text(full_text: str):
     """Extrai informações gerais da requisição (zona, DGAV, datas, nº de amostras)."""
     ctx = {}
@@ -517,33 +486,12 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
       • Data/hora de processamento (K1:L1)
       • Conversão automática de datas
       • Validação de campos obrigatórios
-      • Fórmula Data requerido = Data receção + 30 dias
+      • Fórmula Data requerido = Data Receção + 30 dias
     """
-  
-    import os
     from openpyxl import load_workbook
     from openpyxl.styles import PatternFill, Font, Alignment
     from datetime import datetime
     import os
-
-    # ⚙️ Força sincronização com o ambiente (caso o app.py tenha atualizado)
-    global OUTPUT_DIR
-    OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", OUTPUT_DIR))
-    OUTPUT_DIR.mkdir(exist_ok=True)
-    def is_valid_date(value: str) -> bool:
-        try:
-            if isinstance(value, datetime):
-                return True
-            datetime.strptime(str(value).strip(), "%d/%m/%Y")
-            return True
-        except Exception:
-            return False
-
-    def to_datetime(value: str):
-        try:
-            return datetime.strptime(str(value).strip(), "%d/%m/%Y")
-        except Exception:
-            return None
 
     if not ocr_rows:
         print(f"⚠️ {out_name}: sem linhas para escrever.")
@@ -563,17 +511,29 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
     gray_fill = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")
     bold_center = Font(bold=True, color="000000")
 
-    # 🧹 Limpar linhas anteriores
+    def is_valid_date(value: str) -> bool:
+        try:
+            if isinstance(value, datetime):
+                return True
+            datetime.strptime(str(value).strip(), "%d/%m/%Y")
+            return True
+        except Exception:
+            return False
+
+    def to_datetime(value: str):
+        try:
+            return datetime.strptime(str(value).strip(), "%d/%m/%Y")
+        except Exception:
+            return None
+
+    # 🧹 Limpar linhas anteriores (mantém apenas cabeçalhos)
     for row in range(start_row, 201):
         for col in range(1, 13):
-            cell = ws.cell(row=row, column=col)
-            cell.value = None
-            cell.fill = PatternFill(fill_type=None)
-        ws[f"I{row}"].value = None
+            ws.cell(row=row, column=col).value = None
+            ws.cell(row=row, column=col).fill = PatternFill(fill_type=None)
 
     # ✍️ Escrever novas linhas
     for idx, row in enumerate(ocr_rows, start=start_row):
-        # --- Datas ---
         rececao_val = row.get("datarececao", "")
         colheita_val = row.get("datacolheita", "")
 
@@ -592,7 +552,6 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
             cell_B.value = colheita_val
             cell_B.fill = red_fill
 
-        # --- Restantes colunas ---
         ws[f"C{idx}"] = row.get("referencia", "")
         ws[f"D{idx}"] = row.get("hospedeiro", "")
         ws[f"E{idx}"] = row.get("tipo", "")
@@ -601,43 +560,33 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
         ws[f"H{idx}"] = row.get("responsavelcolheita", "")
         ws[f"I{idx}"] = ""  # Observações
         ws[f"K{idx}"] = row.get("procedure", "")
+        ws[f"L{idx}"] = f"=A{idx}+30"  # Data requerido = Data receção + 30 dias
 
-        # Fórmula Data Requerido = Data Receção + 30 dias
-        ws[f"L{idx}"] = f"=A{idx}+30"
-
-        # --- Campos obrigatórios (A→G) ---
-        mandatory_cols = ["A", "B", "C", "D", "E", "F", "G"]
-        for col in mandatory_cols:
+        # Campos obrigatórios
+        for col in ["A", "B", "C", "D", "E", "F", "G"]:
             cell = ws[f"{col}{idx}"]
             if not cell.value or str(cell.value).strip() == "":
                 cell.fill = red_fill
 
-        # --- Destaque amarelo (corrigido / revisão) ---
+        # Destaque amarelo (revisão)
         if row.get("WasCorrected") or row.get("ValidationStatus") in ("review", "unknown", "no_list"):
             ws[f"D{idx}"].fill = yellow_fill
 
-    # ────────────────────────────────────────────────────────────────
-    # 📊 Validação E1:F1
-    # ────────────────────────────────────────────────────────────────
+    # ────────────────────────────────────────────────
+    # 📊 Validação E1:F1 — Nº Amostras declaradas / processadas
+    # ────────────────────────────────────────────────
     processed = len(ocr_rows)
-    expected = expected_count
+    expected = expected_count if expected_count is not None else "?"
     ws.merge_cells("E1:F1")
     cell = ws["E1"]
-
-    val_str = f"{expected if expected is not None else '?'} / {processed}"
-    cell.value = f"Nº Amostras: {val_str}"
+    cell.value = f"Nº Amostras: {expected} / {processed}"
     cell.font = bold_center
     cell.alignment = Alignment(horizontal="center", vertical="center")
+    cell.fill = green_fill if expected == processed else red_fill
 
-    if expected is not None and expected != processed:
-        cell.fill = red_fill
-        print(f"⚠️ Diferença de nº de amostras: esperado={expected}, processado={processed}")
-    else:
-        cell.fill = green_fill
-
-    # ────────────────────────────────────────────────────────────────
-    # 🗂️ Origem do PDF (G1:J1)
-    # ────────────────────────────────────────────────────────────────
+    # ────────────────────────────────────────────────
+    # 🗂️ Origem do PDF
+    # ────────────────────────────────────────────────
     ws.merge_cells("G1:J1")
     pdf_orig_name = os.path.basename(source_pdf) if source_pdf else "(desconhecida)"
     ws["G1"].value = f"Origem: {pdf_orig_name}"
@@ -645,9 +594,9 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
     ws["G1"].alignment = Alignment(horizontal="left", vertical="center")
     ws["G1"].fill = gray_fill
 
-    # ────────────────────────────────────────────────────────────────
-    # 🕒 Data/hora de processamento (K1:L1)
-    # ────────────────────────────────────────────────────────────────
+    # ────────────────────────────────────────────────
+    # 🕒 Data/hora de processamento
+    # ────────────────────────────────────────────────
     ws.merge_cells("K1:L1")
     timestamp = datetime.now().strftime("%d/%m/%Y %H:%M")
     ws["K1"].value = f"Processado em: {timestamp}"
@@ -659,9 +608,10 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
     base_name = os.path.splitext(os.path.basename(out_name))[0]
     out_path = os.path.join(OUTPUT_DIR, f"{base_name}.xlsx")
     wb.save(out_path)
-    print(f"🟢 Gravado (com validação E1/F1, origem G1:J1 e timestamp K1:L1): {out_path}")
+    print(f"🟢 Gravado com sucesso: {out_path}")
 
     return out_path
+
 # ───────────────────────────────────────────────
 # OCR + Parsing (devolve listas por requisição)
 # ───────────────────────────────────────────────
@@ -871,6 +821,7 @@ def process_pdf_sync(pdf_path: str):
     return rows_per_req
 
 pass
+
 
 
 
