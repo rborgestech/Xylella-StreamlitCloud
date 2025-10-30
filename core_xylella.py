@@ -331,7 +331,7 @@ def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, An
 def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path: str | None) -> List[List[Dict[str, Any]]]:
     """
     Divide o documento em blocos (requisições) e devolve uma lista onde cada elemento
-    é a lista de amostras dessa requisição.
+    é a lista de amostras dessa requisição. Usa atribuição EXCLUSIVA de tabelas por bloco.
     """
     # Texto global
     if txt_path and os.path.exists(txt_path):
@@ -352,48 +352,66 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
 
     # Múltiplas requisições — segmentar por cabeçalhos
     blocos = split_if_multiple_requisicoes(full_text)
-    out: List[List[Dict[str, Any]]] = []
+    num_blocos = len(blocos)
+    out: List[List[Dict[str, Any]]] = [[] for _ in range(num_blocos)]
 
-    # Pré-extrair todas as refs existentes nas tabelas (para cruzamento leve)
-    all_table_texts = []
-    for t in all_tables:
-        table_text = " ".join(c.get("content", "") for c in t.get("cells", []))
-        all_table_texts.append((t, table_text))
-
+    # Extrair refs por bloco
+    refs_por_bloco: List[List[str]] = []
     for i, bloco in enumerate(blocos, start=1):
-        print(f"\n🔹 A processar requisição {i}/{len(blocos)}...")
+        refs_bloco = re.findall(
+            r"\b\d{1,3}/[A-Z]{0,2}/DGAV(?:-[A-Z0-9/]+)?|\b\d{2,4}/\d{2,4}/[A-Z0-9\-]+",
+            bloco, re.I
+        )
+        refs_bloco = [r.strip() for r in refs_bloco if len(r.strip()) > 4]
+        print(f"   ↳ Bloco {i}: {len(refs_bloco)} referências detectadas")
+        refs_por_bloco.append(refs_bloco)
+
+    # Pré-calcular texto de cada tabela
+    table_texts = [" ".join(c.get("content", "") for c in t.get("cells", [])) for t in all_tables]
+
+    # ATRIBUIÇÃO EXCLUSIVA de tabelas a blocos
+    assigned_to: List[int] = [-1] * len(all_tables)  # -1 = não atribuído
+    for ti, ttxt in enumerate(table_texts):
+        # conta matches por bloco
+        scores = []
+        for bi, refs in enumerate(refs_por_bloco):
+            if not refs:
+                scores.append(0)
+                continue
+            cnt = sum(1 for r in refs if r in ttxt)
+            scores.append(cnt)
+        best = max(scores) if scores else 0
+        if best > 0:
+            # atribui ao bloco com mais matches; em empate, bloco mais cedo
+            bi = scores.index(best)
+            assigned_to[ti] = bi
+
+    # fallback: tabelas não atribuídas vão para o bloco mais “provável” (distribuição uniforme)
+    unassigned = [i for i, b in enumerate(assigned_to) if b < 0]
+    if unassigned:
+        # distribuir por ordem, para não concentrar num bloco
+        for k, ti in enumerate(unassigned):
+            assigned_to[ti] = k % num_blocos
+
+    # Construir amostras por bloco com base na atribuição exclusiva
+    for bi in range(num_blocos):
         try:
-            context = extract_context_from_text(bloco)
-
-            # refs usadas para filtrar tabelas do Azure para este bloco
-            refs_bloco = re.findall(
-                r"\b\d{1,3}/[A-Z]{0,2}/DGAV(?:-[A-Z0-9/]+)?|\b\d{2,4}/\d{2,4}/[A-Z0-9\-]+",
-                bloco, re.I
-            )
-            refs_bloco = [r.strip() for r in refs_bloco if len(r.strip()) > 4]
-            print(f"   ↳ {len(refs_bloco)} referências detetadas no bloco {i}")
-
-            tables_filtradas = []
-            if refs_bloco:
-                for t, txt in all_table_texts:
-                    if any(ref in txt for ref in refs_bloco):
-                        tables_filtradas.append(t)
-
-            # fallback: se não consegui filtrar, usa todas as tabelas (evita perder amostras)
+            context = extract_context_from_text(blocos[bi])
+            tables_filtradas = [all_tables[ti] for ti in range(len(all_tables)) if assigned_to[ti] == bi]
             if not tables_filtradas:
+                print(f"⚠️ Bloco {bi+1}: sem tabelas atribuídas (usar todas como fallback).")
                 tables_filtradas = all_tables
 
             local = {"analyzeResult": {"tables": tables_filtradas}}
-            amostras = parse_xylella_tables(local, context, req_id=i)
-            if amostras:
-                out.append(amostras)
-            else:
-                print(f"⚠️ Requisição {i} sem amostras válidas (possível OCR incompleto).")
-
+            amostras = parse_xylella_tables(local, context, req_id=bi+1)
+            out[bi] = amostras or []
         except Exception as e:
-            print(f"❌ Erro na requisição {i}: {e}")
+            print(f"❌ Erro no bloco {bi+1}: {e}")
+            out[bi] = []
 
-    print(f"\n🏁 Concluído: {len(out)} requisições com amostras extraídas.")
+    # Remover blocos vazios no fim (mantém ordenação)
+    out = [req for req in out if req]
+    print(f"\n🏁 Concluído: {len(out)} requisições com amostras extraídas (atribuição exclusiva).")
     return out
 
 # ───────────────────────────────────────────────
@@ -577,3 +595,4 @@ def process_pdf_sync(pdf_path: str) -> List[List[Dict[str, Any]]]:
     total_amostras = sum(len(r) for r in rows_per_req)
     print(f"✅ {base}: {len(rows_per_req)} requisições, {total_amostras} amostras extraídas.")
     return rows_per_req
+
