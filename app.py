@@ -56,8 +56,10 @@ if start:
                 # nome base do ficheiro
                 base = os.path.splitext(up.name)[0]
 
-                # escreve ficheiros Excel (1 por requisição)
-                write_to_template(rows, os.path.join(outdir, base), source_pdf=up.name)
+               # escreve 1 ficheiro por requisição
+                for i, req_rows in enumerate(rows, start=1):
+                    req_name = f"{base}_req{i}"
+                    write_to_template(req_rows, os.path.join(outdir, req_name), source_pdf=up.name)
 
                 # total de amostras e requisições
                 total_amostras = sum(len(r) for r in rows)
