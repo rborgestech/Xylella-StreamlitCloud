@@ -120,12 +120,13 @@ import re
 #  PARSER – deteção de amostras e campos
 # ───────────────────────────────────────────────────────────────
 def parse_with_regex(text: str):
-    """Extrai blocos de amostras e campos relevantes usando regex."""
+    """Extrai blocos de amostras e campos relevantes usando regex tolerante a OCR."""
+    text = re.sub(r"\s+", " ", text)  # normaliza espaços múltiplos
     padrao = re.compile(
-        r"(?P<data_rec>\d{2}/\d{2}/\d{4}).*?"
-        r"(?P<data_col>\d{2}/\d{2}/\d{4}).*?"
-        r"(?P<codigo>\d{3,}\/\d{4}\/[A-Z]{2,}|[0-9]{5,})?.*?"
-        r"(?P<especie>[A-Z][a-zç]+(?: [a-z]+){0,2}).*?"
+        r"(?P<data_rec>\d{1,2}\s*[/\-]?\s*\d{1,2}\s*[/\-]?\s*\d{2,4}).*?"
+        r"(?P<data_col>\d{1,2}\s*[/\-]?\s*\d{1,2}\s*[/\-]?\s*\d{2,4}).*?"
+        r"(?P<codigo>\d{2,5}\/\d{4}\/[A-Z]{2,}|[0-9]{5,})?.*?"
+        r"(?P<especie>[A-Z][a-zç]+(?: [a-zç]+){0,2}).*?"
         r"(?P<natureza>Simples|Composta).*?"
         r"(?P<zona>Isenta|Contida|Desconhec[ia]do|Zona [A-Za-z]+)?.*?"
         r"(?P<responsavel>DGAV|INIAV|INSA|Outros)?",
@@ -135,8 +136,8 @@ def parse_with_regex(text: str):
     resultados = []
     for m in padrao.finditer(text):
         resultados.append([
-            m.group("data_rec") or "",
-            m.group("data_col") or "",
+            m.group("data_rec").replace(" ", "") if m.group("data_rec") else "",
+            m.group("data_col").replace(" ", "") if m.group("data_col") else "",
             m.group("codigo") or "",
             m.group("especie") or "",
             m.group("natureza") or "",
@@ -144,6 +145,7 @@ def parse_with_regex(text: str):
             m.group("responsavel") or ""
         ])
     return resultados
+
 
 
 # ───────────────────────────────────────────────────────────────
@@ -495,6 +497,7 @@ def parse_xylella_from_result(result_json, pdf_path, txt_path=None):
     print(f"📂 Ficheiros guardados em: {OUTPUT_DIR}")
 
     return all_samples, num_blocks
+
 
 
 
