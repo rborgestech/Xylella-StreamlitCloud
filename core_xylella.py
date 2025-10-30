@@ -141,44 +141,35 @@ def detect_requisicoes(full_text: str):
 
 
 def split_if_multiple_requisicoes(full_text: str):
-    """
-    Divide o texto OCR em blocos distintos (requisições DGAV→SGS),
-    tolerando erros e quebras do OCR.
-    """
-    # Normaliza o texto (remove múltiplos espaços e capitaliza)
-    text = re.sub(r"\s+", " ", full_text, flags=re.M).upper()
-
-    # Padrão flexível: aceita variações e pequenas falhas no OCR
+    """Divide o texto OCR em blocos distintos, um por requisição DGAV→SGS."""
+    text = re.sub(r"[ \t]+", " ", full_text)
+    text = re.sub(r"\n{2,}", "\n", text)
     pattern = re.compile(
-        r"P\s*R\s*O\s*G\s*R\s*A\s*M\s*A\s+N\s*A\s*C\s*I\s*O\s*N\s*A\s*L\s+DE\s+PROSPE[CÇ]\s*AO\s+DE\s+PRAGAS\s+DE\s+QUARENTENA",
+        r"(?:PROGRAMA\s+NACIONAL\s+DE\s+PROSPE[ÇC][AÃ]O\s+DE\s+PRAGAS\s+DE\s+QUARENTENA)",
         re.IGNORECASE,
     )
 
-    # Encontrar todas as ocorrências
     marks = [m.start() for m in pattern.finditer(text)]
     if not marks:
         print("🔍 Nenhum cabeçalho encontrado — tratado como 1 requisição.")
-        return [full_text]
+        return [text]
     if len(marks) == 1:
         print("🔍 Apenas 1 cabeçalho — 1 requisição detectada.")
-        return [full_text]
+        return [text]
 
-    # Adiciona o fim do texto como limite final
     marks.append(len(text))
     blocos = []
-
     for i in range(len(marks) - 1):
-        start = max(0, marks[i] - 200)           # inclui parte do cabeçalho anterior
-        end = min(len(text), marks[i + 1] + 200)
+        start = max(0, marks[i] - 200)           # padding antes
+        end = min(len(text), marks[i + 1] + 200) # padding depois
         bloco = text[start:end].strip()
-        if len(bloco) > 300:
+        if len(bloco) > 400:
             blocos.append(bloco)
         else:
-            print(f"⚠️ Bloco {i+1} demasiado pequeno ({len(bloco)} chars).")
+            print(f"⚠️ Bloco {i+1} demasiado pequeno ({len(bloco)} chars) — possivelmente OCR truncado.")
 
     print(f"🔍 Detetadas {len(blocos)} requisições distintas (por cabeçalho).")
     return blocos
-
 
 def extract_context_from_text(full_text: str):
     """Extrai informações gerais da requisição (zona, DGAV, datas, nº de amostras)."""
@@ -845,6 +836,7 @@ def process_pdf_sync(pdf_path: str):
     return rows_per_req
 
 pass
+
 
 
 
