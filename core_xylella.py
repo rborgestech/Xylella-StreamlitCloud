@@ -661,10 +661,8 @@ def pdf_to_images(pdf_path):
 # ───────────────────────────────────────────────
 
 async def azure_ocr_page(session, img_bytes, page_idx, pdf_name, cache_dir):
-    """Envia imagem para OCR Azure (com cache e ignorando páginas vazias)."""
+    """OCR de uma página (Azure Form Recognizer)."""
     cache_file = os.path.join(cache_dir, f"{os.path.basename(pdf_name)}_p{page_idx}.json")
-
-    # Cache: evita chamadas repetidas
     if os.path.exists(cache_file):
         with open(cache_file, "r", encoding="utf-8") as f:
             result_json = json.load(f)
@@ -672,18 +670,16 @@ async def azure_ocr_page(session, img_bytes, page_idx, pdf_name, cache_dir):
     else:
         url = f"{AZURE_ENDPOINT}formrecognizer/documentModels/{MODEL_ID}:analyze?api-version=2023-07-31"
         headers = {"Ocp-Apim-Subscription-Key": AZURE_API_KEY, "Content-Type": "application/octet-stream"}
-
         async with session.post(url, data=img_bytes, headers=headers) as resp:
             if resp.status != 202:
-                txt = await resp.text()
-                print(f"❌ Erro Azure ({page_idx}): {txt}")
+                print(f"❌ Erro Azure ({page_idx}): {await resp.text()}")
                 return None
             result_url = resp.headers.get("Operation-Location")
 
-        # Polling até o OCR estar concluído
+        # Polling até OCR estar concluído
         for _ in range(20):
             await asyncio.sleep(2)
-            async with session.get(result_url, headers={"Ocp-Apim-Subscription-Key": AZURE_API_KEY}) as r:
+            async with session.get(result_url, headers=headers) as r:
                 j = await r.json()
                 if j.get("status") == "succeeded":
                     result_json = j
@@ -695,14 +691,19 @@ async def azure_ocr_page(session, img_bytes, page_idx, pdf_name, cache_dir):
         with open(cache_file, "w", encoding="utf-8") as f:
             json.dump(result_json, f, ensure_ascii=False)
 
-    # Ignorar páginas em branco
     text = extract_all_text(result_json)
     if len(text.strip()) < 100:
         return None
-
     tables = result_json.get("analyzeResult", {}).get("tables", [])
     return (page_idx, text, tables)
 
+def extract_all_text(result_json):
+    """Extrai texto completo de um resultado Azure OCR."""
+    lines = []
+    for page in result_json.get("analyzeResult", {}).get("pages", []):
+        for line in page.get("lines", []):
+            lines.append(line.get("content", ""))
+    return "\n".join(lines)
 # ───────────────────────────────────────────────
 #  OCR + PARSING COMPLETO PARA UM PDF
 # ───────────────────────────────────────────────
@@ -836,6 +837,7 @@ def process_pdf_sync(pdf_path: str):
     return rows_per_req
 
 pass
+
 
 
 
