@@ -46,3 +46,36 @@ def get_analysis_result_azure(result_json):
         return result_json
     return {"analyzeResult": result_json}
 
+def extract_all_text(pdf_path):
+    """
+    Extrai todo o texto de um PDF usando OCR Azure (se configurado)
+    ou OCR local como fallback.
+    """
+    from pdf2image import convert_from_path
+    import pytesseract
+
+    if not AZURE_KEY or not AZURE_ENDPOINT:
+        print("⚠️ Azure OCR não configurado — a usar OCR local.")
+        images = convert_from_path(pdf_path)
+        text = ""
+        for img in images:
+            text += pytesseract.image_to_string(img, lang="por")
+        return text
+
+    # Azure configurado — envia página a página
+    text_total = ""
+    images = convert_from_path(pdf_path)
+    for idx, img in enumerate(images, start=1):
+        tmp_path = f"/tmp/page_{idx}.jpg"
+        img.save(tmp_path, "JPEG")
+        try:
+            result = extract_text_from_image_azure(tmp_path)
+            data = get_analysis_result_azure(result)
+            for block in data.get("analyzeResult", {}).get("readResult", []):
+                for line in block.get("lines", []):
+                    text_total += line.get("text", "") + "\n"
+        except Exception as e:
+            print(f"⚠️ Erro OCR página {idx}: {e}")
+    return text_total
+
+
