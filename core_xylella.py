@@ -20,6 +20,8 @@ from pathlib import Path
 from datetime import datetime
 from openpyxl import load_workbook, Workbook
 from openpyxl.styles import PatternFill
+import pytesseract
+from azure_ocr import pdf_to_images, extract_text_from_image_azure, get_analysis_result_azure
 
 
 
@@ -446,6 +448,7 @@ def parse_xylella_from_result(result_json, pdf_path, txt_path=None):
     print(f"📂 Ficheiros guardados em: {OUTPUT_DIR}")
 
     return all_samples, num_blocks
+
 
 
 
