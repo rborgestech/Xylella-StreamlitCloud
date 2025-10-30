@@ -35,12 +35,10 @@ if start:
 
                 # processa PDF
                 rows = process_pdf(in_path)
-
-                # guarda o Excel no diretório de saída
-                base = os.path.splitext(up.name)[0]
+                os.environ["OUTPUT_DIR"] = outdir  # usar a pasta temporária
                 write_to_template(rows, os.path.join(outdir, base))
-
-                logs.append(f"✅ {up.name}: concluído ({len(rows)} amostras)")
+                total_amostras = sum(len(r) for r in rows)
+                logs.append(f"✅ {up.name}: concluído ({total_amostras} amostras, {len(rows)} requisições)")
                 ok += 1
             except Exception:
                 logs.append(f"❌ {up.name}:\n{traceback.format_exc()}")
