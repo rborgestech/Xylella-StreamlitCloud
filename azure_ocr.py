@@ -3,7 +3,6 @@
 # Compatível com Streamlit Cloud (usa secrets automaticamente)
 
 import os, requests
-from pdf2image import convert_from_path
 
 # Tenta ler as variáveis de ambiente (não falha se não existirem)
 AZURE_KEY = os.environ.get("AZURE_KEY")
