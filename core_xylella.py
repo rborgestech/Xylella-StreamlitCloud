@@ -258,7 +258,10 @@ def extract_context_from_text(full_text: str):
     # Nº de amostras declaradas (se existir no cabeçalho)
     flat = re.sub(r"\s+", " ", full_text)
     m_decl = re.search(r"N[º°]?\s*de\s*amostras(?:\s+neste\s+envio)?\s*[:\-]?\s*(\d{1,4})", flat, re.I)
-    ctx["declared_samples"] = int(m_decl.group(1)) if m_decl else None
+    try:
+        ctx["declared_samples"] = int(m_decl.group(1)) if m_decl else 0
+    except Exception:
+        ctx["declared_samples"] = 0
 
     return ctx
 
@@ -595,4 +598,5 @@ def process_pdf_sync(pdf_path: str) -> List[List[Dict[str, Any]]]:
     total_amostras = sum(len(r) for r in rows_per_req)
     print(f"✅ {base}: {len(rows_per_req)} requisições, {total_amostras} amostras extraídas.")
     return rows_per_req
+
 
