@@ -19,8 +19,21 @@ else:
 READ_URL = f"{AZURE_ENDPOINT}/computervision/imageanalysis:analyze?api-version=2023-02-01-preview&features=read"
 
 def pdf_to_images(pdf_path):
-    """Converte um PDF em lista de imagens (PIL.Image)."""
-    return convert_from_path(pdf_path)
+    """
+    Converte um PDF em lista de imagens (PIL.Image) sem precisar de poppler.
+    Usa PyMuPDF (fitz), compatível com Streamlit Cloud.
+    """
+    import fitz  # PyMuPDF
+    from PIL import Image
+    import io
+
+    images = []
+    with fitz.open(pdf_path) as doc:
+        for page in doc:
+            pix = page.get_pixmap(dpi=200)
+            img = Image.open(io.BytesIO(pix.tobytes("png")))
+            images.append(img)
+    return images
     
 def extract_text_from_image_azure(image_path: str):
     """Envia a imagem para o endpoint OCR da Azure e retorna o resultado JSON."""
