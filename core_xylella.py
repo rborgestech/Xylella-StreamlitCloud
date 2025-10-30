@@ -791,4 +791,5 @@ async def process_folder_async(input_dir):
     print(f"📂 Saída: {OUTPUT_DIR}")
     print("──────────────────────────────\n")
 
+pass
 
