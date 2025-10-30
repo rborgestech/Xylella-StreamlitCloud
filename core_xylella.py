@@ -428,51 +428,64 @@ def append_process_log(pdf_name: str, req_id: int, processed: int, expected: int
 # ───────────────────────────────────────────────────────────────
 # API — Escrever no TEMPLATE (um Excel por requisição)
 # ───────────────────────────────────────────────────────────────
-def write_to_template(rows_per_req: List[List[Dict[str, Any]]],
-                      out_base_path: str,
-                      expected_count: int | None = None,
-                      source_pdf: str | None = None) -> List[str]:
+def write_to_template(rows_per_req, out_base_path, expected_count=None, source_pdf=None):
     """
     Escreve listas de amostras (uma por requisição) no TEMPLATE SGS.
     Gera vários ficheiros: <out_base>_req1.xlsx, req2.xlsx, ...
-    Devolve a lista de caminhos gravados.
+    Se vier 0 amostras/0 requisições, cria 1 ficheiro vazio com metadados.
     """
-    if not rows_per_req:
-        print(f"⚠️ {out_base_path}: sem linhas para escrever.")
-        return []
+    from openpyxl import load_workbook
 
-    if not TEMPLATE_PATH.exists():
-        raise FileNotFoundError(f"Template não encontrado: {TEMPLATE_PATH}")
+    template_path = Path(os.environ.get("TEMPLATE_PATH", TEMPLATE_PATH))
+    if not template_path.exists():
+        raise FileNotFoundError(f"TEMPLATE não encontrado: {template_path}")
 
-    out_files: List[str] = []
+    output_dir = Path(os.environ.get("OUTPUT_DIR", OUTPUT_DIR))
+    output_dir.mkdir(exist_ok=True)
+
+    sheet_name = "Avaliação pré registo"
+    start_row = 6
     base_name = Path(out_base_path).stem
+    out_files = []
 
-    for idx, req_rows in enumerate(rows_per_req, start=1):
-        # copiar template para o OUTPUT_DIR (respeita env)
-        out_name = f"{base_name}_req{idx}.xlsx"
-        out_path = OUTPUT_DIR / out_name
+    # garante que temos pelo menos 1 “requisição” para gravar metadados
+    effective_reqs = rows_per_req if rows_per_req else [[]]
 
-        wb = load_workbook(TEMPLATE_PATH)
-        ws = wb.worksheets[0]
+    for idx, req_rows in enumerate(effective_reqs, start=1):
+        out_path = output_dir / f"{base_name}_req{idx}.xlsx"
+        wb = load_workbook(template_path)
+        if sheet_name not in wb.sheetnames:
+            wb.close()
+            raise KeyError(f"Folha '{sheet_name}' não encontrada no template.")
+        ws = wb[sheet_name]
 
-        # Começar em linha 6 (mantém cabeçalhos/validações do teu template)
-        start_row = 6
-        # Limpeza leve (opcional) — não toca em fórmulas de topo
-        for r in range(start_row, start_row + max(len(req_rows), 1) + 4):
+        # limpar zona de dados (sem tocar em cabeçalhos/fórmulas)
+        max_lines = max(len(req_rows), 1) + 5
+        for r in range(start_row, start_row + max_lines):
             for c in range(1, 13):
                 ws.cell(row=r, column=c).value = None
 
         # escrever linhas
         for ridx, row in enumerate(req_rows, start=start_row):
-            # datas
             rececao_val = row.get("datarececao", "")
             colheita_val = row.get("datacolheita", "")
-            A = ws[f"A{ridx}"]
-            B = ws[f"B{ridx}"]
-            A.value = _to_datetime(rececao_val) if _is_valid_date(rececao_val) else rececao_val
-            B.value = _to_datetime(colheita_val) if _is_valid_date(colheita_val) else colheita_val
-            if not _is_valid_date(rececao_val): A.fill = RED
-            if not _is_valid_date(colheita_val): B.fill = RED
+
+            def _is_valid_date(v):
+                try:
+                    datetime.strptime(str(v).strip(), "%d/%m/%Y")
+                    return True
+                except Exception:
+                    return False
+
+            def _to_dt(v):
+                try:
+                    return datetime.strptime(str(v).strip(), "%d/%m/%Y")
+                except Exception:
+                    return v
+
+            A = ws[f"A{ridx}"]; B = ws[f"B{ridx}"]
+            A.value = _to_dt(rececao_val) if _is_valid_date(rececao_val) else rececao_val
+            B.value = _to_dt(colheita_val) if _is_valid_date(colheita_val) else colheita_val
 
             ws[f"C{ridx}"] = row.get("referencia", "")
             ws[f"D{ridx}"] = row.get("hospedeiro", "")
@@ -484,44 +497,39 @@ def write_to_template(rows_per_req: List[List[Dict[str, Any]]],
             ws[f"K{ridx}"] = row.get("procedure", "XYLELLA")
             ws[f"L{ridx}"] = f"=A{ridx}+30"  # Data requerido
 
-            # obrigatórios A→G
-            for col in ("A","B","C","D","E","F","G"):
-                cell = ws[f"{col}{ridx}"]
-                if cell.value is None or str(cell.value).strip() == "":
-                    cell.fill = RED
-
-        # E1:F1 — validação de nº amostras
+        # contagem processada (mesmo 0)
         processed = len(req_rows)
+
+        # E1:F1 — validação nº amostras
         ws.merge_cells("E1:F1")
-        cell = ws["E1"]
-        val_str = f"{expected_count if expected_count is not None else '?'} / {processed}"
-        cell.value = f"Nº Amostras: {val_str}"
-        cell.font = BOLD
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-        cell.fill = (RED if (expected_count is not None and expected_count != processed) else GREEN)
+        ws["E1"].value = f"Nº Amostras: {(expected_count if expected_count is not None else '?')} / {processed}"
+        ws["E1"].font = Font(bold=True, color="000000")
+        ws["E1"].alignment = Alignment(horizontal="center", vertical="center")
+        ws["E1"].fill = (PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+                         if (expected_count is not None and expected_count != processed)
+                         else PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid"))
 
         # G1:J1 — origem
         ws.merge_cells("G1:J1")
         ws["G1"].value = f"Origem: {os.path.basename(source_pdf) if source_pdf else base_name}"
-        ws["G1"].font = ITALIC
+        ws["G1"].font = Font(italic=True, color="555555")
         ws["G1"].alignment = Alignment(horizontal="left", vertical="center")
-        ws["G1"].fill = GRAY
+        ws["G1"].fill = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")
 
         # K1:L1 — timestamp
         ws.merge_cells("K1:L1")
         ws["K1"].value = f"Processado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
-        ws["K1"].font = ITALIC
+        ws["K1"].font = Font(italic=True, color="555555")
         ws["K1"].alignment = Alignment(horizontal="right", vertical="center")
-        ws["K1"].fill = GRAY
+        ws["K1"].fill = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")
 
         wb.save(out_path)
         wb.close()
         print(f"🟢 Gravado (E1/F1, G1:J1, K1/L1): {out_path}")
-
-        append_process_log(source_pdf or base_name, idx, processed, expected_count, str(out_path), status="OK")
         out_files.append(str(out_path))
 
     return out_files
+
 
 # ───────────────────────────────────────────────────────────────
 # API — Processar PDF (OCR + parsing) → listas por requisição
@@ -602,3 +610,4 @@ if __name__ == "__main__":
     print("\n📂 Saídas geradas:")
     for p in files:
         print(" -", p)
+
