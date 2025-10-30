@@ -114,6 +114,53 @@ def write_to_template(ocr_rows, out_base_path, expected_count=None, source_pdf=N
 
     return out_files
 
+import re
+
+# ───────────────────────────────────────────────────────────────
+#  PARSER – deteção de amostras e campos
+# ───────────────────────────────────────────────────────────────
+def parse_with_regex(text: str):
+    """Extrai blocos de amostras e campos relevantes usando regex."""
+    padrao = re.compile(
+        r"(?P<data_rec>\d{2}/\d{2}/\d{4}).*?"
+        r"(?P<data_col>\d{2}/\d{2}/\d{4}).*?"
+        r"(?P<codigo>\d{3,}\/\d{4}\/[A-Z]{2,}|[0-9]{5,})?.*?"
+        r"(?P<especie>[A-Z][a-zç]+(?: [a-z]+){0,2}).*?"
+        r"(?P<natureza>Simples|Composta).*?"
+        r"(?P<zona>Isenta|Contida|Desconhec[ia]do|Zona [A-Za-z]+)?.*?"
+        r"(?P<responsavel>DGAV|INIAV|INSA|Outros)?",
+        re.S,
+    )
+
+    resultados = []
+    for m in padrao.finditer(text):
+        resultados.append([
+            m.group("data_rec") or "",
+            m.group("data_col") or "",
+            m.group("codigo") or "",
+            m.group("especie") or "",
+            m.group("natureza") or "",
+            m.group("zona") or "",
+            m.group("responsavel") or ""
+        ])
+    return resultados
+
+
+# ───────────────────────────────────────────────────────────────
+#  SPLIT – múltiplas requisições no mesmo PDF
+# ───────────────────────────────────────────────────────────────
+def split_if_multiple_requisicoes(text: str):
+    """Divide o texto em várias requisições (por cabeçalho de 'Data da Colheita')."""
+    indices = [m.start() for m in re.finditer(r"Data.?Colheita", text)]
+    if len(indices) <= 1:
+        return [text]
+
+    partes = []
+    for i in range(len(indices)):
+        start = indices[i]
+        end = indices[i + 1] if i + 1 < len(indices) else len(text)
+        partes.append(text[start:end])
+    return partes
 
 # ----------------------------------------------------------------
 #  Função principal: Processamento do PDF (síncrono)
@@ -448,6 +495,7 @@ def parse_xylella_from_result(result_json, pdf_path, txt_path=None):
     print(f"📂 Ficheiros guardados em: {OUTPUT_DIR}")
 
     return all_samples, num_blocks
+
 
 
 
