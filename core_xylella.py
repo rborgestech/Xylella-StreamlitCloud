@@ -503,11 +503,17 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
       • Validação de campos obrigatórios
       • Fórmula Data requerido = Data receção + 30 dias
     """
+  
+    import os
     from openpyxl import load_workbook
     from openpyxl.styles import PatternFill, Font, Alignment
     from datetime import datetime
     import os
 
+    # ⚙️ Força sincronização com o ambiente (caso o app.py tenha atualizado)
+    global OUTPUT_DIR
+    OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", OUTPUT_DIR))
+    OUTPUT_DIR.mkdir(exist_ok=True)
     def is_valid_date(value: str) -> bool:
         try:
             if isinstance(value, datetime):
@@ -842,6 +848,7 @@ def process_pdf_sync(pdf_path: str):
     return rows_per_req
 
 pass
+
 
 
 
