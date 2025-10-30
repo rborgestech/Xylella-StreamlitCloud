@@ -88,6 +88,9 @@ start = st.button("📄 Processar ficheiros de Input", type="primary", disabled=
 # ───────────────────────────────────────────────
 # Execução principal
 # ───────────────────────────────────────────────
+# ───────────────────────────────────────────────
+# Execução principal
+# ───────────────────────────────────────────────
 if start and uploads:
     st.session_state.processing = True
     try:
@@ -95,15 +98,15 @@ if start and uploads:
         all_excel = []
         all_stats = []
 
-        # Diretório persistente
         final_dir = Path.cwd() / "output_final"
         final_dir.mkdir(exist_ok=True)
 
         progress = st.progress(0)
         total = len(uploads)
+        log_area = st.empty()
 
         for i, up in enumerate(uploads, start=1):
-            st.markdown(f"### 📄 {up.name}")
+            log_area.markdown(f"### 📄 {up.name}")
             st.write("⏳ Início de processamento...")
 
             tmpdir = tempfile.mkdtemp()
@@ -123,7 +126,6 @@ if start and uploads:
 
             all_stats.append(stats)
 
-            # resumo PDF
             st.write(f"✅ {up.name}: {stats['req_count']} requisições, {stats['samples_total']} amostras.")
             for item in stats["per_req"]:
                 msg = f" • Requisição {item['req']}: {item['samples']} amostras → {Path(item['file']).name}"
@@ -132,19 +134,30 @@ if start and uploads:
                     msg += f" ⚠️ discrepância {sign}{item['diff']} (decl={item['expected']})"
                 st.write(msg)
 
-            # atualizar barra de progresso
             progress.progress(i / total)
-            time.sleep(0.3)
+            time.sleep(0.2)
 
-        if all_excel:
+        # 🔹 Verifica ficheiros válidos antes do ZIP
+        valid_files = [str(f) for f in all_excel if os.path.exists(f)]
+
+        if valid_files:
             zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
-            zip_bytes = build_zip(all_excel, all_stats)
-            st.success(f"🏁 Processamento concluído ({len(all_excel)} ficheiros Excel gerados).")
-            st.download_button("⬇️ Descarregar resultados (ZIP)", data=zip_bytes,
-                               file_name=zip_name, mime="application/zip")
+            zip_bytes = build_zip(valid_files, all_stats)
+
+            st.success(f"🏁 Processamento concluído ({len(valid_files)} ficheiros Excel gerados).")
+            st.download_button(
+                "⬇️ Descarregar resultados (ZIP)",
+                data=zip_bytes,
+                file_name=zip_name,
+                mime="application/zip"
+            )
+            st.balloons()
+        else:
+            st.warning("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
 
     finally:
         st.session_state.processing = False
+        st.experimental_rerun()
 
 else:
     st.info("💡 Carrega um ficheiro PDF e clica em **Processar ficheiros de Input**.")
