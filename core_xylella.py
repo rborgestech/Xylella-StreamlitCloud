@@ -414,7 +414,13 @@ def parse_xylella_from_result(result_json, pdf_name, txt_path=None):
 # Parser: dividir e extrair requisições
 # ───────────────────────────────────────────────
 def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path: str | None) -> List[List[Dict[str, Any]]]:
-    """Divide o documento em blocos (requisições) e extrai amostras por bloco."""
+    """
+    Divide o documento em blocos (requisições) e extrai amostras por bloco,
+    mostrando progresso detalhado no log.
+    """
+    import time
+    t0 = time.time()
+
     # Texto global do OCR
     if txt_path and os.path.exists(txt_path):
         full_text = Path(txt_path).read_text(encoding="utf-8")
@@ -440,14 +446,18 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
 
     # Documento com múltiplas requisições
     blocos = split_if_multiple_requisicoes(full_text)
-    print(f"📄 Documento dividido em {len(blocos)} requisições distintas.")
+    total = len(blocos)
+    print(f"📄 Documento dividido em {total} requisições distintas.\n")
 
     for i, bloco in enumerate(blocos, start=1):
         try:
+            start_time = time.time()
+            print(f"🔹 [{i}/{total}] A processar requisição {i}...")
+
             context = extract_context_from_text(bloco)
             refs_bloco = re.findall(r"\b\d{7,8}\b|\b\d{2,4}/\d{2,4}/[A-Z0-9\-]+\b", bloco, re.I)
 
-            # Filtra tabelas correspondentes a esta requisição
+            # Filtra tabelas correspondentes
             tables_filtradas = []
             for t in all_tables:
                 joined = " ".join(c.get("content", "") for c in t.get("cells", []))
@@ -462,14 +472,20 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
             amostras = parse_xylella_tables(local, context, req_id=i)
 
             if amostras:
-                print(f"✅ Requisição {i}: {len(amostras)} amostras.")
                 out.append(amostras)
+                print(f"✅ Requisição {i} concluída ({len(amostras)} amostras).")
             else:
                 print(f"⚠️ Requisição {i} sem amostras extraídas.")
+
+            elapsed = time.time() - start_time
+            pct = round(i / total * 100)
+            print(f"⏱️ {pct}% concluído ({elapsed:.1f}s desde início)\n")
 
         except Exception as e:
             print(f"❌ Erro na requisição {i}: {e}")
 
+    total_time = time.time() - t0
+    print(f"🏁 Fim do parsing — {len(out)} requisições processadas em {total_time:.1f}s.\n")
     return out
 
 # ───────────────────────────────────────────────
@@ -829,6 +845,7 @@ def process_pdf_sync(pdf_path: str):
     return rows_per_req
 
 pass
+
 
 
 
