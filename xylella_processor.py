@@ -1,54 +1,48 @@
 # xylella_processor.py
 # -*- coding: utf-8 -*-
 """
-Adaptador leve para a app Streamlit.
+Adaptador leve entre a app Streamlit e o core_xylella.py
 
 Responsabilidades:
-- Importa o motor real a partir de `core_xylella.py`;
-- Garante que o TEMPLATE Excel é encontrado por caminho relativo;
-- Expõe unicamente as funções esperadas pela UI:
+- Garante que o TEMPLATE Excel é encontrado;
+- Importa as funções reais do core;
+- Expõe uma API estável esperada pela UI:
     • process_pdf(pdf_path) -> rows
-    • write_to_template(ocr_rows, out_base_path, expected_count=None, source_pdf=None)
+    • write_to_template(rows, pdf_name)
 """
 
 from __future__ import annotations
-
 from pathlib import Path
 import os
-import sys  # ✅ Import necessário para o sys.path.append
+import sys
 import importlib
-from typing import Any, Optional
-import requests
 import openpyxl
 
-# ───────────────────────────────────────────────────────────────
-# Localização robusta do TEMPLATE (ao lado deste ficheiro)
-# ───────────────────────────────────────────────────────────────
+# ───────────────────────────────────────────────
+# Localização robusta do TEMPLATE
+# ───────────────────────────────────────────────
 TEMPLATE_FILENAME = "TEMPLATE_PXF_SGSLABIP1056.xlsx"
 TEMPLATE_PATH = Path(__file__).with_name(TEMPLATE_FILENAME)
 
 if not TEMPLATE_PATH.exists():
-    print("⚠️ TEMPLATE não encontrado localmente — a criar versão mínima (dummy)...")
+    print("⚠️ TEMPLATE não encontrado — a criar dummy temporário.")
     try:
         wb = openpyxl.Workbook()
         ws = wb.active
-        ws.title = "Amostras"
+        ws.title = "Avaliação pré registo"
         ws.append(["Data Receção", "Data Colheita", "Código", "Espécie", "Natureza", "Zona", "Responsável"])
         wb.save(TEMPLATE_PATH)
         print(f"✅ TEMPLATE dummy criado em {TEMPLATE_PATH}")
     except Exception as e:
-        raise FileNotFoundError(f"❌ Não foi possível criar o TEMPLATE: {e}")
+        raise FileNotFoundError(f"❌ Falha ao criar TEMPLATE: {e}")
 
-# Exporta o caminho final para o ambiente (para o core usar)
 os.environ.setdefault("TEMPLATE_PATH", str(TEMPLATE_PATH))
 print(f"📂 TEMPLATE_PATH final: {TEMPLATE_PATH}")
 
-# ───────────────────────────────────────────────────────────────
-# Import do motor (core)
-# ───────────────────────────────────────────────────────────────
-# Garante que o diretório onde está o core é visível
+# ───────────────────────────────────────────────
+# Importa o core real
+# ───────────────────────────────────────────────
 sys.path.append(str(Path(__file__).resolve().parent))
-
 _CORE_MODULE_NAME = "core_xylella"
 
 try:
@@ -56,74 +50,40 @@ try:
 except Exception as e:
     raise ImportError(
         f"❌ Não foi possível importar '{_CORE_MODULE_NAME}'. "
-        f"Verifica se o ficheiro 'core_xylella.py' existe e está no mesmo diretório. "
-        f"Detalhe: {e!r}"
+        f"Verifica se 'core_xylella.py' existe e compila. Detalhe: {e!r}"
     )
 
-# Verificações suaves de interface
-if not hasattr(core, "process_pdf"):
-    raise AttributeError(
-        "O módulo 'core_xylella' não expõe a função 'process_pdf(pdf_path)'."
-    )
+# Mapeia funções reais (com nomes adaptados)
+if not hasattr(core, "process_pdf_sync"):
+    raise AttributeError("O core_xylella.py não contém a função 'process_pdf_sync(pdf_path)'.")
+
 if not hasattr(core, "write_to_template"):
-    raise AttributeError(
-        "O módulo 'core_xylella' não expõe a função "
-        "'write_to_template(ocr_rows, out_base_path, expected_count=None, source_pdf=None)'."
-    )
+    raise AttributeError("O core_xylella.py não contém a função 'write_to_template(rows, pdf_name)'.")
 
-_core_process_pdf = getattr(core, "process_pdf")
+_core_process_pdf = getattr(core, "process_pdf_sync")
 _core_write_to_template = getattr(core, "write_to_template")
 
-# ───────────────────────────────────────────────────────────────
-# API pública para a app Streamlit
-# ───────────────────────────────────────────────────────────────
-def process_pdf(pdf_path: str) -> Any:
-    """
-    Recebe o caminho para 1 PDF e devolve 'rows' (estrutura compreendida pelo core).
-    """
-    pdf_path = str(pdf_path)
-    if not Path(pdf_path).exists():
-        raise FileNotFoundError(f"PDF não encontrado: {pdf_path}")
+# ───────────────────────────────────────────────
+# API pública usada pela app Streamlit
+# ───────────────────────────────────────────────
+def process_pdf(pdf_path: str):
+    """Recebe o caminho para um PDF e devolve as linhas (rows)."""
     return _core_process_pdf(pdf_path)
 
 
-def write_to_template(
-    ocr_rows: Any,
-    out_base_path: str,
-    expected_count: Optional[int] = None,
-    source_pdf: Optional[str] = None,
-) -> Any:
+def write_to_template(rows, out_base_path, expected_count=None, source_pdf=None):
     """
-    Grava 1+ ficheiros Excel com base no TEMPLATE.
-    - out_base_path: caminho base sem extensão. O core deve gravar:
-         <out_base_path>_req1.xlsx, _req2.xlsx, ...
-    - expected_count: nº de requisições esperado (opcional). Pode ser usado para validação.
-    - source_pdf: nome do PDF de origem (opcional, útil para metadata/log).
+    Redireciona para a função real no core.
+    Ignora parâmetros não usados (expected_count, source_pdf).
     """
-    base = Path(out_base_path)
-    base.parent.mkdir(parents=True, exist_ok=True)
+    return _core_write_to_template(rows, out_base_path)
 
-    # Garante que o TEMPLATE existe (melhor falhar cedo)
-    if not TEMPLATE_PATH.exists():
-        raise FileNotFoundError(
-            f"TEMPLATE não encontrado em {TEMPLATE_PATH}. "
-            f"Confirma que '{TEMPLATE_FILENAME}' está ao lado do 'xylella_processor.py'."
-        )
 
-    # A maioria dos cores lê TEMPLATE_PATH do ambiente (já definido acima)
-    return _core_write_to_template(
-        ocr_rows,
-        base.as_posix(),
-        expected_count=expected_count,
-        source_pdf=source_pdf,
-    )
-
-# ───────────────────────────────────────────────────────────────
-# Execução direta para teste rápido (opcional)
-#   Ex.: python xylella_processor.py <ficheiro.pdf>
-# ───────────────────────────────────────────────────────────────
+# ───────────────────────────────────────────────
+# Execução direta (teste local)
+# ───────────────────────────────────────────────
 if __name__ == "__main__":
-    import zipfile, datetime, traceback
+    import sys, traceback
 
     if len(sys.argv) < 2:
         print("Uso: python xylella_processor.py <ficheiro.pdf>")
@@ -132,8 +92,7 @@ if __name__ == "__main__":
     pdf = sys.argv[1]
     try:
         rows = process_pdf(pdf)
-        out_base = Path(pdf).with_suffix("")  # sem .pdf
-        write_to_template(rows, str(out_base), expected_count=None, source_pdf=Path(pdf).name)
+        write_to_template(rows, Path(pdf).stem)
         print("✅ Processado com sucesso.")
     except Exception:
         print("❌ Erro ao processar:\n" + traceback.format_exc())
