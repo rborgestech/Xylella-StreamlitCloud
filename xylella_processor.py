@@ -43,7 +43,7 @@ def process_pdf_with_stats(pdf_path: str):
         created_files = []
         base_name = Path(pdf_path).stem
 
-        # 🔒 Sanitize do nome base (sem espaços, acentos, etc.)
+        # 🔒 Nome seguro (sem espaços nem acentos)
         safe_base_name = re.sub(r'[^\w\-_.]', '_', base_name)
 
         output_dir = Path(os.environ.get("OUTPUT_DIR", Path(__file__).parent / "Output"))
@@ -52,7 +52,8 @@ def process_pdf_with_stats(pdf_path: str):
         stats["req_count"] = len(rows_per_req)
 
         for i, req_rows in enumerate(rows_per_req, start=1):
-            if not req_rows:
+            if req_rows is None:
+                print(f"⚠️ Requisição {i} ignorada (None)")
                 continue
 
             out_name = f"{safe_base_name}.xlsx" if len(rows_per_req) == 1 else f"{safe_base_name}_req{i}.xlsx"
@@ -64,7 +65,6 @@ def process_pdf_with_stats(pdf_path: str):
 
             core.write_to_template(req_rows, out_path, expected_count=expected, source_pdf=pdf_path)
 
-            # 🔍 Verificar se o ficheiro foi mesmo gravado
             if not out_path.exists():
                 print(f"❌ Falha ao gravar: {out_path}")
                 continue
@@ -73,7 +73,7 @@ def process_pdf_with_stats(pdf_path: str):
             stats["samples_total"] += len(req_rows)
 
             discrepancy = None
-            if expected and expected != len(req_rows):
+            if expected != len(req_rows):
                 discrepancy = expected - len(req_rows)
 
             stats["per_req"].append({
@@ -93,7 +93,6 @@ def process_pdf_with_stats(pdf_path: str):
         print(f"❌ Erro a processar {pdf_path}: {e}")
         traceback.print_exc()
         return [], stats
-
 
 
 # ───────────────────────────────────────────────
