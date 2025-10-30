@@ -67,6 +67,11 @@ if start:
     st.success(f"🏁 Processamento concluído • {ok} ok, {fail} com erro.")
     with open(zip_path, "rb") as f:
         st.download_button("⬇️ Descarregar resultados (ZIP)", f, file_name=os.path.basename(zip_path))
+        # Mostrar OCR debug se existir
+        debug_files = [fn for fn in os.listdir(outdir) if fn.endswith("_ocr_debug.txt")]
+        if debug_files:
+            with open(os.path.join(outdir, debug_files[0]), "rb") as f:
+                st.download_button("📄 Ver texto OCR extraído", f, file_name=debug_files[0])
 
     with st.expander("🧾 Registo de execução"):
         st.code("\n".join(logs) if logs else "Sem logs a apresentar.")
