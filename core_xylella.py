@@ -745,6 +745,52 @@ async def process_pdf_async(pdf_path, session):
 
     return rows
 
+
+# ───────────────────────────────────────────────
+#  PROCESSAMENTO ASSÍNCRONO DE TODOS OS PDFs
+# ───────────────────────────────────────────────
+
+async def process_folder_async(input_dir):
+    """
+    Processa todos os PDFs de forma assíncrona e gera um resumo final
+    com tempos médios, totais e nº de amostras extraídas.
+    """
+    pdfs = [os.path.join(input_dir, f) for f in os.listdir(input_dir) if f.lower().endswith(".pdf")]
+    if not pdfs:
+        print("ℹ️ Não há PDFs na pasta de entrada.")
+        return
+
+    start_time = asyncio.get_event_loop().time()
+    summary = []
+
+    async with aiohttp.ClientSession() as session:
+        tasks = [process_pdf_async(pdf, session) for pdf in pdfs]
+        results = await asyncio.gather(*tasks)
+
+    # Montar resumo de desempenho
+    total_time = asyncio.get_event_loop().time() - start_time
+    total_pdfs = len(pdfs)
+    total_rows = 0
+    total_time_ocr = 0
+    total_time_parse = 0
+
+    # Cada resultado é o "rows" retornado por process_pdf_async
+    for pdf, res in zip(pdfs, results):
+        if not res:
+            continue
+        total_rows += len(res)
+
+    avg_time_per_pdf = total_time / total_pdfs if total_pdfs else 0
+
+    print("\n📊 Resumo Final")
+    print("──────────────────────────────")
+    print(f"📄 PDFs processados: {total_pdfs}")
+    print(f"🧾 Total de amostras extraídas: {total_rows}")
+    print(f"⏱️ Tempo total: {timedelta(seconds=round(total_time))}")
+    print(f"⚙️ Tempo médio por PDF: {timedelta(seconds=round(avg_time_per_pdf))}")
+    print(f"📂 Saída: {OUTPUT_DIR}")
+    print("──────────────────────────────\n")
+
 # ───────────────────────────────────────────────
 # 12. EXECUTAR PROCESSAMENTO
 # ───────────────────────────────────────────────
