@@ -156,8 +156,26 @@ if start and uploads:
             st.warning("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
 
     finally:
+        # Garantir que os ficheiros existem antes de tentar reler
+        valid_files = [str(f) for f in all_excel if os.path.exists(f)]
+
+        if valid_files:
+            zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
+            zip_bytes = build_zip(valid_files, all_stats)
+            st.success(f"🏁 Processamento concluído ({len(valid_files)} ficheiros Excel gerados).")
+            st.download_button(
+                "⬇️ Descarregar resultados (ZIP)",
+                data=zip_bytes,
+                file_name=zip_name,
+                mime="application/zip"
+            )
+            st.balloons()
+        else:
+            st.warning("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
+
+        # Libertar estado, mas sem forçar reload imediato
         st.session_state.processing = False
-        st.experimental_rerun()
+
 
 else:
     st.info("💡 Carrega um ficheiro PDF e clica em **Processar ficheiros de Input**.")
