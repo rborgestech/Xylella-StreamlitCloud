@@ -35,8 +35,17 @@ if start:
 
                 # processa PDF
                 rows = process_pdf(in_path)
-                os.environ["OUTPUT_DIR"] = outdir  # usar a pasta temporária
+
+                # define diretório de saída para o core
+                os.environ["OUTPUT_DIR"] = outdir  
+
+                # nome base do ficheiro
+                base = os.path.splitext(up.name)[0]
+
+                # escreve ficheiros Excel
                 write_to_template(rows, os.path.join(outdir, base))
+
+                # total de amostras e requisições
                 total_amostras = sum(len(r) for r in rows)
                 logs.append(f"✅ {up.name}: concluído ({total_amostras} amostras, {len(rows)} requisições)")
                 ok += 1
