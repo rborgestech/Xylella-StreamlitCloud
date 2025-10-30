@@ -15,10 +15,12 @@ Funções principais expostas:
 
 from __future__ import annotations
 import os, re
+import tempfile
 from pathlib import Path
 from datetime import datetime
 from openpyxl import load_workbook, Workbook
 from openpyxl.styles import PatternFill
+
 
 
 
@@ -134,8 +136,8 @@ def process_pdf_sync(pdf_path):
     full_text = ""
 
     for i, img in enumerate(images, start=1):
-        tmp_png = f"/content/page_{i}.png"
-        img.save(tmp_png, "PNG")
+        tmp_path = os.path.join(tempfile.gettempdir(), f"page_{idx}.png")
+        img.save(tmp_path, "PNG")
         try:
             res_url = extract_text_from_image_azure(tmp_png)
             res_json = get_analysis_result_azure(res_url)
@@ -454,4 +456,5 @@ def parse_xylella_from_result(result_json, pdf_path, txt_path=None):
     print(f"📂 Ficheiros guardados em: {OUTPUT_DIR}")
 
     return all_samples, num_blocks
+
 
