@@ -5,12 +5,15 @@
 import os, requests
 from pdf2image import convert_from_path
 
-# Lê as variáveis diretamente do ambiente Streamlit
+# Tenta ler as variáveis de ambiente (não falha se não existirem)
 AZURE_KEY = os.environ.get("AZURE_KEY")
 AZURE_ENDPOINT = os.environ.get("AZURE_ENDPOINT")
 
+# Só avisa, não falha — permite fallback para OCR local
 if not AZURE_KEY or not AZURE_ENDPOINT:
-    raise ValueError("❌ Falta configurar AZURE_KEY e AZURE_ENDPOINT nos secrets do Streamlit.")
+    print("⚠️ AVISO: AZURE_KEY ou AZURE_ENDPOINT não configurados — OCR Azure será ignorado.")
+else:
+    print(f"🔗 Azure endpoint ativo: {AZURE_ENDPOINT}")
 
 # URL base do serviço OCR (Azure Cognitive Services)
 READ_URL = f"{AZURE_ENDPOINT}/computervision/imageanalysis:analyze?api-version=2023-02-01-preview&features=read"
@@ -21,6 +24,9 @@ def pdf_to_images(pdf_path):
     
 def extract_text_from_image_azure(image_path: str):
     """Envia a imagem para o endpoint OCR da Azure e retorna o resultado JSON."""
+    if not AZURE_KEY or not AZURE_ENDPOINT:
+        raise RuntimeError("⚠️ OCR Azure não configurado. Usa OCR local.")
+        
     headers = {
         "Ocp-Apim-Subscription-Key": AZURE_KEY,
         "Content-Type": "application/octet-stream"
@@ -39,5 +45,4 @@ def get_analysis_result_azure(result_json):
     if "analyzeResult" in result_json:
         return result_json
     return {"analyzeResult": result_json}
-
 
