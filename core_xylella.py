@@ -141,34 +141,54 @@ def detect_requisicoes(full_text: str):
 
 
 def split_if_multiple_requisicoes(full_text: str):
-    """Divide o texto OCR em blocos distintos, um por requisição DGAV→SGS."""
+    """
+    Divide o texto OCR em blocos distintos (requisições DGAV→SGS).
+    Se não encontrar cabeçalhos oficiais, tenta padrões alternativos (fallback).
+    """
     text = re.sub(r"[ \t]+", " ", full_text)
     text = re.sub(r"\n{2,}", "\n", text)
-    pattern = re.compile(
-        r"(?:PROGRAMA\s+NACIONAL\s+DE\s+PROSPE[ÇC][AÃ]O\s+DE\s+PRAGAS\s+DE\s+QUARENTENA)",
+
+    # 🧩 Padrão principal (cabeçalho completo)
+    pattern_main = re.compile(
+        r"PROGRAMA\s+NACIONAL\s+DE\s+PROSPE[ÇC][AÃ]O\s+DE\s+PRAGAS\s+DE\s+QUARENTENA",
         re.IGNORECASE,
     )
 
-    marks = [m.start() for m in pattern.finditer(text)]
+    marks = [m.start() for m in pattern_main.finditer(text)]
+
+    # 🚨 Fallback: tenta "Amostra colhida por DGAV" ou "Referência da amostra"
+    if len(marks) <= 1:
+        alt_pattern = re.compile(
+            r"AMOSTRA\S*\s+COLHIDA\S*\s+POR\s+DGAV|REFER[EÊ]NCIA\s+DA\s+AMOSTRA",
+            re.IGNORECASE,
+        )
+        alt_marks = [m.start() for m in alt_pattern.finditer(text)]
+        if len(alt_marks) > 1:
+            print(f"🔍 Usado fallback DGAV — {len(alt_marks)} blocos detetados.")
+            marks = alt_marks
+
+    # Se ainda assim nada
     if not marks:
         print("🔍 Nenhum cabeçalho encontrado — tratado como 1 requisição.")
         return [text]
+
     if len(marks) == 1:
-        print("🔍 Apenas 1 cabeçalho — 1 requisição detectada.")
+        print("🔍 Apenas 1 cabeçalho detectado — 1 requisição.")
         return [text]
 
+    # Divide o texto em blocos (com padding para incluir contexto)
     marks.append(len(text))
     blocos = []
     for i in range(len(marks) - 1):
-        start = max(0, marks[i] - 200)           # padding antes
-        end = min(len(text), marks[i + 1] + 200) # padding depois
+        start = max(0, marks[i] - 200)
+        end = min(len(text), marks[i + 1] + 200)
         bloco = text[start:end].strip()
         if len(bloco) > 400:
             blocos.append(bloco)
         else:
-            print(f"⚠️ Bloco {i+1} demasiado pequeno ({len(bloco)} chars) — possivelmente OCR truncado.")
+            print(f"⚠️ Bloco {i+1} demasiado pequeno ({len(bloco)} chars).")
 
-    print(f"🔍 Detetadas {len(blocos)} requisições distintas (por cabeçalho).")
+    print(f"🔍 Detetadas {len(blocos)} requisições distintas (padrão híbrido).")
     return blocos
 
 def extract_context_from_text(full_text: str):
@@ -837,6 +857,7 @@ def process_pdf_sync(pdf_path: str):
     return rows_per_req
 
 pass
+
 
 
 
