@@ -83,32 +83,43 @@ uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], acce
 if "processing" not in st.session_state:
     st.session_state.processing = False
 
-start = st.button("📄 Processar ficheiros de Input", type="primary", disabled=st.session_state.processing or not uploads)
+start = st.button("📄 Processar ficheiros de Input", type="primary",
+                  disabled=st.session_state.processing or not uploads)
 
 # ───────────────────────────────────────────────
 # Execução principal
 # ───────────────────────────────────────────────
 if start and uploads:
     st.session_state.processing = True
+    session_dir = tempfile.mkdtemp(prefix="xylella_session_")
+
     try:
         st.info("⚙️ A processar... isto pode demorar alguns segundos.")
         all_excel = []
 
-        final_dir = Path.cwd() / "output_final"
-        final_dir.mkdir(exist_ok=True)
-
         progress = st.progress(0)
         total = len(uploads)
 
+        # Validação de segurança: tipo e tamanho
+        for up in uploads:
+            if not up.name.lower().endswith(".pdf"):
+                st.error(f"❌ Ficheiro inválido: {up.name} (apenas PDFs são permitidos)")
+                st.stop()
+            if up.size > 20 * 1024 * 1024:  # 20 MB
+                st.error(f"⚠️ {up.name} excede o limite de 20 MB")
+                st.stop()
+
+        # Processamento dos ficheiros
         for i, up in enumerate(uploads, start=1):
             st.markdown(f"### 📄 {up.name}")
             st.write("⏳ Início de processamento...")
 
-            tmpdir = tempfile.mkdtemp()
+            tmpdir = tempfile.mkdtemp(dir=session_dir)
             tmp_path = os.path.join(tmpdir, up.name)
             with open(tmp_path, "wb") as f:
                 f.write(up.getbuffer())
 
+            # Diretório temporário isolado
             os.environ["OUTPUT_DIR"] = tmpdir
             created = process_pdf(tmp_path)
 
@@ -116,24 +127,33 @@ if start and uploads:
                 st.warning(f"⚠️ Nenhum ficheiro gerado para {up.name}")
             else:
                 for fp in created:
-                    dest = final_dir / Path(fp).name
-                    shutil.copy(fp, dest)
-                    all_excel.append(str(dest))
+                    all_excel.append(fp)
                     st.success(f"✅ {Path(fp).name} gravado")
 
             progress.progress(i / total)
-            time.sleep(0.3)
+            time.sleep(0.2)
 
+        # Criação do ZIP final
         if all_excel:
             zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
             zip_bytes = build_zip(all_excel)
             st.success(f"🏁 Processamento concluído ({len(all_excel)} ficheiros Excel gerados).")
             st.download_button("⬇️ Descarregar resultados (ZIP)", data=zip_bytes,
                                file_name=zip_name, mime="application/zip")
+            st.balloons()
         else:
             st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
 
+    except Exception as e:
+        st.error(f"❌ Erro inesperado: {e}")
+
     finally:
+        # Limpeza de ficheiros temporários
+        try:
+            shutil.rmtree(session_dir, ignore_errors=True)
+        except Exception as e:
+            st.warning(f"Não foi possível limpar ficheiros temporários: {e}")
+
         st.session_state.processing = False
 
 else:
