@@ -94,37 +94,79 @@ def process_pdf(pdf_path: str) -> List[str]:
 # ───────────────────────────────────────────────
 # Gerar ZIP com resultados e logs
 # ───────────────────────────────────────────────
+def _extract_summary_info(xlsx_path: str):
+    """Lê o cabeçalho E1:F1 do template para obter nº de amostras declaradas/processadas."""
+    declared, processed = None, None
+    try:
+        wb = load_workbook(xlsx_path, data_only=True)
+        ws = wb.worksheets[0]
+        val = str(ws["E1"].value or "")
+        m = re.search(r"(\d+)\s*/\s*(\d+)", val)
+        if m:
+            declared = int(m.group(1))
+            processed = int(m.group(2))
+    except Exception:
+        pass
+    return declared, processed
+
+
 def build_zip(file_paths: List[str]) -> bytes:
     """
     Constrói um ZIP em memória com:
       • ficheiros Excel processados (.xlsx)
       • pasta 'debug' com ficheiros OCR e logs
-      • summary.txt com resumo de execução
+      • summary.txt detalhado na raiz
     """
     mem = io.BytesIO()
     summary_lines = []
     summary_lines.append("🧾 RESUMO DE EXECUÇÃO\n")
-    summary_lines.append("──────────────────────────────\n")
+    summary_lines.append("──────────────────────────────────────────\n")
 
-    # Gerar resumo a partir dos nomes dos ficheiros
-    for fp in file_paths:
+    total_files = 0
+    total_samples = 0
+    discrepancias = 0
+
+    for fp in sorted(file_paths):
+        if not os.path.exists(fp):
+            continue
+
+        total_files += 1
         name = os.path.basename(fp)
-        if "_req" in name:
-            pdf_base = name.split("_req")[0]
-            summary_lines.append(f"{pdf_base}: ficheiro gerado → {name}")
+        declared, processed = _extract_summary_info(fp)
+        line = f"{name}: ficheiro gerado."
+
+        if processed:
+            total_samples += processed
+            if declared is not None:
+                diff = processed - declared
+                if diff != 0:
+                    line += f" ⚠️ discrepância ({processed} vs {declared})"
+                    discrepancias += 1
+                else:
+                    line += f" ({processed} amostras OK)"
+            else:
+                line += f" ({processed} amostras)"
         else:
-            summary_lines.append(f"{name}: ficheiro gerado.")
+            line += " (sem contagem detectada)"
 
-    summary_lines.append("\n📊 Total: {} ficheiro(s) Excel\n".format(len(file_paths)))
+        summary_lines.append(line)
 
-    # Criar o ZIP com tudo
+    # Totais finais
+    summary_lines.append("\n──────────────────────────────────────────")
+    summary_lines.append(f"📊 Total: {total_files} ficheiro(s) Excel")
+    summary_lines.append(f"🧪 Total de amostras processadas: {total_samples}")
+    if discrepancias:
+        summary_lines.append(f"⚠️ {discrepancias} ficheiro(s) com discrepâncias")
+    summary_lines.append("──────────────────────────────────────────\n")
+
+    # ZIP
     with zipfile.ZipFile(mem, "w", compression=zipfile.ZIP_DEFLATED) as z:
         # Excel
         for p in file_paths:
             if p and os.path.exists(p):
                 z.write(p, arcname=os.path.basename(p))
 
-        # Ficheiros de debug → dentro de pasta "debug/"
+        # Pasta debug
         for extra in OUTPUT_DIR.glob("*_ocr_debug.txt"):
             z.write(extra, arcname=f"debug/{os.path.basename(extra)}")
         for logf in OUTPUT_DIR.glob("process_log.csv"):
@@ -132,9 +174,9 @@ def build_zip(file_paths: List[str]) -> bytes:
         for summ in OUTPUT_DIR.glob("process_summary_*.txt"):
             z.write(summ, arcname=f"debug/{os.path.basename(summ)}")
 
-        # Adicionar summary.txt à raiz
+        # Summary detalhado
         z.writestr("summary.txt", "\n".join(summary_lines))
 
     mem.seek(0)
-    print(f"📦 ZIP criado: {len(file_paths)} ficheiros Excel + pasta debug + summary.txt.")
+    print(f"📦 ZIP criado: {total_files} ficheiros Excel, pasta debug, summary.txt.")
     return mem.read()
