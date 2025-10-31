@@ -29,7 +29,7 @@ def process_pdf(pdf_path: str) -> List[str]:
     """
     print(f"\n📄 A processar: {os.path.basename(pdf_path)}")
 
-    # Chamada ao core — devolve lista [{rows, expected}]
+    # Chamada ao core — devolve lista de listas (cada requisição = lista de amostras)
     req_results = core.process_pdf_sync(pdf_path)
     created_files = []
 
@@ -37,27 +37,23 @@ def process_pdf(pdf_path: str) -> List[str]:
         print(f"⚠️ Nenhuma requisição extraída de {os.path.basename(pdf_path)}.")
         return []
 
-    for i, req in enumerate(req_results, start=1):
-        rows = req.get("rows", [])
-        expected = req.get("expected", 0)
-
+    for i, rows in enumerate(req_results, start=1):
         if not rows:
             print(f"⚠️ Requisição {i}: sem amostras válidas.")
             continue
 
+        # tenta obter número esperado do contexto se existir
+        expected = None
+        if isinstance(rows, list) and len(rows) > 0 and "expected" in rows[0]:
+            expected = rows[0].get("expected")
+
         base = os.path.splitext(os.path.basename(pdf_path))[0]
         out_name = f"{base}_req{i}.xlsx" if len(req_results) > 1 else f"{base}.xlsx"
 
-        # Gera o ficheiro Excel no diretório configurado
+        # Gera o ficheiro Excel
         out_path = core.write_to_template(rows, out_name, expected_count=expected, source_pdf=pdf_path)
         if out_path:
             created_files.append(out_path)
-
-        # Log local
-        diff = len(rows) - (expected or 0)
-        if expected and diff != 0:
-            print(f"⚠️ Requisição {i}: {len(rows)} amostras vs {expected} esperadas (diferença {diff:+d}).")
-        else:
             print(f"✅ Requisição {i}: {len(rows)} amostras → {os.path.basename(out_path)}")
 
     print(f"🏁 {os.path.basename(pdf_path)}: {len(created_files)} ficheiro(s) Excel criados.")
