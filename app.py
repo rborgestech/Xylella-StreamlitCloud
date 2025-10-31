@@ -5,15 +5,19 @@ from pathlib import Path
 from datetime import datetime
 from xylella_processor import process_pdf, build_zip
 
+# ───────────────────────────────────────────────
+# Configuração base
+# ───────────────────────────────────────────────
 st.set_page_config(page_title="Xylella Processor", page_icon="🧪", layout="centered")
 st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# CSS — laranja SGS + estilos de status
+# CSS — tema SGS + animações
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
+/* Botão primário laranja SGS */
 .stButton > button[kind="primary"] {
   background-color: #CA4300 !important;
   border: 1px solid #CA4300 !important;
@@ -25,11 +29,15 @@ st.markdown("""
   background-color: #A13700 !important;
   border: 1px solid #A13700 !important;
 }
+
+/* File uploader */
 [data-testid="stFileUploader"] > div:first-child {
   border: 2px dashed #CA4300 !important;
   border-radius: 10px !important;
   padding: 1rem !important;
 }
+
+/* Caixas de estado */
 .success-box {
   background-color: #E8F5E9;
   border-left: 5px solid #2E7D32;
@@ -50,6 +58,41 @@ st.markdown("""
   padding: 0.7rem 1rem;
   border-radius: 6px;
   margin-bottom: 0.4rem;
+}
+
+/* Loader animado de "..." */
+.st-processing-dots::after {
+  content: ' ';
+  animation: dots 1.2s steps(4, end) infinite;
+}
+@keyframes dots {
+  0%, 20% { content: ''; }
+  40% { content: '.'; }
+  60% { content: '..'; }
+  80%, 100% { content: '...'; }
+}
+
+/* Botões lado a lado (final) */
+.button-row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+.stDownloadButton button, .stButton button {
+  background-color: #ffffff !important;
+  border: 1.5px solid #CA4300 !important;
+  color: #CA4300 !important;
+  font-weight: 600 !important;
+  border-radius: 8px !important;
+  padding: 0.6rem 1.2rem !important;
+  transition: all 0.2s ease-in-out;
+}
+.stDownloadButton button:hover, .stButton button:hover {
+  background-color: #CA4300 !important;
+  color: #ffffff !important;
+  border-color: #A13700 !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -88,10 +131,8 @@ elif st.session_state.processing:
     uploads = st.session_state.uploads
     total = len(uploads)
 
-    # 🔵 Informação inicial
     st.markdown('<div class="info-box">⏳ A processar ficheiros... aguarde até o processo terminar.</div>', unsafe_allow_html=True)
 
-    # Lista apenas de nomes (sem botão remover)
     with st.expander("📄 Ficheiros em processamento", expanded=True):
         for up in uploads:
             st.markdown(f"- {up.name}")
@@ -103,8 +144,10 @@ elif st.session_state.processing:
 
     try:
         for i, up in enumerate(uploads, start=1):
+            # Linha com animação "..."
             status_text.markdown(
-                f'<div class="info-box">📘 <b>A processar ficheiro {i}/{total}:</b> {up.name}</div>',
+                f'<div class="info-box">📘 <b>A processar ficheiro {i}/{total}</b>'
+                f'<span class="st-processing-dots"></span><br>{up.name}</div>',
                 unsafe_allow_html=True
             )
 
@@ -143,24 +186,6 @@ elif st.session_state.processing:
         if all_excel:
             st.session_state.all_excel = all_excel
             st.session_state.finished = True
-            st.markdown(
-                f'<div class="success-box">✅ Processamento concluído '
-                f'({len(all_excel)} ficheiro{"s" if len(all_excel)>1 else ""} Excel gerado{"s" if len(all_excel)>1 else ""}).</div>',
-                unsafe_allow_html=True
-            )
-
-            # 🔽 Mostra imediatamente o botão ZIP
-            zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
-            zip_bytes = build_zip(all_excel)
-
-            st.download_button(
-                "⬇️ Descarregar resultados (ZIP)",
-                data=zip_bytes,
-                file_name=zip_name,
-                mime="application/zip",
-                key="download_zip"
-            )
-
         else:
             st.warning("⚠️ Nenhum ficheiro Excel foi detetado.")
 
@@ -170,12 +195,8 @@ elif st.session_state.processing:
         shutil.rmtree(session_dir, ignore_errors=True)
         st.session_state.processing = False
 
-
 # ───────────────────────────────────────────────
-# Ecrã final — painel de sucesso com botões lado a lado (versão final)
-# ───────────────────────────────────────────────
-# ───────────────────────────────────────────────
-# Ecrã final — painel de sucesso + botões lado a lado (único)
+# Ecrã final — painel de sucesso + botões lado a lado
 # ───────────────────────────────────────────────
 if st.session_state.finished and st.session_state.all_excel:
     all_excel = st.session_state.all_excel
@@ -194,12 +215,10 @@ if st.session_state.finished and st.session_state.all_excel:
         unsafe_allow_html=True
     )
 
-    # Criar ZIP uma única vez agora
     zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
     with st.spinner("A preparar ficheiro ZIP..."):
         zip_bytes = build_zip(all_excel)
 
-    # Botões lado a lado
     st.markdown('<div class="button-row">', unsafe_allow_html=True)
     col1, col2 = st.columns([1,1])
     with col1:
