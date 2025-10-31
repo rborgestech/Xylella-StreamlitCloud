@@ -174,71 +174,34 @@ elif st.session_state.processing:
 # ───────────────────────────────────────────────
 # Ecrã final — painel de sucesso com botões lado a lado (versão final)
 # ───────────────────────────────────────────────
+# ───────────────────────────────────────────────
+# Ecrã final — painel de sucesso + botões lado a lado (único)
+# ───────────────────────────────────────────────
 if st.session_state.finished and st.session_state.all_excel:
     all_excel = st.session_state.all_excel
     num_files = len(all_excel)
 
-    # Painel verde de sucesso — apenas 1 mensagem
     st.markdown(
         f"""
         <div style="
-            background-color: #E8F5E9;
-            border-left: 6px solid #2E7D32;
-            border-radius: 10px;
-            padding: 1.5rem 2rem;
-            margin-top: 2rem;
-            text-align: center;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-            animation: fadeIn 0.6s ease-in-out;
+          background:#E8F5E9; border-left:6px solid #2E7D32; border-radius:10px;
+          padding:1.2rem 1.6rem; margin-top:1.4rem; text-align:center;
         ">
-            <h4 style="color:#2E7D32; font-weight:600; margin-bottom:0.4rem;">
-                ✅ Processamento concluído
-            </h4>
-            <p style="color:#2E7D32; font-size:1.05rem; margin:0;">
-                {num_files} ficheiro{'s' if num_files>1 else ''} Excel gerado{'s' if num_files>1 else ''}.
-            </p>
+          <h4 style="color:#2E7D32; font-weight:600; margin:.2rem 0 .3rem 0;">✅ Processamento concluído</h4>
+          <p style="color:#2E7D32; margin:.2rem 0 0 0;">{num_files} ficheiro{'s' if num_files>1 else ''} Excel gerado{'s' if num_files>1 else ''}.</p>
         </div>
-
-        <style>
-        @keyframes fadeIn {{
-            from {{ opacity: 0; transform: translateY(10px); }}
-            to {{ opacity: 1; transform: translateY(0); }}
-        }}
-        .button-row {{
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 1rem;
-            margin-top: 1.5rem;
-        }}
-        .stDownloadButton button, .stButton button {{
-            background-color: #ffffff !important;
-            border: 1.5px solid #CA4300 !important;
-            color: #CA4300 !important;
-            font-weight: 600 !important;
-            border-radius: 8px !important;
-            padding: 0.6rem 1.2rem !important;
-            transition: all 0.2s ease-in-out;
-        }}
-        .stDownloadButton button:hover, .stButton button:hover {{
-            background-color: #CA4300 !important;
-            color: #ffffff !important;
-            border-color: #A13700 !important;
-        }}
-        </style>
         """,
         unsafe_allow_html=True
     )
 
-    # Criar ZIP uma única vez
+    # Criar ZIP uma única vez agora
     zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
     with st.spinner("A preparar ficheiro ZIP..."):
         zip_bytes = build_zip(all_excel)
 
-    # Botões lado a lado, centrados
+    # Botões lado a lado
     st.markdown('<div class="button-row">', unsafe_allow_html=True)
-
-    col1, col2 = st.columns([1, 1])
+    col1, col2 = st.columns([1,1])
     with col1:
         st.download_button(
             "⬇️ Descarregar resultados (ZIP)",
@@ -251,5 +214,4 @@ if st.session_state.finished and st.session_state.all_excel:
         if st.button("🔁 Novo processamento", key="btn_new_run"):
             st.session_state.clear()
             st.experimental_rerun()
-
     st.markdown("</div>", unsafe_allow_html=True)
