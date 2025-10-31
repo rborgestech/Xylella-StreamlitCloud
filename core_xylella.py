@@ -12,21 +12,33 @@ Requer:
   - OUTPUT_DIR (env) — diretório onde guardar .xlsx e _ocr_debug.txt
 """
 
-from __future__ import annotations
-import os, re, io, time, json, csv, requests
+# -*- coding: utf-8 -*-
+import os
+import re
+import tempfile
+import importlib
+from datetime import datetime
 from pathlib import Path
-from datetime import datetime, timedelta
-from typing import List, Dict, Any
-
-from openpyxl import load_workbook
-from openpyxl.styles import PatternFill, Font, Alignment
 
 # ───────────────────────────────────────────────
-# Caminhos / Ambiente
+# Diretório de saída seguro
 # ───────────────────────────────────────────────
-BASE_DIR = Path(__file__).parent
-OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", BASE_DIR / "Output"))
-OUTPUT_DIR.mkdir(exist_ok=True)
+# Se o app principal (app.py) definir OUTPUT_DIR via os.environ, usa esse.
+# Caso contrário, grava tudo no diretório temporário do sistema (/tmp no Streamlit Cloud).
+try:
+    OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", tempfile.gettempdir()))
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+except Exception as e:
+    # Fallback absoluto (nunca falha)
+    OUTPUT_DIR = Path(tempfile.gettempdir())
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"[WARN] Não foi possível criar diretório de output definido: {e}. Usando {OUTPUT_DIR}")
+
+# ───────────────────────────────────────────────
+# Carregamento dinâmico do módulo principal
+# ───────────────────────────────────────────────
+_CORE_MODULE_NAME = "core_xylella_main" if Path("core_xylella_main.py").exists() else "core_xylella_base"
+core = importlib.import_module(_CORE_MODULE_NAME)
 
 TEMPLATE_PATH = Path(os.environ.get("TEMPLATE_PATH", BASE_DIR / "TEMPLATE_PXf_SGSLABIP1056.xlsx"))
 if not TEMPLATE_PATH.exists():
@@ -637,6 +649,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
 
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
     return created_files
+
 
 
 
