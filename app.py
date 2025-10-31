@@ -174,28 +174,31 @@ elif st.session_state.processing:
 # ───────────────────────────────────────────────
 # Ecrã final — painel de sucesso elegante
 # ───────────────────────────────────────────────
+# ───────────────────────────────────────────────
+# Ecrã final — painel de sucesso com botões lado a lado
+# ───────────────────────────────────────────────
 if st.session_state.finished and st.session_state.all_excel:
     all_excel = st.session_state.all_excel
     zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
     zip_bytes = build_zip(all_excel)
     num_files = len(all_excel)
 
-    # Painel verde de sucesso com botões centrados
+    # Painel de sucesso
     st.markdown(
         f"""
         <div style="
             background-color: #E8F5E9;
             border-left: 6px solid #2E7D32;
             border-radius: 10px;
-            padding: 2rem 2rem 1.5rem 2rem;
+            padding: 1.5rem 2rem;
             margin-top: 2rem;
             text-align: center;
             box-shadow: 0 2px 8px rgba(0,0,0,0.05);
         ">
-            <h4 style="color:#2E7D32; font-size:1.3rem; margin-bottom:0.5rem;">
+            <h4 style="color:#2E7D32; font-weight:600; margin-bottom:0.3rem;">
                 ✅ Processamento concluído
             </h4>
-            <p style="color:#2E7D32; font-size:1.1rem; margin-top:0;">
+            <p style="color:#2E7D32; font-size:1.05rem; margin-top:0;">
                 {num_files} ficheiro{'s' if num_files>1 else ''} Excel gerado{'s' if num_files>1 else ''}.
             </p>
         </div>
@@ -203,20 +206,47 @@ if st.session_state.finished and st.session_state.all_excel:
         unsafe_allow_html=True
     )
 
-    # Espaçamento suave antes dos botões
-    st.markdown("<div style='height:0.8rem;'></div>", unsafe_allow_html=True)
+    # CSS adicional para botões lado a lado
+    st.markdown("""
+    <style>
+    .button-row {
+        display: flex;
+        justify-content: center;
+        gap: 1rem;
+        margin-top: 1.5rem;
+    }
+    .stDownloadButton button, .stButton button {
+        background-color: #ffffff !important;
+        border: 1.5px solid #CA4300 !important;
+        color: #CA4300 !important;
+        font-weight: 600 !important;
+        border-radius: 8px !important;
+        padding: 0.5rem 1rem !important;
+        transition: all 0.2s ease-in-out;
+    }
+    .stDownloadButton button:hover, .stButton button:hover {
+        background-color: #CA4300 !important;
+        color: #ffffff !important;
+        border-color: #A13700 !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-    # Coluna dupla para centralizar botões
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        st.download_button(
-            "⬇️ Descarregar resultados (ZIP)",
-            data=zip_bytes,
-            file_name=zip_name,
-            mime="application/zip",
-            key="download_zip"
-        )
-        st.markdown("<div style='height:0.6rem;'></div>", unsafe_allow_html=True)
-        if st.button("🔁 Novo processamento", type="primary", use_container_width=True):
-            st.session_state.clear()
-            st.experimental_rerun()
+    # Linha de botões centrada
+    st.markdown('<div class="button-row">', unsafe_allow_html=True)
+
+    # Botão ZIP
+    st.download_button(
+        "⬇️ Descarregar resultados (ZIP)",
+        data=zip_bytes,
+        file_name=zip_name,
+        mime="application/zip",
+        key="download_zip"
+    )
+
+    # Botão Novo processamento
+    if st.button("🔁 Novo processamento", key="new_process"):
+        st.session_state.clear()
+        st.experimental_rerun()
+
+    st.markdown("</div>", unsafe_allow_html=True)
