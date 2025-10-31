@@ -10,7 +10,7 @@ st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# CSS Laranja SGS
+# CSS base (laranja SGS)
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -34,27 +34,35 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ───────────────────────────────────────────────
-# Estado
+# Estado persistente
 # ───────────────────────────────────────────────
 if "processing" not in st.session_state:
     st.session_state.processing = False
+if "finished" not in st.session_state:
+    st.session_state.finished = False
+if "all_excel" not in st.session_state:
+    st.session_state.all_excel = []
 
 # ───────────────────────────────────────────────
-# Interface
+# Interface inicial
 # ───────────────────────────────────────────────
-if not st.session_state.processing:
+if not st.session_state.processing and not st.session_state.finished:
     uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True)
     start = st.button("📄 Processar ficheiros de Input", type="primary", disabled=not uploads)
 
     if start and uploads:
-        st.session_state.uploads = uploads
         st.session_state.processing = True
-        st.experimental_rerun()
+        st.session_state.uploads = uploads
+        st.rerun()  # forçado apenas uma vez, permitido aqui
 else:
-    st.info("⏳ A processar ficheiros... aguarde até o processo terminar.")
-    uploads = st.session_state.uploads
+    uploads = st.session_state.get("uploads", None)
 
-    # Execução principal
+# ───────────────────────────────────────────────
+# Execução principal
+# ───────────────────────────────────────────────
+if st.session_state.processing and uploads:
+    st.info("⏳ A processar ficheiros... aguarde até o processo terminar.")
+
     session_dir = tempfile.mkdtemp(prefix="xylella_session_")
     all_excel = []
     total = len(uploads)
@@ -73,6 +81,7 @@ else:
             os.environ["OUTPUT_DIR"] = tmpdir
             result = process_pdf(tmp_path)
 
+            # permite retorno simples ou triplo
             if isinstance(result, tuple) and len(result) == 3:
                 created, n_amostras, discrepancias = result
             else:
@@ -93,22 +102,32 @@ else:
             progress.progress(i / total)
             time.sleep(0.2)
 
-        # ZIP final
+        # Fim do processamento
         if all_excel:
-            zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
-            zip_bytes = build_zip(all_excel)
+            st.session_state.all_excel = all_excel
+            st.session_state.finished = True
             st.success(f"🏁 Processamento concluído ({len(all_excel)} ficheiros Excel gerados).")
-            st.download_button("⬇️ Descarregar resultados (ZIP)", data=zip_bytes,
-                               file_name=zip_name, mime="application/zip")
-            st.balloons()
         else:
-            st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
-
+            st.error("⚠️ Nenhum ficheiro Excel foi detetado.")
     except Exception as e:
         st.error(f"❌ Erro inesperado: {e}")
-
     finally:
         shutil.rmtree(session_dir, ignore_errors=True)
         st.session_state.processing = False
+
+# ───────────────────────────────────────────────
+# Interface final (download)
+# ───────────────────────────────────────────────
+if st.session_state.finished:
+    all_excel = st.session_state.all_excel
+    zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
+    zip_bytes = build_zip(all_excel)
+
+    st.download_button("⬇️ Descarregar resultados (ZIP)", data=zip_bytes,
+                       file_name=zip_name, mime="application/zip")
+
+    if st.button("🔁 Novo processamento", type="primary"):
+        st.session_state.finished = False
+        st.session_state.all_excel = []
         st.session_state.uploads = None
         st.experimental_rerun()
