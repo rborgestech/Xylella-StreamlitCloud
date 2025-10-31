@@ -561,7 +561,7 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
     gray_fill   = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")
     bold_center = Font(bold=True, color="000000")
 
-    # 🧹 Limpar linhas anteriores (A→L; observa a coluna I/observações)
+    # 🧹 Limpar linhas anteriores (A→L)
     for row in range(start_row, 201):
         for col in range(1, 13):
             cell = ws.cell(row=row, column=col)
@@ -569,22 +569,35 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
             cell.fill = PatternFill(fill_type=None)
         ws[f"I{row}"].value = None
 
-    # ✍️ Escrever novas linhas
-    def _is_valid_date(value: str) -> bool:
-        try:
-            if isinstance(value, datetime):
-                return True
-            datetime.strptime(str(value).strip(), "%d/%m/%Y")
-            return True
-        except Exception:
-            return False
+    # 🔧 Funções auxiliares ---------------------------------------------
+    import re
+    from datetime import datetime, date
 
-    def _to_datetime(value: str):
+    def normalize_date_str(val: str) -> str:
+        """Corrige datas OCR como 23110/2025 → 23/10/2025."""
+        if not val:
+            return ""
+        s = re.sub(r"\D", "", str(val))
+        if len(s) >= 8:
+            d, m, y = int(s[:2]), int(s[2:4]), int(s[4:8])
+            if 1 <= d <= 31 and 1 <= m <= 12:
+                return f"{d:02d}/{m:02d}/{y:04d}"
+        # já vem em dd/mm/yyyy?
+        m = re.match(r"^\s*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s*$", str(val))
+        if m:
+            d, m_, y = map(int, m.groups())
+            return f"{d:02d}/{m_:02d}/{y:04d}"
+        return str(val).strip()
+
+    def to_excel_date(val: str):
+        """Converte string normalizada em datetime.date para Excel."""
+        s = normalize_date_str(val)
         try:
-            return datetime.strptime(str(value).strip(), "%d/%m/%Y")
+            return datetime.strptime(s, "%d/%m/%Y")
         except Exception:
             return None
 
+    # ✍️ Escrever novas linhas ------------------------------------------
     for idx, row in enumerate(ocr_rows, start=start_row):
         rececao_val  = row.get("datarececao", "")
         colheita_val = row.get("datacolheita", "")
@@ -592,14 +605,20 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
         cell_A = ws[f"A{idx}"]
         cell_B = ws[f"B{idx}"]
 
-        if _is_valid_date(rececao_val):
-            cell_A.value = _to_datetime(rececao_val)
+        # Data de receção
+        dt_recepcao = to_excel_date(rececao_val)
+        if dt_recepcao:
+            cell_A.value = dt_recepcao
+            cell_A.number_format = "dd/mm/yyyy"
         else:
             cell_A.value = rececao_val
             cell_A.fill = red_fill
 
-        if _is_valid_date(colheita_val):
-            cell_B.value = _to_datetime(colheita_val)
+        # Data de colheita
+        dt_colheita = to_excel_date(colheita_val)
+        if dt_colheita:
+            cell_B.value = dt_colheita
+            cell_B.number_format = "dd/mm/yyyy"
         else:
             cell_B.value = colheita_val
             cell_B.fill = red_fill
@@ -620,11 +639,11 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
             if not c.value or str(c.value).strip() == "":
                 c.fill = red_fill
 
-        # Destaque amarelo (se houver flags de validação)
+        # Destaque amarelo (flags de validação)
         if row.get("WasCorrected") or row.get("ValidationStatus") in ("review", "unknown", "no_list"):
             ws[f"D{idx}"].fill = yellow_fill
 
-    # 📊 Validação E1:F1
+    # 📊 Validação E1:F1 -----------------------------------------------
     processed = len(ocr_rows)
     expected  = expected_count
     ws.merge_cells("E1:F1")
@@ -643,7 +662,7 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
     ws["G1"].value = f"Origem: {pdf_orig_name}"
     ws["G1"].font = Font(italic=True, color="555555")
     ws["G1"].alignment = Alignment(horizontal="left", vertical="center")
-    ws["G1"].fill = GRAY
+    ws["G1"].fill = gray_fill
 
     # 🕒 Data/hora de processamento (K1:L1)
     ws.merge_cells("K1:L1")
@@ -651,9 +670,9 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
     ws["K1"].value = f"Processado em: {timestamp}"
     ws["K1"].font = Font(italic=True, color="555555")
     ws["K1"].alignment = Alignment(horizontal="right", vertical="center")
-    ws["K1"].fill = GRAY
+    ws["K1"].fill = gray_fill
 
-    # 💾 Guardar ficheiro
+    # 💾 Guardar ficheiro ---------------------------------------------
     base_name = os.path.splitext(os.path.basename(out_name))[0]
     out_path = os.path.join(OUTPUT_DIR, f"{base_name}.xlsx")
     wb.save(out_path)
@@ -738,6 +757,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
 
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
     return created_files
+
 
 
 
