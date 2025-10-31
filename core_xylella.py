@@ -226,63 +226,58 @@ def split_if_multiple_requisicoes(full_text: str) -> List[str]:
 
 def normalize_date_str(val: str) -> str:
     """
-    Corrige datas OCR de forma inteligente (ex: 23110/2025 → 23/10/2025).
-    Analisa as posições 3 e 6 (barras '/' ou '-') e reconstrói padrões dd/mm/yyyy válidos.
+    Corrige datas OCR partidas/coladas:
+    - remove quebras/espaços (mantendo '/')
+    - respeita 3.º e 6.º caráter quando existirem
+    - reconstrói dd/mm/yyyy a partir de dígitos
     """
     if not val:
         return ""
-
     txt = str(val).strip().replace("-", "/").replace(".", "/")
-    txt = re.sub(r"[^\d/]", "", txt)  # remove ruído OCR
+    # remove espaços, tabs e quebras de linha, mantendo '/'
+    txt = re.sub(r"[\u00A0\s]+", "", txt)
 
-    # Se já estiver no formato dd/mm/yyyy
-    m_std = re.match(r"^\s*(\d{1,2})/(\d{1,2})/(\d{4})\s*$", txt)
+    # já em dd/mm/yyyy?
+    m_std = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})$", txt)
     if m_std:
         d, m_, y = map(int, m_std.groups())
         if 1 <= d <= 31 and 1 <= m_ <= 12 and 1900 <= y <= 2100:
             return f"{d:02d}/{m_:02d}/{y:04d}"
 
-    # Controlo posicional: 3º e 6º caracteres
-    if len(txt) >= 7:
-        # 3º e 6º caracteres são barras → formato já delimitado
-        if len(txt) > 6 and txt[2] == "/" and txt[5] == "/":
-            try:
-                d, m_, y = int(txt[:2]), int(txt[3:5]), int(txt[6:10])
-                if 1 <= d <= 31 and 1 <= m_ <= 12 and 1900 <= y <= 2100:
-                    return f"{d:02d}/{m_:02d}/{y:04d}"
-            except Exception:
-                pass
+    # se 3º e 6º carater forem '/', tentar leitura posicional direta
+    if len(txt) >= 10 and txt[2] == "/" and txt[5] == "/":
+        try:
+            d, m_, y = int(txt[:2]), int(txt[3:5]), int(txt[6:10])
+            if 1 <= d <= 31 and 1 <= m_ <= 12 and 1900 <= y <= 2100:
+                return f"{d:02d}/{m_:02d}/{y:04d}"
+        except Exception:
+            pass
 
-        # Só o 3º é barra (caso típico: 23110/2025)
-        if txt[2] == "/" and len(txt) >= 9:
-            d = int(txt[:2])
-            try:
-                # tentar ler mês/ano a seguir
-                resto = re.sub(r"[^\d]", "", txt[3:])
-                # se o resto começar por 10 → mês 10
-                if resto.startswith("10"):
-                    m_, y = 10, int(resto[-4:])
-                else:
-                    m_, y = int(resto[:2]), int(resto[-4:])
-                if 1 <= d <= 31 and 1 <= m_ <= 12 and 1900 <= y <= 2100:
-                    return f"{d:02d}/{m_:02d}/{y:04d}"
-            except Exception:
-                pass
+    # remover tudo exceto dígitos para reconstrução
+    digits = re.sub(r"\D", "", txt)
 
-    # Sem barras — tenta reconstruir 8 dígitos (ddmmyyyy)
-    s = re.sub(r"\D", "", txt)
-    if len(s) == 8:
-        d, m_, y = int(s[:2]), int(s[2:4]), int(s[4:])
+    # 8 dígitos: ddmmyyyy
+    if len(digits) == 8:
+        d, m_, y = int(digits[:2]), int(digits[2:4]), int(digits[4:])
         if 1 <= d <= 31 and 1 <= m_ <= 12 and 1900 <= y <= 2100:
             return f"{d:02d}/{m_:02d}/{y:04d}"
 
-    # Fallback genérico (ex: 3/1/2025)
-    m_flex = re.match(r"^\s*(\d{1,2})/(\d{1,2})/(\d{2,4})\s*$", txt)
+    # 9 dígitos (caso típico 23110/2025 → 23/10/2025)
+    if len(digits) == 9:
+        # heurística: se os dígitos 3..5 forem '110' → mês 10
+        if digits[2:5] == "110":
+            d, m_, y = int(digits[:2]), 10, int(digits[-4:])
+            return f"{d:02d}/{m_:02d}/{y:04d}"
+        # fallback: ddmmyyyy nos primeiros 8
+        d, m_, y = int(digits[:2]), int(digits[2:4]), int(digits[4:8])
+        if 1 <= d <= 31 and 1 <= m_ <= 12:
+            return f"{d:02d}/{m_:02d}/{y:04d}"
+
+    # flexível: d/m/aa ou d/m/aaaa
+    m_flex = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{2,4})$", txt)
     if m_flex:
         d, m_, y = m_flex.groups()
-        y = int(y)
-        if y < 100:  # corrige ano de 2 dígitos
-            y += 2000
+        y = int(y) + (2000 if len(y) == 2 else 0)
         d, m_ = int(d), int(m_)
         if 1 <= d <= 31 and 1 <= m_ <= 12 and 1900 <= y <= 2100:
             return f"{d:02d}/{m_:02d}/{y:04d}"
@@ -290,44 +285,30 @@ def normalize_date_str(val: str) -> str:
     return ""
 
 
-
 def _is_valid_date(value: str) -> bool:
-    """Valida se a string é uma data válida (corrigindo erros OCR)."""
     if isinstance(value, datetime):
         return True
-    if not value:
+    norm = normalize_date_str(value)
+    if not norm:
         return False
-
-    value = normalize_date_str(value)
-    if not value:
-        return False
-
     try:
-        dt = datetime.strptime(value, "%d/%m/%Y")
+        dt = datetime.strptime(norm, "%d/%m/%Y")
         return 1900 <= dt.year <= 2100
     except Exception:
         return False
 
 
 def _to_datetime(value: str):
-    """Converte texto OCR em datetime, corrigindo formatos errados."""
     if isinstance(value, datetime):
         return value
-    if not value:
+    norm = normalize_date_str(value)
+    if not norm:
         return None
-
-    value = normalize_date_str(value)
-    if not value:
-        return None
-
     try:
-        dt = datetime.strptime(value, "%d/%m/%Y")
-        if dt.year < 1900:
-            return None
-        return dt
+        dt = datetime.strptime(norm, "%d/%m/%Y")
+        return dt if dt.year >= 1900 else None
     except Exception:
         return None
-
 
 
 
@@ -844,6 +825,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
 
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
     return created_files
+
 
 
 
