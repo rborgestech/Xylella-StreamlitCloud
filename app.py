@@ -171,25 +171,47 @@ elif st.session_state.processing:
         st.session_state.processing = False
 
 # ───────────────────────────────────────────────
-# Ecrã final (download ZIP + botão voltar)
+# Ecrã final — visual melhorado + retorno rápido
 # ───────────────────────────────────────────────
 if st.session_state.finished and st.session_state.all_excel:
     all_excel = st.session_state.all_excel
     zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
     zip_bytes = build_zip(all_excel)
+    num_files = len(all_excel)
 
-    # Botão de download centrado
-    st.download_button(
-        "⬇️ Descarregar resultados (ZIP)",
-        data=zip_bytes,
-        file_name=zip_name,
-        mime="application/zip",
-        key="download_zip"
+    st.markdown(
+        f"""
+        <div style="
+            background-color:#E8F5E9;
+            border-left:6px solid #2E7D32;
+            border-radius:10px;
+            padding:1rem 1.5rem;
+            margin-top:1.5rem;
+            text-align:center;
+        ">
+            <h4 style="color:#2E7D32; margin-bottom:0.5rem;">
+                🧪 Processamento concluído — {num_files} ficheiro{'s' if num_files>1 else ''} Excel gerado{'s' if num_files>1 else ''}.
+            </h4>
+            <div style="margin-top:1rem; display:flex; justify-content:center; gap:1rem;">
+                <div>
+                    {st.download_button(
+                        "⬇️ Descarregar resultados (ZIP)",
+                        data=zip_bytes,
+                        file_name=zip_name,
+                        mime="application/zip",
+                        key="download_zip",
+                    )}
+                </div>
+                <div>
+                    {st.button("🔁 Novo processamento", type="primary", key="new_process")}
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
     )
 
-    # 🔁 Botão de novo processamento — só neste ecrã
-    if st.button("🔁 Novo processamento", type="primary"):
-        for key in ["uploads", "all_excel", "finished", "processing"]:
-            if key in st.session_state:
-                del st.session_state[key]
-        st.rerun()
+    # 🚀 Retorno rápido e limpo
+    if st.session_state.get("new_process"):
+        st.session_state.clear()
+        st.experimental_rerun()
