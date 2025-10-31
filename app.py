@@ -14,7 +14,7 @@ st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# CSS — laranja #CA4300 e sem vermelhos
+# CSS — laranja #CA4300
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -35,14 +35,6 @@ st.markdown("""
   box-shadow: none !important;
   outline: none !important;
 }
-.stButton > button[kind="primary"][disabled],
-.stButton > button[kind="primary"][disabled]:hover {
-  background-color: #b3b3b3 !important;
-  border: 1px solid #b3b3b3 !important;
-  color: #f2f2f2 !important;
-  cursor: not-allowed !important;
-  box-shadow: none !important;
-}
 [data-testid="stFileUploader"] > div:first-child {
   border: 2px dashed #CA4300 !important;
   border-radius: 10px !important;
@@ -56,12 +48,6 @@ st.markdown("""
   border-color: #CA4300 !important;
   box-shadow: none !important;
 }
-:root {
-  --primary-color: #CA4300 !important;
-  --secondary-color: #CA4300 !important;
-  --accent-color: #CA4300 !important;
-  --text-selection-color: #CA4300 !important;
-}
 </style>
 """, unsafe_allow_html=True)
 
@@ -70,30 +56,31 @@ st.markdown("""
 # ───────────────────────────────────────────────
 if "processing" not in st.session_state:
     st.session_state.processing = False
-if "uploader_key" not in st.session_state:
-    st.session_state.uploader_key = 0  # usado para limpar o file_uploader
+if "uploads" not in st.session_state:
+    st.session_state.uploads = []
 
 # ───────────────────────────────────────────────
-# UI — Upload
+# Interface
 # ───────────────────────────────────────────────
-uploads = st.file_uploader(
-    "📂 Carrega um ou vários PDFs",
-    type=["pdf"],
-    accept_multiple_files=True,
-    key=f"uploader-{st.session_state.uploader_key}",
-)
+if not st.session_state.processing:
+    uploaded = st.file_uploader(
+        "📂 Carrega um ou vários PDFs",
+        type=["pdf"],
+        accept_multiple_files=True,
+    )
+    if uploaded:
+        st.session_state.uploads = uploaded
 
-start = st.button(
-    "📄 Processar ficheiros de Input",
-    type="primary",
-    disabled=st.session_state.processing or not uploads
-)
+if not st.session_state.processing and st.session_state.uploads:
+    start = st.button("📄 Processar ficheiros de Input", type="primary")
+else:
+    start = False
 
 # ───────────────────────────────────────────────
-# Helpers
+# Função auxiliar
 # ───────────────────────────────────────────────
 def read_e1_counts(xlsx_path: str):
-    """Lê 'Nº Amostras: X / Y' da E1 (declared/processed)."""
+    """Lê 'Nº Amostras: X / Y' da célula E1 (Esperado / Processado)."""
     declared, processed = None, None
     try:
         wb = load_workbook(xlsx_path, data_only=False)
@@ -107,94 +94,62 @@ def read_e1_counts(xlsx_path: str):
         pass
     return declared, processed
 
-def collect_debug_files(root_dir: Path) -> list[str]:
-    """Apanha logs e txt de debug recursivamente para o ZIP/debug/."""
-    debug = []
-    patterns = ["*_ocr_debug.txt", "process_log.csv", "process_summary_*.txt"]
-    for pat in patterns:
-        for f in root_dir.rglob(pat):
-            debug.append(str(f))
-    return debug
-
 # ───────────────────────────────────────────────
 # Execução principal
 # ───────────────────────────────────────────────
-if start and uploads:
+if start and st.session_state.uploads:
     st.session_state.processing = True
-    session_root = Path(tempfile.mkdtemp(prefix="xylella_session_"))
-
     try:
-        top_info = st.info("⚙️ A processar ficheiros... aguarda alguns segundos.")
-        all_excel: list[str] = []
-        all_debug: list[str] = []
-        summary_lines: list[str] = []
-
+        st.info("⚙️ A processar ficheiros... aguarda alguns segundos.")
+        all_excel, debug_files, summary_lines = [], [], []
         progress = st.progress(0.0)
-        total = len(uploads)
+        total = len(st.session_state.uploads)
 
-        # Validação rápida
-        for up in uploads:
-            if not up.name.lower().endswith(".pdf"):
-                st.error(f"❌ Ficheiro inválido: {up.name} (apenas PDFs são permitidos)")
-                st.session_state.processing = False
-                st.stop()
-
-        for i, up in enumerate(uploads, start=1):
+        for i, up in enumerate(st.session_state.uploads, start=1):
             st.markdown(f"### 📄 {up.name}")
-            step_msg = st.empty()
-            step_msg.info(f"⏳ A processar ficheiro {i}/{total}...")
+            st.write(f"⏳ A processar ficheiro {i}/{total}...")
 
-            tmpdir = session_root / f"job_{i:02d}"
-            tmpdir.mkdir(parents=True, exist_ok=True)
+            tmpdir = Path(tempfile.mkdtemp(prefix="xylella_"))
             tmp_path = tmpdir / up.name
             with open(tmp_path, "wb") as f:
                 f.write(up.getbuffer())
 
-            # Isolar saída do core
             os.environ["OUTPUT_DIR"] = str(tmpdir)
             created = process_pdf(str(tmp_path))
 
             if not created:
-                step_msg.warning(f"⚠️ Nenhum ficheiro gerado para {up.name}")
+                st.warning(f"⚠️ Nenhum ficheiro gerado para {up.name}")
+                continue
+
+            req_count = len(created)
+            total_samples, discrepancy_msgs = 0, []
+
+            for fp in created:
+                declared, processed = read_e1_counts(fp)
+                if processed:
+                    total_samples += processed
+                if declared is not None and processed is not None and declared != processed:
+                    diff = processed - declared
+                    discrepancy_msgs.append(f"{Path(fp).name}: Esperado {declared}, Processado {processed} (Δ {diff:+d})")
+                all_excel.append(fp)
+                st.success(f"✅ {Path(fp).name} gravado")
+
+            if discrepancy_msgs:
+                st.warning(f"✅ {up.name}: {req_count} requisições, {total_samples} amostras (⚠️ discrepâncias: {', '.join(discrepancy_msgs)})")
             else:
-                req_count = len(created)
-                total_samples = 0
-                discrepancies_msgs = []
+                st.success(f"✅ {up.name}: {req_count} requisições, {total_samples} amostras (sem discrepâncias)")
 
-                for fp in created:
-                    # contar amostras + discrepâncias
-                    declared, processed = read_e1_counts(fp)
-                    if processed:
-                        total_samples += processed
-                    if declared is not None and processed is not None and declared != processed:
-                        diff = processed - declared
-                        discrepancies_msgs.append(
-                            f"{Path(fp).name}: Esperado {declared}, Processado {processed} (Δ {diff:+d})"
-                        )
+            summary_lines.append(f"{up.name}: {req_count} requisições, {total_samples} amostras.")
 
-                    all_excel.append(fp)
-                    st.success(f"✅ {Path(fp).name} gravado")
-
-                # Mensagem final do ficheiro
-                if discrepancies_msgs:
-                    step_msg.warning(
-                        f"✅ {up.name}: {req_count} requisições, {total_samples} amostras "
-                        f"(⚠️ discrepâncias: {', '.join(discrepancies_msgs)})"
-                    )
-                else:
-                    step_msg.success(
-                        f"✅ {up.name}: {req_count} requisições, {total_samples} amostras (sem discrepâncias)"
-                    )
-
-                summary_lines.append(f"{up.name}: {req_count} requisições, {total_samples} amostras.")
-
-            # recolha de debug (recursiva)
-            all_debug.extend(collect_debug_files(tmpdir))
+            # recolhe debug files
+            for pat in ["*_ocr_debug.txt", "process_log.csv", "process_summary_*.txt"]:
+                for f in tmpdir.glob(pat):
+                    debug_files.append(str(f))
 
             progress.progress(i / total)
-            time.sleep(0.15)
+            time.sleep(0.2)
 
-        # ZIP final
+        # ZIP final com debug + summary
         if all_excel:
             summary_lines.append(f"\n📊 Total: {len(all_excel)} ficheiro(s) Excel gerado(s)")
             summary_text = "\n".join(summary_lines)
@@ -202,49 +157,36 @@ if start and uploads:
             zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
             mem = io.BytesIO()
             with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as z:
-                # Excel (raiz)
                 for f in all_excel:
-                    if os.path.exists(f):
-                        z.write(f, arcname=os.path.basename(f))
-                # debug/
-                for dbg in all_debug:
-                    if os.path.exists(dbg):
-                        z.write(dbg, arcname=f"debug/{os.path.basename(dbg)}")
-                # summary.txt
+                    z.write(f, arcname=os.path.basename(f))
+                for dbg in debug_files:
+                    z.write(dbg, arcname=f"debug/{os.path.basename(dbg)}")
                 z.writestr("summary.txt", summary_text)
             mem.seek(0)
 
-            top_info.success(f"🏁 Processamento concluído ({len(all_excel)} ficheiros Excel gerados).")
-
-            # botão de download — se o utilizador clicar, limpamos uploads
-            downloaded = st.download_button(
+            st.success(f"🏁 Processamento concluído ({len(all_excel)} ficheiros Excel gerados).")
+            st.download_button(
                 "⬇️ Descarregar resultados (ZIP)",
                 data=mem.read(),
                 file_name=zip_name,
                 mime="application/zip",
-                type="primary",
-                use_container_width=False,
+                type="primary"
             )
+            st.balloons()
 
-            if downloaded:
-                # 🔹 Limpa a seleção do file_uploader e re-renderiza
-                st.session_state.uploader_key += 1
-                st.session_state.processing = False
-                st.success("✅ Concluído. A lista de ficheiros foi limpa.")
-                st.experimental_rerun()
         else:
-            top_info.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
+            st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
 
     except Exception as e:
         st.error(f"❌ Erro inesperado: {e}")
 
     finally:
         st.session_state.processing = False
-        # limpa o diretório temporário da sessão
-        try:
-            shutil.rmtree(session_root, ignore_errors=True)
-        except Exception:
-            pass
 
-else:
-    st.info("💡 Carrega um ficheiro PDF e clica em **Processar ficheiros de Input**.")
+# ───────────────────────────────────────────────
+# Botão para limpar lista de ficheiros
+# ───────────────────────────────────────────────
+if not st.session_state.processing and st.session_state.uploads:
+    if st.button("🗑️ Limpar lista de ficheiros carregados"):
+        st.session_state.uploads = []
+        st.experimental_rerun()
