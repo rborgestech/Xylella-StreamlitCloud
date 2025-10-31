@@ -60,19 +60,22 @@ st.markdown("""
   margin-bottom: 0.4rem;
 }
 
-/* Loader animado de "..." */
+/* Loader animado "..." em laranja SGS */
 .st-processing-dots::after {
   content: ' ';
   animation: dots 1.2s steps(4, end) infinite;
+  color: #CA4300;
+  font-weight: 700;
+  margin-left: .15rem;
 }
 @keyframes dots {
-  0%, 20% { content: ''; }
-  40% { content: '.'; }
-  60% { content: '..'; }
+  0%, 20%   { content: ''; }
+  40%       { content: '.'; }
+  60%       { content: '..'; }
   80%, 100% { content: '...'; }
 }
 
-/* Botões lado a lado (final) */
+/* Linha de botões finais lado a lado */
 .button-row {
   display: flex;
   justify-content: center;
@@ -100,14 +103,9 @@ st.markdown("""
 # ───────────────────────────────────────────────
 # Estado
 # ───────────────────────────────────────────────
-if "processing" not in st.session_state:
-    st.session_state.processing = False
-if "finished" not in st.session_state:
-    st.session_state.finished = False
-if "uploads" not in st.session_state:
-    st.session_state.uploads = []
-if "all_excel" not in st.session_state:
-    st.session_state.all_excel = []
+for k in ["processing", "finished", "uploads", "all_excel", "zip_bytes", "zip_name"]:
+    if k not in st.session_state:
+        st.session_state[k] = False if k in ["processing", "finished"] else []
 
 # ───────────────────────────────────────────────
 # Ecrã inicial
@@ -144,7 +142,6 @@ elif st.session_state.processing:
 
     try:
         for i, up in enumerate(uploads, start=1):
-            # Linha com animação "..."
             status_text.markdown(
                 f'<div class="info-box">📘 <b>A processar ficheiro {i}/{total}</b>'
                 f'<span class="st-processing-dots"></span><br>{up.name}</div>',
@@ -182,10 +179,13 @@ elif st.session_state.processing:
             progress.progress(i / total)
             time.sleep(0.2)
 
-        # Conclusão
+        # Conclusão — parar a animação e guardar resultados
+        status_text.empty()  # remove o texto com loader
         if all_excel:
             st.session_state.all_excel = all_excel
             st.session_state.finished = True
+            st.session_state.zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
+            st.session_state.zip_bytes = build_zip(all_excel)
         else:
             st.warning("⚠️ Nenhum ficheiro Excel foi detetado.")
 
@@ -199,8 +199,7 @@ elif st.session_state.processing:
 # Ecrã final — painel de sucesso + botões lado a lado
 # ───────────────────────────────────────────────
 if st.session_state.finished and st.session_state.all_excel:
-    all_excel = st.session_state.all_excel
-    num_files = len(all_excel)
+    num_files = len(st.session_state.all_excel)
 
     st.markdown(
         f"""
@@ -215,14 +214,12 @@ if st.session_state.finished and st.session_state.all_excel:
         unsafe_allow_html=True
     )
 
-    zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
-    with st.spinner("A preparar ficheiro ZIP..."):
-        zip_bytes = build_zip(all_excel)
+    zip_name = st.session_state.zip_name
+    zip_bytes = st.session_state.zip_bytes
 
-    # Botões lado a lado
     st.markdown('<div class="button-row">', unsafe_allow_html=True)
-    col1, col2 = st.columns([1,1])
-    
+    col1, col2 = st.columns([1, 1])
+
     with col1:
         st.download_button(
             "⬇️ Descarregar resultados (ZIP)",
@@ -231,14 +228,12 @@ if st.session_state.finished and st.session_state.all_excel:
             mime="application/zip",
             key="zip_download_final"
         )
-    
+
     with col2:
         if st.button("🔁 Novo processamento", key="btn_new_run"):
-            with st.spinner("🔄 A reiniciar..."):
-                # Limpa o estado e força refresh controlado
-                for key in list(st.session_state.keys()):
-                    del st.session_state[key]
-                time.sleep(0.6)  # pequeno delay para não interromper renderização
-                st.experimental_rerun()
-    
+            for k in ["processing", "finished", "uploads", "all_excel", "zip_bytes", "zip_name"]:
+                if k in st.session_state:
+                    del st.session_state[k]
+            st.stop()  # reinicia sem erro nem recriar ZIP
+
     st.markdown("</div>", unsafe_allow_html=True)
