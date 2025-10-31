@@ -222,6 +222,35 @@ def split_if_multiple_requisicoes(full_text: str) -> List[str]:
     print(f"🔍 Detetadas {len(blocos)} requisições distintas (por cabeçalho).")
     return blocos
 
+import re
+
+def normalize_date(value: str) -> str:
+    """
+    Corrige datas reconhecidas de forma incorreta pelo OCR.
+    Ex: '23110/2025' → '23/10/2025', '1110/2025' → '11/10/2025'
+    """
+    if not value:
+        return value
+
+    value = value.strip().replace(" ", "").replace("-", "/")
+
+    # Caso típico: 23110/2025 (dia e mês colados)
+    m = re.match(r"^(\d{2})(1[0-2]|0[1-9])0?/?(\d{4})$", value)
+    if m:
+        return f"{m.group(1)}/{m.group(2)}/{m.group(3)}"
+
+    # Caso comum: 23110/2025 (sem o / antes do mês)
+    m = re.match(r"^(\d{2})([01]\d)/?(\d{4})$", value)
+    if m:
+        return f"{m.group(1)}/{m.group(2)}/{m.group(3)}"
+
+    # Já está bem formatada? (dd/mm/yyyy)
+    if re.match(r"^\d{1,2}/\d{1,2}/\d{4}$", value):
+        return value
+
+    return value
+
+
 def extract_context_from_text(full_text: str):
     """Extrai informações gerais da requisição (zona, DGAV, datas, nº de amostras)."""
     ctx = {}
@@ -276,7 +305,7 @@ def extract_context_from_text(full_text: str):
             only_date = re.sub(r"\s+", "", m_simple.group(1))
             for key in ("(*)", "(**)", "(***)"):
                 colheita_map[key] = only_date
-    default_colheita = next(iter(colheita_map.values()), "")
+    default_colheita = normalize_date(next(iter(colheita_map.values()), ""))
     ctx["colheita_map"] = colheita_map
     ctx["default_colheita"] = default_colheita
 
@@ -289,7 +318,7 @@ def extract_context_from_text(full_text: str):
         re.I,
     )
     if m_envio:
-        ctx["data_envio"] = re.sub(r"\s+", "", m_envio.group(1))
+        ctx["data_envio"] = normalize_date(m_envio.group(1))
     elif default_colheita:
         ctx["data_envio"] = default_colheita
     else:
@@ -715,6 +744,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
 
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
     return created_files
+
 
 
 
