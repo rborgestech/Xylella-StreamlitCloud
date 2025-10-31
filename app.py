@@ -25,7 +25,7 @@ st.markdown("""
   font-weight: 600 !important;
   border-radius: 6px !important;
 }
-.stButton > button[kind="primary"]:hover {
+.stButton > button[kind="primary"]::hover {
   background-color: #A13700 !important;
   border: 1px solid #A13700 !important;
 }
@@ -101,165 +101,170 @@ st.markdown("""
 /* Fade-in no painel final */
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); opacity: 1; }
+  to   { opacity: 1; transform: translateY(0); }
 }
-.fade-in {
-  animation: fadeIn 0.8s ease-in-out;
-}
+.fade-in { animation: fadeIn 0.8s ease-in-out; }
 </style>
 """, unsafe_allow_html=True)
 
 # ───────────────────────────────────────────────
 # Estado
 # ───────────────────────────────────────────────
-for k in ["processing", "finished", "uploads", "all_excel", "zip_bytes", "zip_name"]:
-    if k not in st.session_state:
-        st.session_state[k] = False if k in ["processing", "finished"] else []
+if "processing" not in st.session_state:
+  st.session_state.processing = False
+if "finished" not in st.session_state:
+  st.session_state.finished = False
+if "uploads" not in st.session_state:
+  st.session_state.uploads = []
+if "all_excel" not in st.session_state:
+  st.session_state.all_excel = []
+if "zip_bytes" not in st.session_state:
+  st.session_state.zip_bytes = None
+if "zip_name" not in st.session_state:
+  st.session_state.zip_name = None
 
 # ───────────────────────────────────────────────
 # Ecrã inicial
 # ───────────────────────────────────────────────
 if not st.session_state.processing and not st.session_state.finished:
-    uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True)
+  uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True)
 
-    if uploads:
-        st.session_state.uploads = uploads
-        start = st.button(f"📄 Processar {len(uploads)} ficheiro(s) de Input", type="primary")
-        if start:
-            st.session_state.processing = True
-            st.rerun()
-    else:
-        st.info("💡 Carrega ficheiros PDF para ativar o processamento.")
+  if uploads:
+    st.session_state.uploads = uploads
+    start = st.button(f"📄 Processar {len(uploads)} ficheiro(s) de Input", type="primary")
+    if start:
+      st.session_state.processing = True
+      st.rerun()
+  else:
+    st.info("💡 Carrega ficheiros PDF para ativar o processamento.")
 
 # ───────────────────────────────────────────────
 # Ecrã de processamento
 # ───────────────────────────────────────────────
 elif st.session_state.processing:
-    uploads = st.session_state.uploads
-    total = len(uploads)
+  uploads = st.session_state.uploads
+  total = len(uploads)
 
-    st.markdown('<div class="info-box">⏳ A processar ficheiros... aguarde até o processo terminar.</div>', unsafe_allow_html=True)
+  st.markdown('<div class="info-box">⏳ A processar ficheiros... aguarde até o processo terminar.</div>', unsafe_allow_html=True)
 
-    with st.expander("📄 Ficheiros em processamento", expanded=True):
-        for up in uploads:
-            st.markdown(f"- {up.name}")
+  with st.expander("📄 Ficheiros em processamento", expanded=True):
+    for up in uploads:
+      st.markdown(f"- {up.name}")
 
-    progress = st.progress(0)
-    status_text = st.empty()
-    all_excel = []
-    session_dir = tempfile.mkdtemp(prefix="xylella_session_")
+  # Painel único e contínuo para os ficheiros gerados
+  generated_panel = st.expander("📄 Ficheiros gerados", expanded=True)
 
-    try:
-        for i, up in enumerate(uploads, start=1):
-            status_text.markdown(
-                f'<div class="info-box">📘 <b>A processar ficheiro {i}/{total}</b>'
-                f'<span class="st-processing-dots"></span><br>{up.name}</div>',
-                unsafe_allow_html=True
+  progress = st.progress(0)
+  status_text = st.empty()
+  all_excel = []
+  session_dir = tempfile.mkdtemp(prefix="xylella_session_")
+
+  try:
+    for i, up in enumerate(uploads, start=1):
+      status_text.markdown(
+        f'<div class="info-box">📘 <b>A processar ficheiro {i}/{total}</b>'
+        f'<span class="st-processing-dots"></span><br>{up.name}</div>',
+        unsafe_allow_html=True
+      )
+
+      tmpdir = tempfile.mkdtemp(dir=session_dir)
+      tmp_path = os.path.join(tmpdir, up.name)
+      with open(tmp_path, "wb") as f:
+        f.write(up.getbuffer())
+
+      os.environ["OUTPUT_DIR"] = tmpdir
+      result = process_pdf(tmp_path)
+
+      if isinstance(result, tuple) and len(result) == 3:
+        created, n_amostras, discrepancias = result
+      else:
+        created, n_amostras, discrepancias = result, None, None
+
+      if not created:
+        generated_panel.markdown(
+          f'<div class="warning-box">⚠️ Nenhum ficheiro gerado para <b>{up.name}</b>.</div>',
+          unsafe_allow_html=True
+        )
+      else:
+        for fp in created:
+          all_excel.append(fp)
+          base_name = Path(fp).name
+
+          if discrepancias and discrepancias > 0:
+            msg = (
+              f"⚠️ <b>{base_name}</b>: ficheiro gerado. "
+              f"<span style='color:#F57C00;'>⚠️ discrepância detectada ({discrepancias})</span>"
             )
-
-            tmpdir = tempfile.mkdtemp(dir=session_dir)
-            tmp_path = os.path.join(tmpdir, up.name)
-            with open(tmp_path, "wb") as f:
-                f.write(up.getbuffer())
-
-            os.environ["OUTPUT_DIR"] = tmpdir
-            result = process_pdf(tmp_path)
-
-            if isinstance(result, tuple) and len(result) == 3:
-                created, n_amostras, discrepancias = result
-            else:
-                created, n_amostras, discrepancias = result, None, None
-
-           if not created:
-              st.markdown(
-                  f'<div class="warning-box">⚠️ Nenhum ficheiro gerado para <b>{up.name}</b>.</div>',
-                  unsafe_allow_html=True
-              )
+            css_class = "warning-box"
           else:
-              with st.expander("📄 Ficheiros gerados", expanded=True):
-                  for fp in created:
-                      all_excel.append(fp)
-                      base_name = Path(fp).name
-          
-                      # Monta mensagem com ícone e estilo
-                      if discrepancias and discrepancias > 0:
-                          msg = (
-                              f"⚠️ <b>{base_name}</b>: ficheiro gerado. "
-                              f"<span style='color:#F57C00;'>⚠️ discrepância detectada ({discrepancias})</span>"
-                          )
-                          css_class = "warning-box"
-                      else:
-                          amostras_txt = (
-                              f"({n_amostras} amostra{'s' if n_amostras != 1 else ''} OK)"
-                              if n_amostras else ""
-                          )
-                          msg = f"✅ <b>{base_name}</b>: ficheiro gerado. {amostras_txt}"
-                          css_class = "success-box"
-          
-                      st.markdown(f'<div class="{css_class}">{msg}</div>', unsafe_allow_html=True)
+            amostras_txt = f"({n_amostras} amostra{'s' if (n_amostras or 0) != 1 else ''} OK)" if n_amostras is not None else ""
+            msg = f"✅ <b>{base_name}</b>: ficheiro gerado. {amostras_txt}"
+            css_class = "success-box"
 
-            progress.progress(i / total)
-            time.sleep(0.2)
+          generated_panel.markdown(f'<div class="{css_class}">{msg}</div>', unsafe_allow_html=True)
 
-        # Conclusão — mostrar spinner enquanto gera ZIP
-        status_text.empty()
-        with st.spinner("🧩 A gerar ficheiro ZIP… aguarde alguns segundos."):
-            time.sleep(0.5)
-            if all_excel:
-                st.session_state.all_excel = all_excel
-                st.session_state.finished = True
-                st.session_state.zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
-                st.session_state.zip_bytes = build_zip(all_excel)
-            else:
-                st.warning("⚠️ Nenhum ficheiro Excel foi detetado.")
+      progress.progress(i / total)
+      time.sleep(0.2)
 
-    except Exception as e:
-        st.error(f"❌ Erro inesperado: {e}")
-    finally:
-        shutil.rmtree(session_dir, ignore_errors=True)
-        st.session_state.processing = False
+    # Conclusão — indicar claramente que está a gerar o ZIP
+    status_text.empty()
+    with st.spinner("🧩 A gerar ficheiro ZIP… aguarde alguns segundos."):
+      time.sleep(0.5)
+      if all_excel:
+        st.session_state.all_excel = all_excel
+        st.session_state.finished = True
+        st.session_state.zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
+        st.session_state.zip_bytes = build_zip(all_excel)
+      else:
+        st.warning("⚠️ Nenhum ficheiro Excel foi detetado.")
+
+  except Exception as e:
+    st.error(f"❌ Erro inesperado: {e}")
+  finally:
+    shutil.rmtree(session_dir, ignore_errors=True)
+    st.session_state.processing = False
 
 # ───────────────────────────────────────────────
 # Ecrã final — painel de sucesso + botões lado a lado
 # ───────────────────────────────────────────────
 if st.session_state.finished and st.session_state.all_excel:
-    num_files = len(st.session_state.all_excel)
+  num_files = len(st.session_state.all_excel)
 
-    st.markdown(
-        f"""
-        <div class="fade-in" style="
-          background:#E8F5E9; border-left:6px solid #2E7D32; border-radius:10px;
-          padding:1.2rem 1.6rem; margin-top:1.4rem; text-align:center;
-        ">
-          <h4 style="color:#2E7D32; font-weight:600; margin:.2rem 0 .3rem 0;">✅ Processamento concluído</h4>
-          <p style="color:#2E7D32; margin:.2rem 0 0 0;">{num_files} ficheiro{'s' if num_files>1 else ''} Excel gerado{'s' if num_files>1 else ''}.</p>
-        </div>
-        """,
-        unsafe_allow_html=True
+  st.markdown(
+    f"""
+    <div class="fade-in" style="
+      background:#E8F5E9; border-left:6px solid #2E7D32; border-radius:10px;
+      padding:1.2rem 1.6rem; margin-top:1.4rem; text-align:center;
+    ">
+      <h4 style="color:#2E7D32; font-weight:600; margin:.2rem 0 .3rem 0;">✅ Processamento concluído</h4>
+      <p style="color:#2E7D32; margin:.2rem 0 0 0;">{num_files} ficheiro{'s' if num_files>1 else ''} Excel gerado{'s' if num_files>1 else ''}.</p>
+    </div>
+    """,
+    unsafe_allow_html=True
+  )
+
+  zip_name = st.session_state.zip_name
+  zip_bytes = st.session_state.zip_bytes
+
+  st.markdown('<div class="button-row">', unsafe_allow_html=True)
+  col1, col2 = st.columns([1, 1])
+
+  with col1:
+    st.download_button(
+      "⬇️ Descarregar resultados (ZIP)",
+      data=zip_bytes,
+      file_name=zip_name,
+      mime="application/zip",
+      key="zip_download_final"
     )
 
-    zip_name = st.session_state.zip_name
-    zip_bytes = st.session_state.zip_bytes
+  with col2:
+    if st.button("🔁 Novo processamento", key="btn_new_run"):
+      with st.spinner("🔄 A reiniciar..."):
+        for k in ["processing", "finished", "uploads", "all_excel", "zip_bytes", "zip_name"]:
+          if k in st.session_state:
+            del st.session_state[k]
+        time.sleep(0.6)
+        st.rerun()
 
-    st.markdown('<div class="button-row">', unsafe_allow_html=True)
-    col1, col2 = st.columns([1, 1])
-
-    with col1:
-        st.download_button(
-            "⬇️ Descarregar resultados (ZIP)",
-            data=zip_bytes,
-            file_name=zip_name,
-            mime="application/zip",
-            key="zip_download_final"
-        )
-
-    with col2:
-        if st.button("🔁 Novo processamento", key="btn_new_run"):
-            with st.spinner("🔄 A reiniciar..."):
-                for k in ["processing", "finished", "uploads", "all_excel", "zip_bytes", "zip_name"]:
-                    if k in st.session_state:
-                        del st.session_state[k]
-                time.sleep(0.6)
-                st.rerun()
-
-    st.markdown("</div>", unsafe_allow_html=True)
+  st.markdown("</div>", unsafe_allow_html=True)
