@@ -30,7 +30,7 @@ st.markdown("""
   border-radius: 10px !important;
   padding: 1rem !important;
 }
-/* Esconde o botão Browse Files quando em processamento */
+/* Desativar botão "Browse files" enquanto processa */
 .processing [data-testid="stFileUploader"] button {
   display: none !important;
 }
@@ -60,7 +60,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ───────────────────────────────────────────────
-# Estado
+# Estado global
 # ───────────────────────────────────────────────
 if "processing" not in st.session_state:
     st.session_state.processing = False
@@ -72,18 +72,35 @@ if "uploads" not in st.session_state:
     st.session_state.uploads = []
 
 # ───────────────────────────────────────────────
-# Interface inicial
+# File uploader — limpa automaticamente uploads antigos
 # ───────────────────────────────────────────────
 container_class = "processing" if st.session_state.processing else ""
 st.markdown(f'<div class="{container_class}">', unsafe_allow_html=True)
-uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True)
-if uploads:
+
+uploads = st.file_uploader(
+    "📂 Carrega um ou vários PDFs",
+    type=["pdf"],
+    accept_multiple_files=True,
+    key="file_uploader"
+)
+
+# Se o utilizador carregar novos ficheiros, limpar estado anterior
+if uploads and uploads != st.session_state.uploads:
+    for key in ["finished", "all_excel"]:
+        st.session_state[key] = False if key == "finished" else []
     st.session_state.uploads = uploads
+
 st.markdown("</div>", unsafe_allow_html=True)
 
+# ───────────────────────────────────────────────
+# Interface principal
+# ───────────────────────────────────────────────
 if not st.session_state.processing and not st.session_state.finished:
     if st.session_state.uploads:
-        start = st.button(f"📄 Processar {len(st.session_state.uploads)} ficheiro(s) de Input", type="primary")
+        start = st.button(
+            f"📄 Processar {len(st.session_state.uploads)} ficheiro(s) de Input",
+            type="primary"
+        )
         if start:
             st.session_state.processing = True
             st.rerun()
@@ -91,7 +108,7 @@ if not st.session_state.processing and not st.session_state.finished:
         st.info("💡 Carrega ficheiros PDF para ativar o processamento.")
 
 # ───────────────────────────────────────────────
-# Execução principal
+# Execução principal (processamento)
 # ───────────────────────────────────────────────
 if st.session_state.processing and st.session_state.uploads:
     uploads = st.session_state.uploads
@@ -130,7 +147,7 @@ if st.session_state.processing and st.session_state.uploads:
                 )
             else:
                 for fp in created:
-                    all_excel.append(fp)  # 🔹 garantir que fica guardado
+                    all_excel.append(fp)
                     msg = f"🟢 <b>{Path(fp).name}</b> processado com sucesso"
                     detalhes = []
                     if n_amostras is not None:
@@ -144,11 +161,15 @@ if st.session_state.processing and st.session_state.uploads:
             progress.progress(i / total)
             time.sleep(0.2)
 
-        # ✅ Agora a verificação funciona corretamente
+        # ✅ Só mostra mensagem final se houver Excel gerados
         if len(all_excel) > 0:
             st.session_state.all_excel = all_excel
             st.session_state.finished = True
-            st.success(f"🏁 Processamento concluído ({len(all_excel)} ficheiros Excel gerados).")
+            st.markdown(
+                f'<div class="success-box">✅ Processamento concluído '
+                f'({len(all_excel)} ficheiro{"s" if len(all_excel)>1 else ""} Excel gerado{"s" if len(all_excel)>1 else ""}).</div>',
+                unsafe_allow_html=True
+            )
         else:
             st.warning("⚠️ Nenhum ficheiro Excel foi detetado.")
 
@@ -159,7 +180,7 @@ if st.session_state.processing and st.session_state.uploads:
         st.session_state.processing = False
 
 # ───────────────────────────────────────────────
-# Interface final — download + voltar
+# Download final (sem botão de novo processamento)
 # ───────────────────────────────────────────────
 if st.session_state.finished:
     all_excel = st.session_state.all_excel
@@ -173,8 +194,3 @@ if st.session_state.finished:
         mime="application/zip",
         key="download_zip"
     )
-
-    if st.button("🔁 Novo processamento", type="primary"):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.rerun()
