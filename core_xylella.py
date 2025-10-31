@@ -18,12 +18,13 @@ import re
 import time
 import tempfile
 import importlib
-import requests  # ✅ necessário para chamadas HTTP (OCR Azure)
+import requests
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
-# 🟢 Estilos Excel
+# 🟢 Biblioteca Excel
+from openpyxl import load_workbook
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 
 # ───────────────────────────────────────────────
@@ -665,6 +666,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
 
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
     return created_files
+
 
 
 
