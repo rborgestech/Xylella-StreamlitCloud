@@ -15,6 +15,7 @@ Requer:
 # -*- coding: utf-8 -*-
 import os
 import re
+import time
 import tempfile
 import importlib
 import requests  # ✅ necessário para chamadas HTTP (OCR Azure)
@@ -664,6 +665,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
 
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
     return created_files
+
 
 
 
