@@ -97,6 +97,15 @@ st.markdown("""
   color: #ffffff !important;
   border-color: #A13700 !important;
 }
+
+/* Fade-in no painel final */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); opacity: 1; }
+}
+.fade-in {
+  animation: fadeIn 0.8s ease-in-out;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -179,15 +188,17 @@ elif st.session_state.processing:
             progress.progress(i / total)
             time.sleep(0.2)
 
-        # Conclusão — parar a animação e guardar resultados
-        status_text.empty()  # remove o texto com loader
-        if all_excel:
-            st.session_state.all_excel = all_excel
-            st.session_state.finished = True
-            st.session_state.zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
-            st.session_state.zip_bytes = build_zip(all_excel)
-        else:
-            st.warning("⚠️ Nenhum ficheiro Excel foi detetado.")
+        # Conclusão — mostrar spinner enquanto gera ZIP
+        status_text.empty()
+        with st.spinner("🧩 A gerar ficheiro ZIP… aguarde alguns segundos."):
+            time.sleep(0.5)
+            if all_excel:
+                st.session_state.all_excel = all_excel
+                st.session_state.finished = True
+                st.session_state.zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
+                st.session_state.zip_bytes = build_zip(all_excel)
+            else:
+                st.warning("⚠️ Nenhum ficheiro Excel foi detetado.")
 
     except Exception as e:
         st.error(f"❌ Erro inesperado: {e}")
@@ -203,7 +214,7 @@ if st.session_state.finished and st.session_state.all_excel:
 
     st.markdown(
         f"""
-        <div style="
+        <div class="fade-in" style="
           background:#E8F5E9; border-left:6px solid #2E7D32; border-radius:10px;
           padding:1.2rem 1.6rem; margin-top:1.4rem; text-align:center;
         ">
@@ -231,9 +242,11 @@ if st.session_state.finished and st.session_state.all_excel:
 
     with col2:
         if st.button("🔁 Novo processamento", key="btn_new_run"):
-            for k in ["processing", "finished", "uploads", "all_excel", "zip_bytes", "zip_name"]:
-                if k in st.session_state:
-                    del st.session_state[k]
-            st.stop()  # reinicia sem erro nem recriar ZIP
+            with st.spinner("🔄 A reiniciar..."):
+                for k in ["processing", "finished", "uploads", "all_excel", "zip_bytes", "zip_name"]:
+                    if k in st.session_state:
+                        del st.session_state[k]
+                time.sleep(0.6)
+                st.rerun()
 
     st.markdown("</div>", unsafe_allow_html=True)
