@@ -95,9 +95,18 @@ def process_pdf(pdf_path: str) -> List[str]:
 # Gerar ZIP com resultados e logs
 # ───────────────────────────────────────────────
 def _extract_summary_info(xlsx_path: str):
-    """Lê E1 ou F1 e tenta detetar nº de amostras declaradas/processadas (ex: 'Nº Amostras: 10 / 9')."""
+    """Lê E1/F1 e tenta detetar nº de amostras declaradas/processadas (ex: 'Nº Amostras: 10 / 9')."""
     declared, processed = None, None
+
+    # ✅ Proteção — evita FileNotFoundError
+    if not xlsx_path or not os.path.exists(xlsx_path):
+        print(f"⚠️ Ficheiro não encontrado (ignorado no summary): {xlsx_path}")
+        return declared, processed
+
     try:
+        from openpyxl import load_workbook
+        import re
+
         wb = load_workbook(xlsx_path, data_only=False)
         ws = wb.worksheets[0]
 
@@ -120,7 +129,7 @@ def _extract_summary_info(xlsx_path: str):
                 declared = int(m2.group(1))
                 processed = None
 
-        # se não encontrar nada em E1/F1, tentar ler texto completo das primeiras células
+        # fallback extra — procurar nas primeiras linhas
         if declared is None:
             for row in ws.iter_rows(min_row=1, max_row=2, max_col=6, values_only=True):
                 row_text = " ".join([str(v) for v in row if v])
@@ -131,7 +140,7 @@ def _extract_summary_info(xlsx_path: str):
                     break
 
     except Exception as e:
-        print(f"⚠️ Falha ao ler E1/F1 de {os.path.basename(xlsx_path)}: {e}")
+        print(f"⚠️ Falha ao ler contagem de amostras em {os.path.basename(xlsx_path)}: {e}")
 
     return declared, processed
 
