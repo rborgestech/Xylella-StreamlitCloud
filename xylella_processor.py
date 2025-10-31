@@ -37,19 +37,31 @@ def process_pdf_with_stats(pdf_path: str):
     created, per_req = [], []
 
     for i, rows in enumerate(rows_per_req, start=1):
+        # 🔸 Ignorar resultados inválidos vindos do core
+        if not isinstance(rows, list):
+            print(f"⚠️ Requisição {i} ignorada (tipo inválido: {type(rows)})")
+            continue
         if not rows:
             print(f"⚠️ Requisição {i} sem amostras.")
             continue
 
-        fname = f"{base}.xlsx" if len(rows_per_req) == 1 else f"{base}_req{i}.xlsx"
-        declared = rows[0].get("declared_samples") if isinstance(rows[0], dict) else None
+        # 🔸 Garantir que todos os elementos são dicionários
+        dict_rows = [r for r in rows if isinstance(r, dict) and "referencia" in r]
+        if not dict_rows:
+            print(f"⚠️ Requisição {i} sem dicionários válidos (OCR incompleto).")
+            continue
 
-        out_path = core.write_to_template(rows, fname, expected_count=declared, source_pdf=pdf_path)
-        if not out_path:
+        fname = f"{base}.xlsx" if len(rows_per_req) == 1 else f"{base}_req{i}.xlsx"
+        declared = dict_rows[0].get("declared_samples")
+
+        try:
+            out_path = core.write_to_template(dict_rows, fname, expected_count=declared, source_pdf=pdf_path)
+        except Exception as e:
+            print(f"❌ Erro ao escrever Excel para req {i}: {e}")
             continue
 
         expected, processed = _read_e1_counts(out_path)
-        processed = processed or len(rows)
+        processed = processed or len(dict_rows)
         expected = expected or declared
         diff = (processed - expected) if expected is not None else None
 
