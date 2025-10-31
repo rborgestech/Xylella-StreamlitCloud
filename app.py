@@ -10,7 +10,7 @@ st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# CSS base (laranja SGS)
+# CSS personalizado (laranja SGS)
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -30,6 +30,20 @@ st.markdown("""
   border-radius: 10px !important;
   padding: 1rem !important;
 }
+.success-box {
+  background-color: #E8F5E9;
+  border-left: 5px solid #2E7D32;
+  padding: 0.7rem 1rem;
+  border-radius: 6px;
+  margin-bottom: 0.5rem;
+}
+.warning-box {
+  background-color: #FFF3E0;
+  border-left: 5px solid #F57C00;
+  padding: 0.7rem 1rem;
+  border-radius: 6px;
+  margin-bottom: 0.5rem;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -44,7 +58,7 @@ if "all_excel" not in st.session_state:
     st.session_state.all_excel = []
 
 # ───────────────────────────────────────────────
-# Ecrã inicial — sem botão até haver ficheiros
+# Ecrã inicial
 # ───────────────────────────────────────────────
 if not st.session_state.processing and not st.session_state.finished:
     uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True)
@@ -73,7 +87,8 @@ if st.session_state.processing and uploads:
 
     try:
         for i, up in enumerate(uploads, start=1):
-            status_text.markdown(f"### 📄 A processar ficheiro **{i}/{total}**: `{up.name}`")
+            # Cabeçalho com visual igual ao st.info()
+            status_text.info(f"📄 **A processar ficheiro {i}/{total}:** `{up.name}`")
 
             tmpdir = tempfile.mkdtemp(dir=session_dir)
             tmp_path = os.path.join(tmpdir, up.name)
@@ -89,17 +104,23 @@ if st.session_state.processing and uploads:
             else:
                 created, n_amostras, discrepancias = result, None, None
 
+            # Mensagens de resultado
             if not created:
-                st.warning(f"⚠️ Nenhum ficheiro gerado para {up.name}")
+                st.markdown(
+                    f'<div class="warning-box">⚠️ Nenhum ficheiro gerado para <b>{up.name}</b>.</div>',
+                    unsafe_allow_html=True
+                )
             else:
                 for fp in created:
-                    all_excel.append(fp)
-                    msg = f"✅ {Path(fp).name} gravado"
+                    msg = f"🟢 <b>{Path(fp).name}</b> processado com sucesso"
+                    detalhes = []
                     if n_amostras is not None:
-                        msg += f" — {n_amostras} amostras"
-                        if discrepancias:
-                            msg += f", {discrepancias} discrepâncias"
-                    st.success(msg)
+                        detalhes.append(f"{n_amostras} amostras")
+                    if discrepancias is not None:
+                        detalhes.append(f"{discrepancias} discrepâncias")
+                    if detalhes:
+                        msg += " — " + ", ".join(detalhes)
+                    st.markdown(f'<div class="success-box">{msg}</div>', unsafe_allow_html=True)
 
             progress.progress(i / total)
             time.sleep(0.2)
@@ -117,7 +138,7 @@ if st.session_state.processing and uploads:
         st.session_state.processing = False
 
 # ───────────────────────────────────────────────
-# Interface final — download + botão voltar
+# Interface final — download + voltar
 # ───────────────────────────────────────────────
 if st.session_state.finished:
     all_excel = st.session_state.all_excel
@@ -132,7 +153,6 @@ if st.session_state.finished:
         key="download_zip"
     )
 
-    # 🔁 Botão para voltar ao ecrã inicial
     if st.button("🔁 Novo processamento", type="primary"):
         for key in list(st.session_state.keys()):
             del st.session_state[key]
