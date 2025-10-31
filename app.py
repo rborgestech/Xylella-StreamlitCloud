@@ -10,7 +10,7 @@ st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# CSS base (laranja SGS)
+# CSS base
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -34,7 +34,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ───────────────────────────────────────────────
-# Estado persistente
+# Estado
 # ───────────────────────────────────────────────
 if "processing" not in st.session_state:
     st.session_state.processing = False
@@ -44,16 +44,19 @@ if "all_excel" not in st.session_state:
     st.session_state.all_excel = []
 
 # ───────────────────────────────────────────────
-# Interface inicial
+# Interface inicial — botão só aparece após upload
 # ───────────────────────────────────────────────
 if not st.session_state.processing and not st.session_state.finished:
     uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True)
-    start = st.button("📄 Processar ficheiros de Input", type="primary", disabled=not uploads)
 
-    if start and uploads:
-        st.session_state.processing = True
-        st.session_state.uploads = uploads
-        st.rerun()  # forçado apenas uma vez, permitido aqui
+    if uploads and len(uploads) > 0:
+        start = st.button("📄 Processar ficheiros de Input", type="primary")
+        if start:
+            st.session_state.processing = True
+            st.session_state.uploads = uploads
+            st.rerun()
+    else:
+        st.info("💡 Carrega ficheiros PDF para ativar o processamento.")
 else:
     uploads = st.session_state.get("uploads", None)
 
@@ -62,7 +65,6 @@ else:
 # ───────────────────────────────────────────────
 if st.session_state.processing and uploads:
     st.info("⏳ A processar ficheiros... aguarde até o processo terminar.")
-
     session_dir = tempfile.mkdtemp(prefix="xylella_session_")
     all_excel = []
     total = len(uploads)
@@ -81,7 +83,6 @@ if st.session_state.processing and uploads:
             os.environ["OUTPUT_DIR"] = tmpdir
             result = process_pdf(tmp_path)
 
-            # permite retorno simples ou triplo
             if isinstance(result, tuple) and len(result) == 3:
                 created, n_amostras, discrepancias = result
             else:
@@ -102,7 +103,6 @@ if st.session_state.processing and uploads:
             progress.progress(i / total)
             time.sleep(0.2)
 
-        # Fim do processamento
         if all_excel:
             st.session_state.all_excel = all_excel
             st.session_state.finished = True
@@ -116,7 +116,7 @@ if st.session_state.processing and uploads:
         st.session_state.processing = False
 
 # ───────────────────────────────────────────────
-# Interface final (download)
+# Interface final
 # ───────────────────────────────────────────────
 if st.session_state.finished:
     all_excel = st.session_state.all_excel
