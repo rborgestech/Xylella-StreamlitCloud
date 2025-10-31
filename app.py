@@ -10,7 +10,7 @@ st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# CSS personalizado (laranja SGS)
+# CSS personalizado (laranja SGS + esconder botão)
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -29,6 +29,10 @@ st.markdown("""
   border: 2px dashed #CA4300 !important;
   border-radius: 10px !important;
   padding: 1rem !important;
+}
+/* Esconde botão Browse Files quando estiver em processamento */
+.processing [data-testid="stFileUploader"] button {
+  display: none !important;
 }
 .success-box {
   background-color: #E8F5E9;
@@ -56,28 +60,39 @@ if "finished" not in st.session_state:
     st.session_state.finished = False
 if "all_excel" not in st.session_state:
     st.session_state.all_excel = []
+if "uploads" not in st.session_state:
+    st.session_state.uploads = []
 
 # ───────────────────────────────────────────────
-# Ecrã inicial
+# Interface inicial e lista de uploads
 # ───────────────────────────────────────────────
+container_class = "processing" if st.session_state.processing else ""
+st.markdown(f'<div class="{container_class}">', unsafe_allow_html=True)
+
+uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True)
+if uploads:
+    st.session_state.uploads = uploads
+
+st.markdown("</div>", unsafe_allow_html=True)
+
 if not st.session_state.processing and not st.session_state.finished:
-    uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True)
+    if st.session_state.uploads:
+        uploaded_names = [f"📄 {u.name}" for u in st.session_state.uploads]
+        st.markdown("**Ficheiros carregados:**")
+        st.markdown("<br>".join(uploaded_names), unsafe_allow_html=True)
 
-    if uploads and len(uploads) > 0:
-        start = st.button(f"📄 Processar {len(uploads)} ficheiro(s) de Input", type="primary")
+        start = st.button(f"📄 Processar {len(st.session_state.uploads)} ficheiro(s) de Input", type="primary")
         if start:
             st.session_state.processing = True
-            st.session_state.uploads = uploads
             st.rerun()
     else:
         st.info("💡 Carrega ficheiros PDF para ativar o processamento.")
-else:
-    uploads = st.session_state.get("uploads", None)
 
 # ───────────────────────────────────────────────
 # Execução principal
 # ───────────────────────────────────────────────
-if st.session_state.processing and uploads:
+if st.session_state.processing and st.session_state.uploads:
+    uploads = st.session_state.uploads
     st.info("⏳ A processar ficheiros... aguarde até o processo terminar.")
     session_dir = tempfile.mkdtemp(prefix="xylella_session_")
     all_excel = []
@@ -87,7 +102,6 @@ if st.session_state.processing and uploads:
 
     try:
         for i, up in enumerate(uploads, start=1):
-            # Cabeçalho com visual igual ao st.info()
             status_text.info(f"📄 **A processar ficheiro {i}/{total}:** `{up.name}`")
 
             tmpdir = tempfile.mkdtemp(dir=session_dir)
@@ -98,13 +112,11 @@ if st.session_state.processing and uploads:
             os.environ["OUTPUT_DIR"] = tmpdir
             result = process_pdf(tmp_path)
 
-            # permite retorno simples ou triplo
             if isinstance(result, tuple) and len(result) == 3:
                 created, n_amostras, discrepancias = result
             else:
                 created, n_amostras, discrepancias = result, None, None
 
-            # Mensagens de resultado
             if not created:
                 st.markdown(
                     f'<div class="warning-box">⚠️ Nenhum ficheiro gerado para <b>{up.name}</b>.</div>',
