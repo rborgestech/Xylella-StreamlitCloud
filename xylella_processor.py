@@ -96,24 +96,45 @@ def process_pdf(pdf_path: str) -> List[str]:
 # ───────────────────────────────────────────────
 def build_zip(file_paths: List[str]) -> bytes:
     """
-    Constrói um ZIP em memória com todos os ficheiros válidos (.xlsx + txt + logs).
-    Inclui automaticamente os _ocr_debug.txt e logs se existirem no OUTPUT_DIR.
+    Constrói um ZIP em memória com:
+      • ficheiros Excel processados (.xlsx)
+      • pasta 'debug' com ficheiros OCR e logs
+      • summary.txt com resumo de execução
     """
     mem = io.BytesIO()
+    summary_lines = []
+    summary_lines.append("🧾 RESUMO DE EXECUÇÃO\n")
+    summary_lines.append("──────────────────────────────\n")
+
+    # Gerar resumo a partir dos nomes dos ficheiros
+    for fp in file_paths:
+        name = os.path.basename(fp)
+        if "_req" in name:
+            pdf_base = name.split("_req")[0]
+            summary_lines.append(f"{pdf_base}: ficheiro gerado → {name}")
+        else:
+            summary_lines.append(f"{name}: ficheiro gerado.")
+
+    summary_lines.append("\n📊 Total: {} ficheiro(s) Excel\n".format(len(file_paths)))
+
+    # Criar o ZIP com tudo
     with zipfile.ZipFile(mem, "w", compression=zipfile.ZIP_DEFLATED) as z:
-        # Incluir ficheiros gerados (.xlsx)
+        # Excel
         for p in file_paths:
             if p and os.path.exists(p):
                 z.write(p, arcname=os.path.basename(p))
 
-        # Incluir ficheiros auxiliares (txt e logs)
+        # Ficheiros de debug → dentro de pasta "debug/"
         for extra in OUTPUT_DIR.glob("*_ocr_debug.txt"):
-            z.write(extra, arcname=os.path.basename(extra))
+            z.write(extra, arcname=f"debug/{os.path.basename(extra)}")
         for logf in OUTPUT_DIR.glob("process_log.csv"):
-            z.write(logf, arcname=os.path.basename(logf))
+            z.write(logf, arcname=f"debug/{os.path.basename(logf)}")
         for summ in OUTPUT_DIR.glob("process_summary_*.txt"):
-            z.write(summ, arcname=os.path.basename(summ))
+            z.write(summ, arcname=f"debug/{os.path.basename(summ)}")
+
+        # Adicionar summary.txt à raiz
+        z.writestr("summary.txt", "\n".join(summary_lines))
 
     mem.seek(0)
-    print(f"📦 ZIP criado com {len(file_paths)} ficheiro(s) Excel e logs.")
+    print(f"📦 ZIP criado: {len(file_paths)} ficheiros Excel + pasta debug + summary.txt.")
     return mem.read()
