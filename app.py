@@ -219,8 +219,10 @@ if st.session_state.finished and st.session_state.all_excel:
     with st.spinner("A preparar ficheiro ZIP..."):
         zip_bytes = build_zip(all_excel)
 
+    # Botões lado a lado
     st.markdown('<div class="button-row">', unsafe_allow_html=True)
     col1, col2 = st.columns([1,1])
+    
     with col1:
         st.download_button(
             "⬇️ Descarregar resultados (ZIP)",
@@ -229,8 +231,14 @@ if st.session_state.finished and st.session_state.all_excel:
             mime="application/zip",
             key="zip_download_final"
         )
+    
     with col2:
         if st.button("🔁 Novo processamento", key="btn_new_run"):
-            st.session_state.clear()
-            st.experimental_rerun()
+            with st.spinner("🔄 A reiniciar..."):
+                # Limpa o estado e força refresh controlado
+                for key in list(st.session_state.keys()):
+                    del st.session_state[key]
+                time.sleep(0.6)  # pequeno delay para não interromper renderização
+                st.experimental_rerun()
+    
     st.markdown("</div>", unsafe_allow_html=True)
