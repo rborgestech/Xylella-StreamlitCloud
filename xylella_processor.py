@@ -1,100 +1,92 @@
-# xylella_processor.py — versão estável (última funcional)
-import os, io, zipfile, re
-from pathlib import Path
-from typing import List, Dict, Any, Tuple
-import importlib
-from openpyxl import load_workbook
+# -*- coding: utf-8 -*-
+"""
+xylella_processor.py — camada intermédia entre Streamlit (app.py) e core_xylella.py
 
-core = importlib.import_module("core_xylella")
+Funções expostas:
+  • process_pdf(pdf_path) → devolve lista de ficheiros Excel gerados (.xlsx)
+  • build_zip(file_paths) → constrói ZIP em memória com .xlsx e logs
+"""
+
+import os, io, zipfile, importlib
+from pathlib import Path
+from typing import List, Dict, Any
+
+# Import dinâmico do core
+_CORE_MODULE_NAME = "core_xylella"
+core = importlib.import_module(_CORE_MODULE_NAME)
+
+# Diretório de saída
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", Path(__file__).parent / "Output"))
 OUTPUT_DIR.mkdir(exist_ok=True)
 
-def _read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
-    try:
-        wb = load_workbook(xlsx_path, data_only=True)
-        ws = wb.worksheets[0]
-        val = str(ws["E1"].value or "")
-        m = re.search(r"(\d+)\s*/\s*(\d+)", val)
-        if m:
-            return int(m.group(1)), int(m.group(2))
-    except Exception:
-        pass
-    return None, None
+# ───────────────────────────────────────────────
+# Processar PDF
+# ───────────────────────────────────────────────
+def process_pdf(pdf_path: str) -> List[str]:
+    """
+    Processa um PDF via core_xylella.
+    Cria 1 ficheiro Excel por requisição e devolve a lista dos caminhos.
+    """
+    print(f"\n📄 A processar: {os.path.basename(pdf_path)}")
 
-def _collect_debug_files(outdir: Path) -> List[str]:
-    debug_files = []
-    for pattern in ["*_ocr_debug.txt", "*.csv", "process_summary_*.txt"]:
-        for f in outdir.glob(pattern):
-            debug_files.append(str(f))
-    return debug_files
+    # Chamada ao core — devolve lista [{rows, expected}]
+    req_results = core.process_pdf_sync(pdf_path)
+    created_files = []
 
-def process_pdf_with_stats(pdf_path: str):
-    print(f"📄 A processar {os.path.basename(pdf_path)} ...")
-    rows_per_req = core.process_pdf_sync(pdf_path)
+    if not req_results:
+        print(f"⚠️ Nenhuma requisição extraída de {os.path.basename(pdf_path)}.")
+        return []
 
-    base = os.path.splitext(os.path.basename(pdf_path))[0]
-    outdir = Path(os.environ.get("OUTPUT_DIR", OUTPUT_DIR))
-    created, per_req = [], []
+    for i, req in enumerate(req_results, start=1):
+        rows = req.get("rows", [])
+        expected = req.get("expected", 0)
 
-    for i, rows in enumerate(rows_per_req, start=1):
-        # 🔸 Ignorar resultados inválidos vindos do core
-        if not isinstance(rows, list):
-            print(f"⚠️ Requisição {i} ignorada (tipo inválido: {type(rows)})")
-            continue
         if not rows:
-            print(f"⚠️ Requisição {i} sem amostras.")
+            print(f"⚠️ Requisição {i}: sem amostras válidas.")
             continue
 
-        # 🔸 Garantir que todos os elementos são dicionários
-        dict_rows = [r for r in rows if isinstance(r, dict) and "referencia" in r]
-        if not dict_rows:
-            print(f"⚠️ Requisição {i} sem dicionários válidos (OCR incompleto).")
-            continue
+        base = os.path.splitext(os.path.basename(pdf_path))[0]
+        out_name = f"{base}_req{i}.xlsx" if len(req_results) > 1 else f"{base}.xlsx"
 
-        fname = f"{base}.xlsx" if len(rows_per_req) == 1 else f"{base}_req{i}.xlsx"
-        declared = dict_rows[0].get("declared_samples")
+        # Gera o ficheiro Excel no diretório configurado
+        out_path = core.write_to_template(rows, out_name, expected_count=expected, source_pdf=pdf_path)
+        if out_path:
+            created_files.append(out_path)
 
-        try:
-            out_path = core.write_to_template(dict_rows, fname, expected_count=declared, source_pdf=pdf_path)
-        except Exception as e:
-            print(f"❌ Erro ao escrever Excel para req {i}: {e}")
-            continue
+        # Log local
+        diff = len(rows) - (expected or 0)
+        if expected and diff != 0:
+            print(f"⚠️ Requisição {i}: {len(rows)} amostras vs {expected} esperadas (diferença {diff:+d}).")
+        else:
+            print(f"✅ Requisição {i}: {len(rows)} amostras → {os.path.basename(out_path)}")
 
-        expected, processed = _read_e1_counts(out_path)
-        processed = processed or len(dict_rows)
-        expected = expected or declared
-        diff = (processed - expected) if expected is not None else None
+    print(f"🏁 {os.path.basename(pdf_path)}: {len(created_files)} ficheiro(s) Excel criados.")
+    return created_files
 
-        per_req.append({
-            "req": i,
-            "file": out_path,
-            "samples": processed,
-            "expected": expected,
-            "diff": diff,
-        })
-        created.append(out_path)
-        print(f"✅ Requisição {i}: {processed} amostras → {fname}")
 
-    stats = {
-        "pdf_name": base,
-        "req_count": len(per_req),
-        "samples_total": sum(p["samples"] for p in per_req),
-        "per_req": per_req,
-    }
-
-    debug_files = _collect_debug_files(outdir)
-    return created, stats, debug_files
-
-def build_zip_with_summary(excel_files: List[str], debug_files: List[str], summary_text: str):
+# ───────────────────────────────────────────────
+# Gerar ZIP com resultados e logs
+# ───────────────────────────────────────────────
+def build_zip(file_paths: List[str]) -> bytes:
+    """
+    Constrói um ZIP em memória com todos os ficheiros válidos (.xlsx + txt + logs).
+    Inclui automaticamente os _ocr_debug.txt e logs se existirem no OUTPUT_DIR.
+    """
     mem = io.BytesIO()
-    zip_name = f"xylella_output_{Path.cwd().name}_{os.getpid()}.zip"
-    with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as z:
-        for f in excel_files:
-            if os.path.exists(f):
-                z.write(f, arcname=os.path.basename(f))
-        for f in debug_files:
-            if os.path.exists(f):
-                z.write(f, arcname=f"debug/{os.path.basename(f)}")
-        z.writestr("summary.txt", summary_text or "")
+    with zipfile.ZipFile(mem, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        # Incluir ficheiros gerados (.xlsx)
+        for p in file_paths:
+            if p and os.path.exists(p):
+                z.write(p, arcname=os.path.basename(p))
+
+        # Incluir ficheiros auxiliares (txt e logs)
+        for extra in OUTPUT_DIR.glob("*_ocr_debug.txt"):
+            z.write(extra, arcname=os.path.basename(extra))
+        for logf in OUTPUT_DIR.glob("process_log.csv"):
+            z.write(logf, arcname=os.path.basename(logf))
+        for summ in OUTPUT_DIR.glob("process_summary_*.txt"):
+            z.write(summ, arcname=os.path.basename(summ))
+
     mem.seek(0)
-    return mem.read(), zip_name
+    print(f"📦 ZIP criado com {len(file_paths)} ficheiro(s) Excel e logs.")
+    return mem.read()
