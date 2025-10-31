@@ -299,7 +299,7 @@ def extract_context_from_text(full_text: str):
             only_date = re.sub(r"\s+", "", m_simple.group(1))
             for key in ("(*)", "(**)", "(***)"):
                 colheita_map[key] = only_date
-    default_colheita = normalize_date(next(iter(colheita_map.values()), ""))
+    default_colheita = normalize_date_str(next(iter(colheita_map.values()), ""))
     ctx["colheita_map"] = colheita_map
     ctx["default_colheita"] = default_colheita
 
@@ -312,7 +312,7 @@ def extract_context_from_text(full_text: str):
         re.I,
     )
     if m_envio:
-        ctx["data_envio"] = normalize_date(m_envio.group(1))
+        ctx["data_envio"] = normalize_date_str(m_envio.group(1)) 
     elif default_colheita:
         ctx["data_envio"] = default_colheita
     else:
@@ -738,6 +738,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
 
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
     return created_files
+
 
 
 
