@@ -143,9 +143,27 @@ elif st.session_state.processing:
         if all_excel:
             st.session_state.all_excel = all_excel
             st.session_state.finished = True
-            st.success(f"🏁 Processamento concluído ({len(all_excel)} ficheiros Excel gerados).")
+            st.markdown(
+                f'<div class="success-box">✅ Processamento concluído '
+                f'({len(all_excel)} ficheiro{"s" if len(all_excel)>1 else ""} Excel gerado{"s" if len(all_excel)>1 else ""}).</div>',
+                unsafe_allow_html=True
+            )
+
+            # 🔽 Mostra imediatamente o botão ZIP
+            zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
+            zip_bytes = build_zip(all_excel)
+
+            st.download_button(
+                "⬇️ Descarregar resultados (ZIP)",
+                data=zip_bytes,
+                file_name=zip_name,
+                mime="application/zip",
+                key="download_zip"
+            )
+
         else:
             st.warning("⚠️ Nenhum ficheiro Excel foi detetado.")
+
     except Exception as e:
         st.error(f"❌ Erro inesperado: {e}")
     finally:
