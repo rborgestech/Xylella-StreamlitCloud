@@ -1,7 +1,8 @@
 import streamlit as st
-import tempfile, os, traceback
+import tempfile, os, shutil, time, traceback
+from pathlib import Path
 from datetime import datetime
-from xylella_processor import process_pdf, build_zip_with_summary
+from xylella_processor import process_pdf_with_stats, build_zip_with_summary
 
 # ───────────────────────────────────────────────
 # Configuração base
@@ -11,117 +12,133 @@ st.title("🧪 Xylella Processor (Cloud)")
 st.caption("Faz upload de um ou vários PDFs. O sistema gera automaticamente um Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# CSS — botão laranja, hover escuro, sem vermelho
+# CSS — laranja (#CA4300), hover escuro, sem vermelhos
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
-.stButton > button[kind="primary"] {
-  background-color: #CA4300 !important;
-  border: 1px solid #CA4300 !important;
-  color: white !important;
-  font-weight: 600 !important;
-  border-radius: 6px !important;
+/* Botão principal */
+.stButton > button[kind="primary"]{
+  background-color:#CA4300!important;border:1px solid #CA4300!important;color:#fff!important;
+  font-weight:600!important;border-radius:6px!important;transition:background-color .2s ease-in-out!important;
 }
 .stButton > button[kind="primary"]:hover,
 .stButton > button[kind="primary"]:focus,
-.stButton > button[kind="primary"]:active {
-  background-color: #A13700 !important;
-  border-color: #A13700 !important;
+.stButton > button[kind="primary"]:active{
+  background-color:#A13700!important;border-color:#A13700!important;color:#fff!important;box-shadow:none!important;outline:none!important;
 }
+/* Disabled */
 .stButton > button[kind="primary"][disabled],
-.stButton > button[kind="primary"][disabled]:hover {
-  background-color: #b3b3b3 !important;
-  border: 1px solid #b3b3b3 !important;
-  color: #f2f2f2 !important;
-  cursor: not-allowed !important;
+.stButton > button[kind="primary"][disabled]:hover{
+  background-color:#b3b3b3!important;border:1px solid #b3b3b3!important;color:#f2f2f2!important;cursor:not-allowed!important;box-shadow:none!important;
 }
-[data-testid="stFileUploader"] > div:first-child {
-  border: 2px dashed #CA4300 !important;
-  border-radius: 10px !important;
-  padding: 1rem !important;
+/* File uploader */
+[data-testid="stFileUploader"] > div:first-child{
+  border:2px dashed #CA4300!important;border-radius:10px!important;padding:1rem!important;
 }
-[data-testid="stFileUploader"] > div:first-child:hover {
-  border-color: #A13700 !important;
+[data-testid="stFileUploader"] > div:first-child:hover{ border-color:#A13700!important; }
+/* Remover tonalidades vermelhas globais */
+:root{
+  --primary-color:#CA4300!important;--secondary-color:#CA4300!important;--accent-color:#CA4300!important;
 }
 </style>
 """, unsafe_allow_html=True)
 
 # ───────────────────────────────────────────────
-# Upload
+# Estado
 # ───────────────────────────────────────────────
-uploaded = st.file_uploader("📤 Carrega os PDFs", type=["pdf"], accept_multiple_files=True)
-start = st.button("📄 Processar ficheiros de Input", type="primary", disabled=not uploaded)
+if "processing" not in st.session_state:
+    st.session_state.processing = False
 
 # ───────────────────────────────────────────────
-# Processamento
+# UI
 # ───────────────────────────────────────────────
-if start:
-    st.session_state["processing"] = True
-    with st.spinner("⚙️ A processar... isto pode demorar alguns segundos."):
-        tmp = tempfile.mkdtemp()
-        outdir = os.path.join(tmp, "output")
-        os.makedirs(outdir, exist_ok=True)
-        os.environ["OUTPUT_DIR"] = outdir
+uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True)
+start = st.button("📄 Processar ficheiros de Input", type="primary", disabled=(st.session_state.processing or not uploads))
 
-        logs, ok, fail = [], 0, 0
-        created_all = []
-        summary_data = []
+# ───────────────────────────────────────────────
+# Execução
+# ───────────────────────────────────────────────
+if start and uploads:
+    st.session_state.processing = True
+    try:
+        st.info("⚙️ A processar... aguarda alguns segundos.")
+        all_excel = []
+        all_stats = []
 
-        for up in uploaded:
-            try:
-                in_path = os.path.join(tmp, up.name)
-                with open(in_path, "wb") as f:
-                    f.write(up.read())
+        # Diretório persistente final
+        final_dir = Path.cwd() / "output_final"
+        final_dir.mkdir(exist_ok=True)
 
-                st.markdown(f"### 🧾 {up.name}")
-                st.write("⏳ Início de processamento...")
+        progress = st.progress(0.0)
+        total = len(uploads)
 
-                req_files = process_pdf(in_path)
-                if not req_files:
-                    st.warning(f"⚠️ Nenhum ficheiro gerado para {up.name}")
-                    continue
+        for i, up in enumerate(uploads, start=1):
+            st.markdown(f"### 🧾 {up.name}")
+            st.write("⏳ Início de processamento...")
 
-                created_all.extend(req_files)
+            tmpdir = tempfile.mkdtemp()
+            in_path = os.path.join(tmpdir, up.name)
+            with open(in_path, "wb") as f:
+                f.write(up.getbuffer())
 
-                per_req = []
-                for i, fpath in enumerate(req_files, start=1):
-                    st.success(f"✅ {os.path.basename(fpath)} gravado")
-                    per_req.append({
-                        "req": i,
-                        "samples": len(req_files[i-1]) if hasattr(req_files[i-1], "__len__") else "—",
-                        "expected": None,  # valor pode vir do parser no futuro
-                        "file": fpath
-                    })
+            # Onde o core vai gravar os .xlsx
+            outdir = os.path.join(tmpdir, "out")
+            os.makedirs(outdir, exist_ok=True)
+            os.environ["OUTPUT_DIR"] = outdir
 
-                summary_data.append({
-                    "pdf": up.name,
-                    "req_count": len(req_files),
-                    "samples_total": sum([len(req_files[i-1]) for i in range(1, len(req_files)+1)
-                                          if hasattr(req_files[i-1], "__len__")]),
-                    "per_req": per_req
-                })
+            # → Core (com contagens corretas)
+            files, stats = process_pdf_with_stats(in_path)
 
-                ok += 1
-            except Exception as e:
-                err = traceback.format_exc()
-                logs.append(f"❌ {up.name}:\n{err}")
-                st.error(f"❌ Erro ao processar {up.name}: {e}")
-                fail += 1
+            # Copiar para pasta final e registar
+            for fp in files:
+                if os.path.exists(fp):
+                    dest = final_dir / Path(fp).name
+                    shutil.copy(fp, dest)
+                    all_excel.append(str(dest))
 
-        # ZIP final com summary.txt detalhado
-        if created_all:
+            all_stats.append(stats)
+
+            # Resumo por PDF no ecrã
+            st.success(f"✅ {up.name}: {stats['req_count']} requisições, {stats['samples_total']} amostras.")
+            for item in stats["per_req"]:
+                msg = f" • Requisição {item['req']}: {item['samples']} amostras → {Path(item['file']).name}"
+                if item.get("expected") is not None:
+                    diff = item['samples'] - (item['expected'] or 0)
+                    sign = "+" if diff > 0 else ""
+                    if diff != 0:
+                        msg += f" ⚠️ discrepância {sign}{diff} (decl={item['expected']})"
+                st.write(msg)
+
+            progress.progress(i/total)
+            time.sleep(0.2)
+
+        # ZIP + summary
+        if all_excel:
             zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
-            zip_bytes = build_zip_with_summary(created_all, summary_data)
-            st.success(f"🏁 Processamento concluído • {ok} ok, {fail} com erro.")
+            zip_bytes = build_zip_with_summary(all_excel, all_stats)
+            st.success(f"🏁 Processamento concluído ({len(all_excel)} ficheiros Excel gerados).")
             st.download_button("⬇️ Descarregar resultados (ZIP)",
-                               data=zip_bytes,
-                               file_name=zip_name,
-                               mime="application/zip")
-            st.balloons()
+                               data=zip_bytes, file_name=zip_name, mime="application/zip")
+
+            # Mostrar o mesmo summary no ecrã
+            with st.expander("📋 Resumo do processamento"):
+                for s in all_stats:
+                    st.write(f"**📄 {s['pdf']}** — {s['req_count']} req · {s['samples_total']} amostras")
+                    for r in s["per_req"]:
+                        line = f"• Req {r['req']}: {r['samples']} amostras → {Path(r['file']).name}"
+                        if r.get("expected") is not None:
+                            diff = r['samples'] - (r['expected'] or 0)
+                            sign = "+" if diff > 0 else ""
+                            if diff != 0:
+                                line += f"  ⚠️ ({sign}{diff})"
+                        st.write(line)
         else:
-            st.error("❌ Nenhum ficheiro .xlsx foi criado.")
+            st.warning("⚠️ Nenhum ficheiro Excel foi detetado.")
 
-    st.session_state["processing"] = False
-
+    except Exception as e:
+        st.error(f"❌ Erro inesperado: {e}")
+        st.code(traceback.format_exc())
+    finally:
+        st.session_state.processing = False
 else:
     st.info("💡 Carrega um ficheiro PDF e clica em **Processar ficheiros de Input**.")
