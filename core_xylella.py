@@ -23,27 +23,37 @@ from pathlib import Path
 # ───────────────────────────────────────────────
 # Diretório de saída seguro
 # ───────────────────────────────────────────────
-# Se o app principal (app.py) definir OUTPUT_DIR via os.environ, usa esse.
-# Caso contrário, grava tudo no diretório temporário do sistema (/tmp no Streamlit Cloud).
 try:
     OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", tempfile.gettempdir()))
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 except Exception as e:
-    # Fallback absoluto (nunca falha)
     OUTPUT_DIR = Path(tempfile.gettempdir())
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     print(f"[WARN] Não foi possível criar diretório de output definido: {e}. Usando {OUTPUT_DIR}")
 
 # ───────────────────────────────────────────────
-# Carregamento dinâmico do módulo principal
+# Diretório base e template
 # ───────────────────────────────────────────────
-_CORE_MODULE_NAME = "core_xylella_main" if Path("core_xylella_main.py").exists() else "core_xylella_base"
-core = importlib.import_module(_CORE_MODULE_NAME)
-
+BASE_DIR = Path(__file__).resolve().parent
 TEMPLATE_PATH = Path(os.environ.get("TEMPLATE_PATH", BASE_DIR / "TEMPLATE_PXf_SGSLABIP1056.xlsx"))
 if not TEMPLATE_PATH.exists():
     print(f"ℹ️ Aviso: TEMPLATE não encontrado em {TEMPLATE_PATH}. Será verificado no momento da escrita.")
 
+# ───────────────────────────────────────────────
+# Carregamento do módulo principal (seguro)
+# ───────────────────────────────────────────────
+try:
+    import core_xylella_main as core
+except ModuleNotFoundError:
+    try:
+        import core_xylella_base as core
+    except ModuleNotFoundError:
+        core = None
+        print("⚠️ Nenhum módulo core_xylella_* encontrado — funcionalidade limitada.")
+
+# ───────────────────────────────────────────────
+# Azure OCR — credenciais
+# ───────────────────────────────────────────────
 AZURE_API_KEY = os.environ.get("AZURE_API_KEY", "")
 AZURE_ENDPOINT = os.environ.get("AZURE_ENDPOINT", "")
 MODEL_ID = os.environ.get("AZURE_MODEL_ID", "prebuilt-document")
@@ -649,6 +659,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
 
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
     return created_files
+
 
 
 
