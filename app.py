@@ -10,7 +10,7 @@ st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# CSS base
+# CSS base (laranja SGS)
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -44,13 +44,13 @@ if "all_excel" not in st.session_state:
     st.session_state.all_excel = []
 
 # ───────────────────────────────────────────────
-# Interface inicial — botão só aparece após upload
+# Ecrã inicial — sem botão até haver ficheiros
 # ───────────────────────────────────────────────
 if not st.session_state.processing and not st.session_state.finished:
     uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True)
 
     if uploads and len(uploads) > 0:
-        start = st.button("📄 Processar ficheiros de Input", type="primary")
+        start = st.button(f"📄 Processar {len(uploads)} ficheiro(s) de Input", type="primary")
         if start:
             st.session_state.processing = True
             st.session_state.uploads = uploads
@@ -83,6 +83,7 @@ if st.session_state.processing and uploads:
             os.environ["OUTPUT_DIR"] = tmpdir
             result = process_pdf(tmp_path)
 
+            # permite retorno simples ou triplo
             if isinstance(result, tuple) and len(result) == 3:
                 created, n_amostras, discrepancias = result
             else:
@@ -116,18 +117,29 @@ if st.session_state.processing and uploads:
         st.session_state.processing = False
 
 # ───────────────────────────────────────────────
-# Interface final
+# Interface final — download + refresh automático
 # ───────────────────────────────────────────────
 if st.session_state.finished:
     all_excel = st.session_state.all_excel
     zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
     zip_bytes = build_zip(all_excel)
 
-    st.download_button("⬇️ Descarregar resultados (ZIP)", data=zip_bytes,
-                       file_name=zip_name, mime="application/zip")
+    st.download_button(
+        "⬇️ Descarregar resultados (ZIP)",
+        data=zip_bytes,
+        file_name=zip_name,
+        mime="application/zip",
+        key="download_zip"
+    )
 
-    if st.button("🔁 Novo processamento", type="primary"):
-        st.session_state.finished = False
-        st.session_state.all_excel = []
-        st.session_state.uploads = None
-        st.experimental_rerun()
+    # 🔄 Refresh automático 3s depois do download aparecer
+    st.markdown("""
+    <script>
+      const btn = window.parent.document.querySelector('button[aria-label="⬇️ Descarregar resultados (ZIP)"]');
+      if (btn) {
+        btn.addEventListener('click', () => {
+          setTimeout(() => { window.location.reload(); }, 3000);
+        });
+      }
+    </script>
+    """, unsafe_allow_html=True)
