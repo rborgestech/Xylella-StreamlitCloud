@@ -331,12 +331,13 @@ def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, An
 # ───────────────────────────────────────────────
 # Dividir em requisições e extrair por bloco
 # ───────────────────────────────────────────────
-def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path: str | None) -> List[List[Dict[str, Any]]]:
+def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path: str | None) -> List[Dict[str, Any]]:
     """
     Divide o documento em blocos (requisições) e devolve uma lista onde cada elemento
-    é a lista de amostras dessa requisição. Usa atribuição EXCLUSIVA de tabelas por bloco.
+    é um dicionário: { "rows": [...amostras...], "expected": nº_declarado }.
+    Suporta múltiplas requisições e atribuição exclusiva de tabelas por bloco.
     """
-    # Texto global
+    # Texto global OCR
     if txt_path and os.path.exists(txt_path):
         full_text = Path(txt_path).read_text(encoding="utf-8")
         print(f"📝 Contexto extraído de {os.path.basename(txt_path)}")
@@ -351,14 +352,15 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
     if count <= 1:
         context = extract_context_from_text(full_text)
         amostras = parse_xylella_tables(result_json, context, req_id=1)
-        return [amostras] if amostras else []
+        expected = context.get("declared_samples", 0)
+        return [{"rows": amostras, "expected": expected}] if amostras else []
 
     # Múltiplas requisições — segmentar por cabeçalhos
     blocos = split_if_multiple_requisicoes(full_text)
     num_blocos = len(blocos)
     out: List[List[Dict[str, Any]]] = [[] for _ in range(num_blocos)]
 
-    # Extrair refs por bloco
+    # Extrair referências por bloco
     refs_por_bloco: List[List[str]] = []
     for i, bloco in enumerate(blocos, start=1):
         refs_bloco = re.findall(
@@ -372,10 +374,9 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
     # Pré-calcular texto de cada tabela
     table_texts = [" ".join(c.get("content", "") for c in t.get("cells", [])) for t in all_tables]
 
-    # ATRIBUIÇÃO EXCLUSIVA de tabelas a blocos
-    assigned_to: List[int] = [-1] * len(all_tables)  # -1 = não atribuído
+    # Atribuição exclusiva de tabelas por bloco
+    assigned_to: List[int] = [-1] * len(all_tables)
     for ti, ttxt in enumerate(table_texts):
-        # conta matches por bloco
         scores = []
         for bi, refs in enumerate(refs_por_bloco):
             if not refs:
@@ -385,18 +386,16 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
             scores.append(cnt)
         best = max(scores) if scores else 0
         if best > 0:
-            # atribui ao bloco com mais matches; em empate, bloco mais cedo
             bi = scores.index(best)
             assigned_to[ti] = bi
 
-    # fallback: tabelas não atribuídas vão para o bloco mais “provável” (distribuição uniforme)
+    # fallback: tabelas não atribuídas → distribuição uniforme
     unassigned = [i for i, b in enumerate(assigned_to) if b < 0]
     if unassigned:
-        # distribuir por ordem, para não concentrar num bloco
         for k, ti in enumerate(unassigned):
             assigned_to[ti] = k % num_blocos
 
-    # Construir amostras por bloco com base na atribuição exclusiva
+    # Construir amostras por bloco com base na atribuição
     for bi in range(num_blocos):
         try:
             context = extract_context_from_text(blocos[bi])
@@ -415,7 +414,17 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
     # Remover blocos vazios no fim (mantém ordenação)
     out = [req for req in out if req]
     print(f"\n🏁 Concluído: {len(out)} requisições com amostras extraídas (atribuição exclusiva).")
-    return out
+
+    # 🔹 NOVO: devolve [{rows, expected}] para validação esperadas/processadas
+    results = []
+    for bi, bloco in enumerate(blocos[:len(out)], start=1):
+        ctx = extract_context_from_text(bloco)
+        expected = ctx.get("declared_samples", 0)
+        results.append({
+            "rows": out[bi - 1],
+            "expected": expected
+        })
+    return results
 
 # ───────────────────────────────────────────────
 # Escrita no TEMPLATE — 1 ficheiro por requisição
@@ -598,6 +607,7 @@ def process_pdf_sync(pdf_path: str) -> List[List[Dict[str, Any]]]:
     total_amostras = sum(len(r) for r in rows_per_req)
     print(f"✅ {base}: {len(rows_per_req)} requisições, {total_amostras} amostras extraídas.")
     return rows_per_req
+
 
 
 
