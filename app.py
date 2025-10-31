@@ -171,13 +171,14 @@ elif st.session_state.processing:
         st.session_state.processing = False
 
 # ───────────────────────────────────────────────
-# Ecrã final (download ZIP)
+# Ecrã final (download ZIP + botão voltar)
 # ───────────────────────────────────────────────
-elif st.session_state.finished:
+if st.session_state.finished and st.session_state.all_excel:
     all_excel = st.session_state.all_excel
     zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
     zip_bytes = build_zip(all_excel)
 
+    # Botão de download centrado
     st.download_button(
         "⬇️ Descarregar resultados (ZIP)",
         data=zip_bytes,
@@ -185,10 +186,10 @@ elif st.session_state.finished:
         mime="application/zip",
         key="download_zip"
     )
-  
-  # Botão "Novo processamento"
-if st.button("🔁 Novo processamento", type="primary"):
-    for key in ["uploads", "all_excel", "finished", "processing"]:
-        if key in st.session_state:
-            del st.session_state[key]
-    st.rerun()
+
+    # 🔁 Botão de novo processamento — só neste ecrã
+    if st.button("🔁 Novo processamento", type="primary"):
+        for key in ["uploads", "all_excel", "finished", "processing"]:
+            if key in st.session_state:
+                del st.session_state[key]
+        st.rerun()
