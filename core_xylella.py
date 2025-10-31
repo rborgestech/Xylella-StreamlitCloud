@@ -667,49 +667,65 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
 
     # ✍️ Escrever novas linhas ------------------------------------------
     for idx, row in enumerate(ocr_rows, start=start_row):
-        rececao_val  = row.get("datarececao", "")
-        colheita_val = row.get("datacolheita", "")
+    rececao_val  = row.get("datarececao", "")
+    colheita_val = row.get("datacolheita", "")
 
-        cell_A = ws[f"A{idx}"]
-        cell_B = ws[f"B{idx}"]
+    cell_A = ws[f"A{idx}"]  # Data receção
+    cell_B = ws[f"B{idx}"]  # Data colheita
+    cell_L = ws[f"L{idx}"]  # Data requerido
 
-        # Data de receção
-        dt_recepcao = to_excel_date(rececao_val)
-        if dt_recepcao:
-            cell_A.value = dt_recepcao
-            cell_A.number_format = "dd/mm/yyyy"
+    # 🧭 Data de receção
+    dt_recepcao = _to_datetime(rececao_val)
+    if dt_recepcao:
+        cell_A.value = dt_recepcao
+        cell_A.number_format = "dd/mm/yyyy"
+        # fórmula automática apenas se A for válida
+        cell_L.value = f"=A{idx}+30"
+        cell_L.number_format = "dd/mm/yyyy"
+    else:
+        # tenta normalizar e mostrar valor original corrigido
+        norm = normalize_date_str(rececao_val)
+        if norm:
+            cell_A.value = norm
         else:
-            cell_A.value = rececao_val
-            cell_A.fill = red_fill
+            cell_A.value = str(rececao_val).strip()
+        cell_A.fill = red_fill
+        cell_L.value = ""
+        cell_L.fill = red_fill
 
-        # Data de colheita
-        dt_colheita = to_excel_date(colheita_val)
-        if dt_colheita:
-            cell_B.value = dt_colheita
-            cell_B.number_format = "dd/mm/yyyy"
+    # 🧭 Data de colheita
+    dt_colheita = _to_datetime(colheita_val)
+    if dt_colheita:
+        cell_B.value = dt_colheita
+        cell_B.number_format = "dd/mm/yyyy"
+    else:
+        norm = normalize_date_str(colheita_val)
+        if norm:
+            cell_B.value = norm
         else:
-            cell_B.value = colheita_val
-            cell_B.fill = red_fill
+            cell_B.value = str(colheita_val).strip()
+        cell_B.fill = red_fill
 
-        ws[f"C{idx}"] = row.get("referencia", "")
-        ws[f"D{idx}"] = row.get("hospedeiro", "")
-        ws[f"E{idx}"] = row.get("tipo", "")
-        ws[f"F{idx}"] = row.get("zona", "")
-        ws[f"G{idx}"] = row.get("responsavelamostra", "")
-        ws[f"H{idx}"] = row.get("responsavelcolheita", "")
-        ws[f"I{idx}"] = ""  # Observações
-        ws[f"K{idx}"] = row.get("procedure", "")
-        ws[f"L{idx}"] = f"=A{idx}+30"  # Data requerido
+    # 🧩 Outras colunas
+    ws[f"C{idx}"] = row.get("referencia", "")
+    ws[f"D{idx}"] = row.get("hospedeiro", "")
+    ws[f"E{idx}"] = row.get("tipo", "")
+    ws[f"F{idx}"] = row.get("zona", "")
+    ws[f"G{idx}"] = row.get("responsavelamostra", "")
+    ws[f"H{idx}"] = row.get("responsavelcolheita", "")
+    ws[f"I{idx}"] = ""  # Observações
+    ws[f"K{idx}"] = row.get("procedure", "")
 
-        # Campos obrigatórios (A→G)
-        for col in ("A","B","C","D","E","F","G"):
-            c = ws[f"{col}{idx}"]
-            if not c.value or str(c.value).strip() == "":
-                c.fill = red_fill
+    # Campos obrigatórios (A→G)
+    for col in ("A", "B", "C", "D", "E", "F", "G"):
+        c = ws[f"{col}{idx}"]
+        if not c.value or str(c.value).strip() == "":
+            c.fill = red_fill
 
-        # Destaque amarelo (flags de validação)
-        if row.get("WasCorrected") or row.get("ValidationStatus") in ("review", "unknown", "no_list"):
-            ws[f"D{idx}"].fill = yellow_fill
+    # Destaque amarelo (flags de validação)
+    if row.get("WasCorrected") or row.get("ValidationStatus") in ("review", "unknown", "no_list"):
+        ws[f"D{idx}"].fill = yellow_fill
+
 
     # 📊 Validação E1:F1 -----------------------------------------------
     processed = len(ocr_rows)
@@ -825,6 +841,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
 
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
     return created_files
+
 
 
 
