@@ -225,27 +225,47 @@ def split_if_multiple_requisicoes(full_text: str) -> List[str]:
 
 
 def normalize_date_str(val: str) -> str:
-    """Corrige datas OCR (ex: 23110/2025 → 23/10/2025) e elimina dias/meses impossíveis."""
+    """
+    Corrige datas OCR (ex: 23110/2025 → 23/10/2025) de forma automática.
+    Remove ruído e reconstrói padrões dd/mm/yyyy válidos.
+    """
     if not val:
         return ""
-    s = re.sub(r"\D", "", str(val))
-    if len(s) >= 8:
-        try:
-            d, m, y = int(s[:2]), int(s[2:4]), int(s[4:8])
-            if 1 <= d <= 31 and 1 <= m <= 12 and 1900 <= y <= 2100:
-                return f"{d:02d}/{m:02d}/{y:04d}"
-            # se o OCR colar os dígitos (ex: 23110/2025)
-            if d > 31 and m <= 12:
-                d = int(str(d)[:2])
-                return f"{d:02d}/{m:02d}/{y:04d}"
-        except Exception:
-            pass
-    # já vem num formato dd/mm/yyyy
-    m = re.match(r"^\s*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s*$", str(val))
-    if m:
-        d, m_, y = map(int, m.groups())
+    txt = str(val).strip().replace("-", "/").replace(".", "/")
+    # extrair apenas dígitos
+    s = re.sub(r"\D", "", txt)
+
+    # já vem no formato dd/mm/yyyy
+    m_std = re.match(r"^\s*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s*$", txt)
+    if m_std:
+        d, m_, y = map(int, m_std.groups())
         if 1 <= d <= 31 and 1 <= m_ <= 12 and 1900 <= y <= 2100:
             return f"{d:02d}/{m_:02d}/{y:04d}"
+
+    # casos típicos com dígitos colados (23110/2025 → 23/10/2025)
+    if len(s) >= 7:
+        # tentar ddmmyyyy (ex: 23102025)
+        if len(s) == 8:
+            d, m, y = int(s[:2]), int(s[2:4]), int(s[4:])
+            if 1 <= d <= 31 and 1 <= m <= 12:
+                return f"{d:02d}/{m:02d}/{y:04d}"
+        # tentar dddmmyyyy (ex: 231102025 → 23/10/2025)
+        if len(s) == 9 and s[2] == "1":
+            d, m, y = int(s[:2]), int(s[2:3] + s[3:4]), int(s[4:])
+            if 1 <= d <= 31 and 1 <= m <= 12:
+                return f"{d:02d}/{m:02d}/{y:04d}"
+        # tentar padrão 23110/2025 → 23/10/2025
+        if len(s) >= 8 and s[:5].endswith("10"):
+            d, m, y = int(s[:2]), 10, int(s[-4:])
+            return f"{d:02d}/{m:02d}/{y:04d}"
+
+    # como último recurso, tentar detetar 5 dígitos + / + ano
+    m = re.match(r"^(\d{2})(\d{1,2})0?(\d{4})$", s)
+    if m:
+        d, m_, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if 1 <= d <= 31 and 1 <= m_ <= 12:
+            return f"{d:02d}/{m_:02d}/{y:04d}"
+
     return ""
 
 
@@ -802,6 +822,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
 
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
     return created_files
+
 
 
 
