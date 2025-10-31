@@ -185,3 +185,10 @@ elif st.session_state.finished:
         mime="application/zip",
         key="download_zip"
     )
+  
+  # Botão "Novo processamento"
+if st.button("🔁 Novo processamento", type="primary"):
+    for key in ["uploads", "all_excel", "finished", "processing"]:
+        if key in st.session_state:
+            del st.session_state[key]
+    st.rerun()
