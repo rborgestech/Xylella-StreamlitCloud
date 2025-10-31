@@ -175,15 +175,13 @@ elif st.session_state.processing:
 # Ecrã final — painel de sucesso elegante
 # ───────────────────────────────────────────────
 # ───────────────────────────────────────────────
-# Ecrã final — painel de sucesso com botões lado a lado
+# Ecrã final — painel de sucesso com dois botões (otimizado)
 # ───────────────────────────────────────────────
 if st.session_state.finished and st.session_state.all_excel:
     all_excel = st.session_state.all_excel
-    zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
-    zip_bytes = build_zip(all_excel)
     num_files = len(all_excel)
 
-    # Painel de sucesso
+    # Renderiza de imediato o painel de sucesso
     st.markdown(
         f"""
         <div style="
@@ -206,12 +204,13 @@ if st.session_state.finished and st.session_state.all_excel:
         unsafe_allow_html=True
     )
 
-    # CSS adicional para botões lado a lado
+    # CSS para botões alinhados lado a lado
     st.markdown("""
     <style>
     .button-row {
         display: flex;
         justify-content: center;
+        align-items: center;
         gap: 1rem;
         margin-top: 1.5rem;
     }
@@ -221,7 +220,7 @@ if st.session_state.finished and st.session_state.all_excel:
         color: #CA4300 !important;
         font-weight: 600 !important;
         border-radius: 8px !important;
-        padding: 0.5rem 1rem !important;
+        padding: 0.6rem 1.2rem !important;
         transition: all 0.2s ease-in-out;
     }
     .stDownloadButton button:hover, .stButton button:hover {
@@ -232,20 +231,26 @@ if st.session_state.finished and st.session_state.all_excel:
     </style>
     """, unsafe_allow_html=True)
 
-    # Linha de botões centrada
+    # Criar o ZIP apenas quando necessário
+    zip_container = st.empty()
+    with zip_container:
+        with st.spinner("A preparar ficheiro ZIP..."):
+            zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
+            zip_bytes = build_zip(all_excel)
+            time.sleep(0.2)
+
+    # Renderizar botões imediatamente após o ZIP estar pronto
     st.markdown('<div class="button-row">', unsafe_allow_html=True)
 
-    # Botão ZIP
     st.download_button(
         "⬇️ Descarregar resultados (ZIP)",
         data=zip_bytes,
         file_name=zip_name,
         mime="application/zip",
-        key="download_zip"
+        key="zip_download_final"
     )
 
-    # Botão Novo processamento
-    if st.button("🔁 Novo processamento", key="new_process"):
+    if st.button("🔁 Novo processamento", key="btn_new_run"):
         st.session_state.clear()
         st.experimental_rerun()
 
