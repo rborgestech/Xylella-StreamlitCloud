@@ -2,7 +2,7 @@ import streamlit as st
 import tempfile, os, shutil, time, traceback
 from pathlib import Path
 from datetime import datetime
-from xylella_processor import process_pdf_with_stats, build_zip_with_summary
+from xylella_processor import process_pdf, build_zip
 
 # ───────────────────────────────────────────────
 # Configuração base
