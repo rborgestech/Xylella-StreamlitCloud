@@ -10,7 +10,7 @@ st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# CSS base
+# CSS base (laranja SGS)
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -117,32 +117,23 @@ if st.session_state.processing and uploads:
         st.session_state.processing = False
 
 # ───────────────────────────────────────────────
-# Interface final — botão ZIP desaparece ao clicar
+# Interface final — download + botão voltar
 # ───────────────────────────────────────────────
 if st.session_state.finished:
     all_excel = st.session_state.all_excel
     zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
     zip_bytes = build_zip(all_excel)
 
-    placeholder = st.empty()
-    with placeholder.container():
-        st.download_button(
-            "⬇️ Descarregar resultados (ZIP)",
-            data=zip_bytes,
-            file_name=zip_name,
-            mime="application/zip",
-            key="download_zip"
-        )
+    st.download_button(
+        "⬇️ Descarregar resultados (ZIP)",
+        data=zip_bytes,
+        file_name=zip_name,
+        mime="application/zip",
+        key="download_zip"
+    )
 
-    # JavaScript: remove botão e faz refresh em 2 segundos
-    st.markdown("""
-    <script>
-      const btn = window.parent.document.querySelector('button[aria-label="⬇️ Descarregar resultados (ZIP)"]');
-      if (btn) {
-        btn.addEventListener('click', () => {
-          btn.style.display = 'none';
-          setTimeout(() => { window.location.reload(); }, 2000);
-        });
-      }
-    </script>
-    """, unsafe_allow_html=True)
+    # 🔁 Botão para voltar ao ecrã inicial
+    if st.button("🔁 Novo processamento", type="primary"):
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.rerun()
