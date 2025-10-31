@@ -197,11 +197,15 @@ def extract_context_from_text(full_text: str):
     """Extrai informações gerais da requisição (zona, DGAV, datas, nº de amostras)."""
     ctx = {}
 
+    # ───────────────────────────────────────────────
     # Zona
+    # ───────────────────────────────────────────────
     m_zona = re.search(r"Xylella\s+fastidiosa\s*\(([^)]+)\)", full_text, re.I)
     ctx["zona"] = m_zona.group(1).strip() if m_zona else "Zona Isenta"
 
-    # DGAV / Responsável
+    # ───────────────────────────────────────────────
+    # DGAV / Responsável pela colheita
+    # ───────────────────────────────────────────────
     responsavel, dgav = None, None
     m_hdr = re.search(
         r"Amostra(?:s|\(s\))?\s*colhida(?:s|\(s\))?\s*por\s*DGAV\s*[:\-]?\s*(.*)",
@@ -216,6 +220,7 @@ def extract_context_from_text(full_text: str):
                 responsavel = ln
                 break
         if responsavel:
+            # Remove emails e ruído
             responsavel = re.sub(r"\S+@dgav\.pt|\S+@\S+", "", responsavel, flags=re.I)
             responsavel = re.sub(r"PROGRAMA.*|Data.*|N[º°].*", "", responsavel, flags=re.I)
             responsavel = re.sub(r"[:;,.\-–—]+$", "", responsavel).strip()
@@ -229,7 +234,9 @@ def extract_context_from_text(full_text: str):
     ctx["dgav"] = dgav
     ctx["responsavel_colheita"] = None
 
-    # Datas de colheita (mapa de asteriscos, se existir)
+    # ───────────────────────────────────────────────
+    # Datas de colheita (mapeamento com asteriscos, se existir)
+    # ───────────────────────────────────────────────
     colheita_map = {}
     for m in re.finditer(r"(\d{1,2}/\d{1,2}/\d{4})\s*\(\s*(\*+)\s*\)", full_text):
         colheita_map[f"({m.group(2).replace(' ', '')})"] = m.group(1)
@@ -243,7 +250,9 @@ def extract_context_from_text(full_text: str):
     ctx["colheita_map"] = colheita_map
     ctx["default_colheita"] = default_colheita
 
-    # Data de envio
+    # ───────────────────────────────────────────────
+    # Data de envio ao laboratório
+    # ───────────────────────────────────────────────
     m_envio = re.search(
         r"Data\s+(?:do|de)\s+envio(?:\s+ao\s+laborat[oó]rio)?[:\-\s]*([0-9/\-\s]+)",
         full_text, re.I,
@@ -255,15 +264,44 @@ def extract_context_from_text(full_text: str):
     else:
         ctx["data_envio"] = datetime.now().strftime("%d/%m/%Y")
 
-    # Nº de amostras declaradas (se existir no cabeçalho)
+    # ───────────────────────────────────────────────
+    # Nº de amostras declaradas (melhorado e tolerante a erros de OCR)
+    # ───────────────────────────────────────────────
     flat = re.sub(r"\s+", " ", full_text)
-    m_decl = re.search(r"N[º°]?\s*de\s*amostras(?:\s+neste\s+envio)?\s*[:\-]?\s*(\d{1,4})", flat, re.I)
-    try:
-        ctx["declared_samples"] = int(m_decl.group(1)) if m_decl else 0
-    except Exception:
+
+    # Regex mais abrangente: aceita 0–9 e também caracteres confundidos no OCR (O, o, Q)
+    m_decl = re.search(
+        r"N[º°]?\s*de\s*amostras(?:\s+neste\s+envio)?\s*[:\-]?\s*([0-9OoQ]{1,4})",
+        flat,
+        re.I,
+    )
+
+    if m_decl:
+        raw = m_decl.group(1).strip()
+
+        # 🔧 Correção de erros frequentes de OCR:
+        # - "O" ou "o" → "0"
+        # - "Q" → "0"
+        raw = raw.replace("O", "0").replace("o", "0").replace("Q", "0")
+
+        try:
+            ctx["declared_samples"] = int(raw)
+        except ValueError:
+            ctx["declared_samples"] = 0
+    else:
         ctx["declared_samples"] = 0
 
+    # 🧠 Fallback: se o OCR falhar mas já existirem amostras detetadas,
+    # usa o número de amostras efetivamente extraídas.
+    if ctx["declared_samples"] == 0:
+        try:
+            if "samples" in locals() and samples:
+                ctx["declared_samples"] = len(samples)
+        except Exception:
+            pass
+
     return ctx
+
 
 def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, Any]]:
     """Extrai as amostras das tabelas Azure OCR, aplicando o contexto da requisição."""
@@ -636,6 +674,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
 
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
     return created_files
+
 
 
 
