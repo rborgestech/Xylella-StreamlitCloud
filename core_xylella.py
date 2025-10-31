@@ -583,30 +583,61 @@ def append_process_log(pdf_name, req_id, processed, expected, out_path=None, sta
 # ───────────────────────────────────────────────
 # API pública usada pela app Streamlit
 # ───────────────────────────────────────────────
-def process_pdf_sync(pdf_path: str) -> List[List[Dict[str, Any]]]:
+def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
     """
     Executa o OCR Azure direto ao PDF e o parser Colab integrado.
-    Devolve: lista de requisições (cada item = lista de amostras dict).
-    A escrita do Excel é feita a jusante (no xylella_processor.py), 1 ficheiro por requisição.
+    Devolve: lista de requisições, cada uma no formato:
+      {
+        "rows": [ {dados da amostra}, ... ],
+        "expected": nº_declarado
+      }
+    A escrita do Excel é feita a jusante (no xylella_processor.py),
+    1 ficheiro por requisição, com validação esperadas/processadas.
     """
     base = os.path.basename(pdf_path)
     print(f"\n🧪 Início de processamento: {base}")
 
-    # 1) OCR Azure direto
+    # 1️⃣ Executar OCR Azure
     result_json = azure_analyze_pdf(pdf_path)
 
-    # 2) Guardar texto OCR global (debug)
+    # 2️⃣ Guardar texto OCR global para debug
     txt_path = OUTPUT_DIR / f"{os.path.splitext(base)[0]}_ocr_debug.txt"
     txt_path.write_text(extract_all_text(result_json), encoding="utf-8")
     print(f"📝 Texto OCR bruto guardado em: {txt_path}")
 
-    # 3) Parser — dividir em requisições e extrair amostras
-    rows_per_req = parse_all_requisitions(result_json, pdf_path, str(txt_path))
+    # 3️⃣ Parser — dividir em requisições e extrair amostras
+    req_results = parse_all_requisitions(result_json, pdf_path, str(txt_path))
 
-    # Log de resumo
-    total_amostras = sum(len(r) for r in rows_per_req)
-    print(f"✅ {base}: {len(rows_per_req)} requisições, {total_amostras} amostras extraídas.")
-    return rows_per_req
+    # 4️⃣ Log e resumo de validação
+    total_amostras = sum(len(req["rows"]) for req in req_results)
+    print(f"✅ {base}: {len(req_results)} requisições, {total_amostras} amostras extraídas.")
+
+    # 5️⃣ Escrever ficheiros Excel diretamente (para compatibilidade cloud)
+    created_files = []
+    for i, req in enumerate(req_results, start=1):
+        rows = req.get("rows", [])
+        expected = req.get("expected", 0)
+
+        if not rows:
+            print(f"⚠️ Requisição {i}: sem amostras — ignorada.")
+            continue
+
+        base_name = os.path.splitext(base)[0]
+        out_name = f"{base_name}_req{i}.xlsx" if len(req_results) > 1 else f"{base_name}.xlsx"
+
+        out_path = write_to_template(rows, out_name, expected_count=expected, source_pdf=pdf_path)
+        created_files.append(out_path)
+
+        diff = len(rows) - (expected or 0)
+        if expected and diff != 0:
+            print(f"⚠️ Requisição {i}: {len(rows)} amostras vs {expected} declaradas (diferença {diff:+d}).")
+        else:
+            print(f"✅ Requisição {i}: {len(rows)} amostras gravadas → {out_path}")
+
+    print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
+    return created_files
+
+
 
 
 
