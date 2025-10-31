@@ -222,26 +222,71 @@ def split_if_multiple_requisicoes(full_text: str) -> List[str]:
     print(f"🔍 Detetadas {len(blocos)} requisições distintas (por cabeçalho).")
     return blocos
 
-import re
 
-import re
-from datetime import datetime, date
 
 def normalize_date_str(val: str) -> str:
-    """Devolve 'dd/mm/yyyy' quando for possível reconstruir a data a partir do OCR."""
+    """Corrige datas OCR (ex: 23110/2025 → 23/10/2025) e elimina dias/meses impossíveis."""
     if not val:
         return ""
-    s = re.sub(r"\D", "", val)  # só dígitos
+    s = re.sub(r"\D", "", str(val))
     if len(s) >= 8:
-        d, m, y = int(s[:2]), int(s[2:4]), int(s[4:8])
-        if 1 <= d <= 31 and 1 <= m <= 12:
-            return f"{d:02d}/{m:02d}/{y:04d}"
-    # já vem em dd/mm/yyyy?
-    m = re.match(r"^\s*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s*$", val)
+        try:
+            d, m, y = int(s[:2]), int(s[2:4]), int(s[4:8])
+            if 1 <= d <= 31 and 1 <= m <= 12 and 1900 <= y <= 2100:
+                return f"{d:02d}/{m:02d}/{y:04d}"
+            # se o OCR colar os dígitos (ex: 23110/2025)
+            if d > 31 and m <= 12:
+                d = int(str(d)[:2])
+                return f"{d:02d}/{m:02d}/{y:04d}"
+        except Exception:
+            pass
+    # já vem num formato dd/mm/yyyy
+    m = re.match(r"^\s*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s*$", str(val))
     if m:
         d, m_, y = map(int, m.groups())
-        return f"{d:02d}/{m_:02d}/{y:04d}"
-    return val.strip()
+        if 1 <= d <= 31 and 1 <= m_ <= 12 and 1900 <= y <= 2100:
+            return f"{d:02d}/{m_:02d}/{y:04d}"
+    return ""
+
+
+def _is_valid_date(value: str) -> bool:
+    """Valida se a string é uma data válida (corrigindo erros OCR)."""
+    if isinstance(value, datetime):
+        return True
+    if not value:
+        return False
+
+    value = normalize_date_str(value)
+    if not value:
+        return False
+
+    try:
+        dt = datetime.strptime(value, "%d/%m/%Y")
+        return 1900 <= dt.year <= 2100
+    except Exception:
+        return False
+
+
+def _to_datetime(value: str):
+    """Converte texto OCR em datetime, corrigindo formatos errados."""
+    if isinstance(value, datetime):
+        return value
+    if not value:
+        return None
+
+    value = normalize_date_str(value)
+    if not value:
+        return None
+
+    try:
+        dt = datetime.strptime(value, "%d/%m/%Y")
+        if dt.year < 1900:
+            return None
+        return dt
+    except Exception:
+        return None
+
+
 
 
 
@@ -757,6 +802,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
 
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
     return created_files
+
 
 
 
