@@ -238,7 +238,8 @@ def extract_context_from_text(full_text: str):
     responsavel, dgav = None, None
     m_hdr = re.search(
         r"Amostra(?:s|\(s\))?\s*colhida(?:s|\(s\))?\s*por\s*DGAV\s*[:\-]?\s*(.*)",
-        full_text, re.IGNORECASE,
+        full_text,
+        re.IGNORECASE,
     )
     if m_hdr:
         tail = full_text[m_hdr.end():]
@@ -284,7 +285,8 @@ def extract_context_from_text(full_text: str):
     # ───────────────────────────────────────────────
     m_envio = re.search(
         r"Data\s+(?:do|de)\s+envio(?:\s+ao\s+laborat[oó]rio)?[:\-\s]*([0-9/\-\s]+)",
-        full_text, re.I,
+        full_text,
+        re.I,
     )
     if m_envio:
         ctx["data_envio"] = re.sub(r"\s+", "", m_envio.group(1))
@@ -294,34 +296,44 @@ def extract_context_from_text(full_text: str):
         ctx["data_envio"] = datetime.now().strftime("%d/%m/%Y")
 
     # ───────────────────────────────────────────────
-    # Nº de amostras declaradas (melhorado e tolerante a erros de OCR)
+    # Nº de amostras declaradas (robusto a OCR e placeholders)
     # ───────────────────────────────────────────────
     flat = re.sub(r"\s+", " ", full_text)
 
-    # Regex mais abrangente: aceita 0–9 e também caracteres confundidos no OCR (O, o, Q)
+    # Normalizações de OCR: NBSP e sublinhados usados como "campo em branco"
+    flat = flat.replace("\u00A0", " ").replace("_", " ")
+
+    # Aceita 'º', '°' ou 'o' depois do N; permite lixo opcional antes do número
     m_decl = re.search(
-        r"N[º°]?\s*de\s*amostras(?:\s+neste\s+envio)?\s*[:\-]?\s*([0-9OoQ]{1,4})",
+        r"N[º°o]?\s*de\s*amostras(?:\s+neste\s+envio)?\s*[:\-]?\s*[\s\-]*([0-9OoQ]{1,4})\b",
         flat,
         re.I,
     )
 
     if m_decl:
         raw = m_decl.group(1).strip()
-
-        # 🔧 Correção de erros frequentes de OCR:
-        # - "O" ou "o" → "0"
-        # - "Q" → "0"
+        # Corrige erros típicos de OCR
         raw = raw.replace("O", "0").replace("o", "0").replace("Q", "0")
-
         try:
             ctx["declared_samples"] = int(raw)
         except ValueError:
             ctx["declared_samples"] = 0
     else:
-        ctx["declared_samples"] = 0
+        # fallback por linha: apanha o nº na linha completa
+        line = None
+        m_line = re.search(r"(N[º°o]?\s*de\s*amostras(?:\s+neste\s+envio)?[^\n]*)", full_text, re.I)
+        if m_line:
+            line = m_line.group(1).replace("\u00A0", " ").replace("_", " ")
+            m_num = re.search(r"([0-9OoQ]{1,4})\b", line)
+            if m_num:
+                raw = m_num.group(1).replace("O", "0").replace("o", "0").replace("Q", "0")
+                ctx["declared_samples"] = int(raw) if raw.isdigit() else 0
+            else:
+                ctx["declared_samples"] = 0
+        else:
+            ctx["declared_samples"] = 0
 
-    # 🧠 Fallback: se o OCR falhar mas já existirem amostras detetadas,
-    # usa o número de amostras efetivamente extraídas.
+    # 🧠 Fallback inteligente: se 0 mas já há amostras detetadas, usa a contagem real
     if ctx["declared_samples"] == 0:
         try:
             if "samples" in locals() and samples:
@@ -703,6 +715,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
 
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
     return created_files
+
 
 
 
