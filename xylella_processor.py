@@ -1,21 +1,20 @@
-# xylella_processor.py — versão final Cloud
-# Constrói ficheiros Excel, recolhe debug e gera ZIP com summary.
+# xylella_processor.py — versão final Cloud (corrigida)
+# Gere os ficheiros Excel, recolhe debug e cria ZIP com summary.
 from __future__ import annotations
-import os, io, zipfile, re, shutil
+import os, io, zipfile, re
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
 import importlib
 from openpyxl import load_workbook
 
 # ───────────────────────────────────────────────
-# Importação dinâmica do core
+# Importação do core_xylella
 # ───────────────────────────────────────────────
 _CORE_MODULE_NAME = "core_xylella"
 core = importlib.import_module(_CORE_MODULE_NAME)
 
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", Path(__file__).parent / "Output"))
 OUTPUT_DIR.mkdir(exist_ok=True)
-
 
 # ───────────────────────────────────────────────
 # Utilitários internos
@@ -44,7 +43,7 @@ def _collect_debug_files(outdir: Path) -> List[str]:
 
 
 # ───────────────────────────────────────────────
-# Funções principais
+# Função principal
 # ───────────────────────────────────────────────
 def process_pdf_with_stats(pdf_path: str) -> Tuple[List[str], Dict[str, Any], List[str]]:
     """
@@ -61,18 +60,22 @@ def process_pdf_with_stats(pdf_path: str) -> Tuple[List[str], Dict[str, Any], Li
     created, per_req = [], []
 
     for i, rows in enumerate(rows_per_req, start=1):
-        fname = f"{base}.xlsx" if len(rows_per_req) == 1 else f"{base}_req{i}.xlsx"
-        declared = None
-        if rows and isinstance(rows[0], dict):
-            declared = rows[0].get("declared_samples")
+        # 🔹 Filtrar entradas inválidas (strings, None, etc.)
+        valid_rows = [r for r in rows if isinstance(r, dict) and "datarececao" in r]
+        if not valid_rows:
+            print(f"⚠️ Requisição {i} ignorada — sem amostras válidas.")
+            continue
 
-        out_path = core.write_to_template(rows, fname, expected_count=declared, source_pdf=pdf_path)
+        fname = f"{base}.xlsx" if len(rows_per_req) == 1 else f"{base}_req{i}.xlsx"
+        declared = valid_rows[0].get("declared_samples") if "declared_samples" in valid_rows[0] else None
+
+        out_path = core.write_to_template(valid_rows, fname, expected_count=declared, source_pdf=pdf_path)
         if not out_path:
             continue
         created.append(out_path)
 
         expected, processed = _read_e1_counts(out_path)
-        processed = processed or len(rows)
+        processed = processed or len(valid_rows)
         expected = expected or declared
         diff = processed - expected if expected is not None else None
 
@@ -95,17 +98,25 @@ def process_pdf_with_stats(pdf_path: str) -> Tuple[List[str], Dict[str, Any], Li
     return created, stats, debug_files
 
 
+# ───────────────────────────────────────────────
+# ZIP com summary e debug
+# ───────────────────────────────────────────────
 def build_zip_with_summary(excel_files: List[str], debug_files: List[str], summary_text: str) -> Tuple[bytes, str]:
     """Constrói um ZIP com ficheiros Excel, pasta debug e summary.txt."""
     mem = io.BytesIO()
-    zip_name = f"xylella_output_{Path.cwd().stem}_{os.getpid()}.zip"
+    zip_name = f"xylella_output_{os.path.basename(os.getcwd())}_{os.getpid()}.zip"
+
     with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as z:
+        # Excel na raiz
         for f in excel_files:
             if os.path.exists(f):
                 z.write(f, arcname=os.path.basename(f))
+        # pasta debug/
         for f in debug_files:
             if os.path.exists(f):
                 z.write(f, arcname=f"debug/{os.path.basename(f)}")
+        # summary.txt
         z.writestr("summary.txt", summary_text or "")
+
     mem.seek(0)
     return mem.read(), zip_name
