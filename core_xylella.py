@@ -224,31 +224,25 @@ def split_if_multiple_requisicoes(full_text: str) -> List[str]:
 
 import re
 
-def normalize_date(value: str) -> str:
-    """
-    Corrige datas reconhecidas de forma incorreta pelo OCR.
-    Ex: '23110/2025' → '23/10/2025', '1110/2025' → '11/10/2025'
-    """
-    if not value:
-        return value
+import re
+from datetime import datetime, date
 
-    value = value.strip().replace(" ", "").replace("-", "/")
-
-    # Caso típico: 23110/2025 (dia e mês colados)
-    m = re.match(r"^(\d{2})(1[0-2]|0[1-9])0?/?(\d{4})$", value)
+def normalize_date_str(val: str) -> str:
+    """Devolve 'dd/mm/yyyy' quando for possível reconstruir a data a partir do OCR."""
+    if not val:
+        return ""
+    s = re.sub(r"\D", "", val)  # só dígitos
+    if len(s) >= 8:
+        d, m, y = int(s[:2]), int(s[2:4]), int(s[4:8])
+        if 1 <= d <= 31 and 1 <= m <= 12:
+            return f"{d:02d}/{m:02d}/{y:04d}"
+    # já vem em dd/mm/yyyy?
+    m = re.match(r"^\s*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s*$", val)
     if m:
-        return f"{m.group(1)}/{m.group(2)}/{m.group(3)}"
+        d, m_, y = map(int, m.groups())
+        return f"{d:02d}/{m_:02d}/{y:04d}"
+    return val.strip()
 
-    # Caso comum: 23110/2025 (sem o / antes do mês)
-    m = re.match(r"^(\d{2})([01]\d)/?(\d{4})$", value)
-    if m:
-        return f"{m.group(1)}/{m.group(2)}/{m.group(3)}"
-
-    # Já está bem formatada? (dd/mm/yyyy)
-    if re.match(r"^\d{1,2}/\d{1,2}/\d{4}$", value):
-        return value
-
-    return value
 
 
 def extract_context_from_text(full_text: str):
@@ -744,6 +738,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
 
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
     return created_files
+
 
 
 
