@@ -24,44 +24,71 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 # ───────────────────────────────────────────────
 def process_pdf(pdf_path: str) -> List[str]:
     """
-    Processa um PDF via core_xylella.
-    Cria 1 ficheiro Excel por requisição e devolve a lista dos caminhos.
+    Processa um PDF via core_xylella e devolve a lista de caminhos .xlsx criados.
+    Aguenta 3 formatos de retorno do core:
+      A) List[List[Dict]]  -> escreve 1 xlsx por req
+      B) List[Dict]        -> escreve 1 xlsx
+      C) List[str]         -> já são caminhos xlsx -> devolve tal como estão
     """
     print(f"\n📄 A processar: {os.path.basename(pdf_path)}")
+    base = os.path.splitext(os.path.basename(pdf_path))[0]
 
-    # Chamada ao core — devolve lista [{rows, expected}]
     req_results = core.process_pdf_sync(pdf_path)
-    created_files = []
-
     if not req_results:
-        print(f"⚠️ Nenhuma requisição extraída de {os.path.basename(pdf_path)}.")
+        print(f"⚠️ Nenhuma requisição extraída de {base}.")
         return []
 
-    for i, req in enumerate(req_results, start=1):
-        rows = req.get("rows", [])
-        expected = req.get("expected", 0)
+    # Caso C) já são ficheiros .xlsx (strings)
+    if isinstance(req_results, list) and all(isinstance(x, str) for x in req_results):
+        created_files = [p for p in req_results if os.path.exists(p)]
+        print(f"🟢 Core devolveu {len(created_files)} ficheiros já criados.")
+        return created_files
 
-        if not rows:
-            print(f"⚠️ Requisição {i}: sem amostras válidas.")
-            continue
+    created_files: List[str] = []
 
-        base = os.path.splitext(os.path.basename(pdf_path))[0]
-        out_name = f"{base}_req{i}.xlsx" if len(req_results) > 1 else f"{base}.xlsx"
+    def _write_one_req(rows: list, req_idx: int, total_reqs: int):
+        """Escreve uma requisição (lista de dicts) no template e retorna o caminho."""
+        if not rows or not isinstance(rows, list):
+            return None
+        if not all(isinstance(r, dict) for r in rows):
+            # proteção extra: se por algum motivo vierem strings aqui, ignora
+            print(f"⚠️ Req {req_idx}: formato inesperado (não é lista de dicts). Ignorado.")
+            return None
 
-        # Gera o ficheiro Excel no diretório configurado
+        # tenta obter expected se vier embutido em cada row (compatibilidade futura)
+        expected = None
+        try:
+            if rows and isinstance(rows[0], dict) and "expected" in rows[0]:
+                expected = rows[0].get("expected")
+        except Exception:
+            expected = None
+
+        out_name = f"{base}_req{req_idx}.xlsx" if total_reqs > 1 else f"{base}.xlsx"
         out_path = core.write_to_template(rows, out_name, expected_count=expected, source_pdf=pdf_path)
-        if out_path:
-            created_files.append(out_path)
+        if out_path and os.path.exists(out_path):
+            print(f"✅ Requisição {req_idx}: {len(rows)} amostras → {os.path.basename(out_path)}")
+            return out_path
+        return None
 
-        # Log local
-        diff = len(rows) - (expected or 0)
-        if expected and diff != 0:
-            print(f"⚠️ Requisição {i}: {len(rows)} amostras vs {expected} esperadas (diferença {diff:+d}).")
-        else:
-            print(f"✅ Requisição {i}: {len(rows)} amostras → {os.path.basename(out_path)}")
+    # Caso B) uma única requisição (lista de dicts)
+    if isinstance(req_results, list) and req_results and all(isinstance(x, dict) for x in req_results):
+        p = _write_one_req(req_results, 1, 1)
+        return [p] if p else []
 
-    print(f"🏁 {os.path.basename(pdf_path)}: {len(created_files)} ficheiro(s) Excel criados.")
-    return created_files
+    # Caso A) várias requisições (lista de listas de dicts)
+    if isinstance(req_results, list) and all(isinstance(x, list) for x in req_results):
+        total = len(req_results)
+        for i, rows in enumerate(req_results, start=1):
+            p = _write_one_req(rows, i, total)
+            if p:
+                created_files.append(p)
+        print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel criados.")
+        return created_files
+
+    # Formato desconhecido — não faz nada
+    print(f"⚠️ Formato de retorno inesperado de core.process_pdf_sync para {base}.")
+    return []
+
 
 
 # ───────────────────────────────────────────────
