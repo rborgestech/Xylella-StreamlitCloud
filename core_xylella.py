@@ -19,7 +19,7 @@ import tempfile
 import importlib
 from datetime import datetime
 from pathlib import Path
-from openpyxl.styles import PatternFill
+from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 
 # ───────────────────────────────────────────────
 # Diretório de saída seguro
@@ -660,6 +660,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
 
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
     return created_files
+
 
 
 
