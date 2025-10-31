@@ -170,8 +170,9 @@ elif st.session_state.processing:
         shutil.rmtree(session_dir, ignore_errors=True)
         st.session_state.processing = False
 
+
 # ───────────────────────────────────────────────
-# Ecrã final — visual melhorado + retorno rápido
+# Ecrã final — painel de sucesso elegante
 # ───────────────────────────────────────────────
 if st.session_state.finished and st.session_state.all_excel:
     all_excel = st.session_state.all_excel
@@ -179,39 +180,43 @@ if st.session_state.finished and st.session_state.all_excel:
     zip_bytes = build_zip(all_excel)
     num_files = len(all_excel)
 
+    # Painel verde de sucesso com botões centrados
     st.markdown(
         f"""
         <div style="
-            background-color:#E8F5E9;
-            border-left:6px solid #2E7D32;
-            border-radius:10px;
-            padding:1rem 1.5rem;
-            margin-top:1.5rem;
-            text-align:center;
+            background-color: #E8F5E9;
+            border-left: 6px solid #2E7D32;
+            border-radius: 10px;
+            padding: 2rem 2rem 1.5rem 2rem;
+            margin-top: 2rem;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
         ">
-            <h4 style="color:#2E7D32; margin-bottom:0.5rem;">
-                🧪 Processamento concluído — {num_files} ficheiro{'s' if num_files>1 else ''} Excel gerado{'s' if num_files>1 else ''}.
+            <h4 style="color:#2E7D32; font-size:1.3rem; margin-bottom:0.5rem;">
+                ✅ Processamento concluído
             </h4>
-            <div style="margin-top:1rem; display:flex; justify-content:center; gap:1rem;">
-                <div>
-                    {st.download_button(
-                        "⬇️ Descarregar resultados (ZIP)",
-                        data=zip_bytes,
-                        file_name=zip_name,
-                        mime="application/zip",
-                        key="download_zip",
-                    )}
-                </div>
-                <div>
-                    {st.button("🔁 Novo processamento", type="primary", key="new_process")}
-                </div>
-            </div>
+            <p style="color:#2E7D32; font-size:1.1rem; margin-top:0;">
+                {num_files} ficheiro{'s' if num_files>1 else ''} Excel gerado{'s' if num_files>1 else ''}.
+            </p>
         </div>
         """,
         unsafe_allow_html=True
     )
 
-    # 🚀 Retorno rápido e limpo
-    if st.session_state.get("new_process"):
-        st.session_state.clear()
-        st.experimental_rerun()
+    # Espaçamento suave antes dos botões
+    st.markdown("<div style='height:0.8rem;'></div>", unsafe_allow_html=True)
+
+    # Coluna dupla para centralizar botões
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.download_button(
+            "⬇️ Descarregar resultados (ZIP)",
+            data=zip_bytes,
+            file_name=zip_name,
+            mime="application/zip",
+            key="download_zip"
+        )
+        st.markdown("<div style='height:0.6rem;'></div>", unsafe_allow_html=True)
+        if st.button("🔁 Novo processamento", type="primary", use_container_width=True):
+            st.session_state.clear()
+            st.experimental_rerun()
