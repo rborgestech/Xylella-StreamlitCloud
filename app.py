@@ -170,20 +170,33 @@ elif st.session_state.processing:
             else:
                 created, n_amostras, discrepancias = result, None, None
 
-            if not created:
-                st.markdown(f'<div class="warning-box">⚠️ Nenhum ficheiro gerado para <b>{up.name}</b>.</div>', unsafe_allow_html=True)
-            else:
-                for fp in created:
-                    all_excel.append(fp)
-                    msg = f"🟢 <b>{Path(fp).name}</b> processado com sucesso"
-                    detalhes = []
-                    if n_amostras is not None:
-                        detalhes.append(f"{n_amostras} amostras")
-                    if discrepancias is not None:
-                        detalhes.append(f"{discrepancias} discrepâncias")
-                    if detalhes:
-                        msg += " — " + ", ".join(detalhes)
-                    st.markdown(f'<div class="success-box">{msg}</div>', unsafe_allow_html=True)
+           if not created:
+              st.markdown(
+                  f'<div class="warning-box">⚠️ Nenhum ficheiro gerado para <b>{up.name}</b>.</div>',
+                  unsafe_allow_html=True
+              )
+          else:
+              with st.expander("📄 Ficheiros gerados", expanded=True):
+                  for fp in created:
+                      all_excel.append(fp)
+                      base_name = Path(fp).name
+          
+                      # Monta mensagem com ícone e estilo
+                      if discrepancias and discrepancias > 0:
+                          msg = (
+                              f"⚠️ <b>{base_name}</b>: ficheiro gerado. "
+                              f"<span style='color:#F57C00;'>⚠️ discrepância detectada ({discrepancias})</span>"
+                          )
+                          css_class = "warning-box"
+                      else:
+                          amostras_txt = (
+                              f"({n_amostras} amostra{'s' if n_amostras != 1 else ''} OK)"
+                              if n_amostras else ""
+                          )
+                          msg = f"✅ <b>{base_name}</b>: ficheiro gerado. {amostras_txt}"
+                          css_class = "success-box"
+          
+                      st.markdown(f'<div class="{css_class}">{msg}</div>', unsafe_allow_html=True)
 
             progress.progress(i / total)
             time.sleep(0.2)
