@@ -10,7 +10,7 @@ st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# CSS (laranja SGS + ajustes visuais)
+# CSS — laranja SGS + estilos de status
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -30,11 +30,6 @@ st.markdown("""
   border-radius: 10px !important;
   padding: 1rem !important;
 }
-/* Desativar botão "Browse files" enquanto processa */
-.processing [data-testid="stFileUploader"] button {
-  display: none !important;
-}
-/* Blocos de feedback */
 .success-box {
   background-color: #E8F5E9;
   border-left: 5px solid #2E7D32;
@@ -60,47 +55,26 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ───────────────────────────────────────────────
-# Estado global
+# Estado
 # ───────────────────────────────────────────────
 if "processing" not in st.session_state:
     st.session_state.processing = False
 if "finished" not in st.session_state:
     st.session_state.finished = False
-if "all_excel" not in st.session_state:
-    st.session_state.all_excel = []
 if "uploads" not in st.session_state:
     st.session_state.uploads = []
+if "all_excel" not in st.session_state:
+    st.session_state.all_excel = []
 
 # ───────────────────────────────────────────────
-# File uploader — limpa automaticamente uploads antigos
-# ───────────────────────────────────────────────
-container_class = "processing" if st.session_state.processing else ""
-st.markdown(f'<div class="{container_class}">', unsafe_allow_html=True)
-
-uploads = st.file_uploader(
-    "📂 Carrega um ou vários PDFs",
-    type=["pdf"],
-    accept_multiple_files=True,
-    key="file_uploader"
-)
-
-# Se o utilizador carregar novos ficheiros, limpar estado anterior
-if uploads and uploads != st.session_state.uploads:
-    for key in ["finished", "all_excel"]:
-        st.session_state[key] = False if key == "finished" else []
-    st.session_state.uploads = uploads
-
-st.markdown("</div>", unsafe_allow_html=True)
-
-# ───────────────────────────────────────────────
-# Interface principal
+# Ecrã inicial
 # ───────────────────────────────────────────────
 if not st.session_state.processing and not st.session_state.finished:
-    if st.session_state.uploads:
-        start = st.button(
-            f"📄 Processar {len(st.session_state.uploads)} ficheiro(s) de Input",
-            type="primary"
-        )
+    uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True)
+
+    if uploads:
+        st.session_state.uploads = uploads
+        start = st.button(f"📄 Processar {len(uploads)} ficheiro(s) de Input", type="primary")
         if start:
             st.session_state.processing = True
             st.rerun()
@@ -108,22 +82,29 @@ if not st.session_state.processing and not st.session_state.finished:
         st.info("💡 Carrega ficheiros PDF para ativar o processamento.")
 
 # ───────────────────────────────────────────────
-# Execução principal (processamento)
+# Ecrã de processamento
 # ───────────────────────────────────────────────
-if st.session_state.processing and st.session_state.uploads:
+elif st.session_state.processing:
     uploads = st.session_state.uploads
+    total = len(uploads)
+
+    # 🔵 Informação inicial
     st.markdown('<div class="info-box">⏳ A processar ficheiros... aguarde até o processo terminar.</div>', unsafe_allow_html=True)
 
-    session_dir = tempfile.mkdtemp(prefix="xylella_session_")
-    all_excel = []
-    total = len(uploads)
+    # Lista apenas de nomes (sem botão remover)
+    with st.expander("📄 Ficheiros em processamento", expanded=True):
+        for up in uploads:
+            st.markdown(f"- {up.name}")
+
     progress = st.progress(0)
     status_text = st.empty()
+    all_excel = []
+    session_dir = tempfile.mkdtemp(prefix="xylella_session_")
 
     try:
         for i, up in enumerate(uploads, start=1):
             status_text.markdown(
-                f'<div class="info-box">📄 <b>A processar ficheiro {i}/{total}:</b> {up.name}</div>',
+                f'<div class="info-box">📘 <b>A processar ficheiro {i}/{total}:</b> {up.name}</div>',
                 unsafe_allow_html=True
             )
 
@@ -141,10 +122,7 @@ if st.session_state.processing and st.session_state.uploads:
                 created, n_amostras, discrepancias = result, None, None
 
             if not created:
-                st.markdown(
-                    f'<div class="warning-box">⚠️ Nenhum ficheiro gerado para <b>{up.name}</b>.</div>',
-                    unsafe_allow_html=True
-                )
+                st.markdown(f'<div class="warning-box">⚠️ Nenhum ficheiro gerado para <b>{up.name}</b>.</div>', unsafe_allow_html=True)
             else:
                 for fp in created:
                     all_excel.append(fp)
@@ -161,18 +139,13 @@ if st.session_state.processing and st.session_state.uploads:
             progress.progress(i / total)
             time.sleep(0.2)
 
-        # ✅ Só mostra mensagem final se houver Excel gerados
-        if len(all_excel) > 0:
+        # Conclusão
+        if all_excel:
             st.session_state.all_excel = all_excel
             st.session_state.finished = True
-            st.markdown(
-                f'<div class="success-box">✅ Processamento concluído '
-                f'({len(all_excel)} ficheiro{"s" if len(all_excel)>1 else ""} Excel gerado{"s" if len(all_excel)>1 else ""}).</div>',
-                unsafe_allow_html=True
-            )
+            st.success(f"🏁 Processamento concluído ({len(all_excel)} ficheiros Excel gerados).")
         else:
             st.warning("⚠️ Nenhum ficheiro Excel foi detetado.")
-
     except Exception as e:
         st.error(f"❌ Erro inesperado: {e}")
     finally:
@@ -180,9 +153,9 @@ if st.session_state.processing and st.session_state.uploads:
         st.session_state.processing = False
 
 # ───────────────────────────────────────────────
-# Download final (sem botão de novo processamento)
+# Ecrã final (download ZIP)
 # ───────────────────────────────────────────────
-if st.session_state.finished:
+elif st.session_state.finished:
     all_excel = st.session_state.all_excel
     zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
     zip_bytes = build_zip(all_excel)
