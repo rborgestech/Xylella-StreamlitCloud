@@ -226,47 +226,69 @@ def split_if_multiple_requisicoes(full_text: str) -> List[str]:
 
 def normalize_date_str(val: str) -> str:
     """
-    Corrige datas OCR (ex: 23110/2025 → 23/10/2025) de forma automática.
-    Remove ruído e reconstrói padrões dd/mm/yyyy válidos.
+    Corrige datas OCR de forma inteligente (ex: 23110/2025 → 23/10/2025).
+    Analisa as posições 3 e 6 (barras '/' ou '-') e reconstrói padrões dd/mm/yyyy válidos.
     """
     if not val:
         return ""
-    txt = str(val).strip().replace("-", "/").replace(".", "/")
-    # extrair apenas dígitos
-    s = re.sub(r"\D", "", txt)
 
-    # já vem no formato dd/mm/yyyy
-    m_std = re.match(r"^\s*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s*$", txt)
+    txt = str(val).strip().replace("-", "/").replace(".", "/")
+    txt = re.sub(r"[^\d/]", "", txt)  # remove ruído OCR
+
+    # Se já estiver no formato dd/mm/yyyy
+    m_std = re.match(r"^\s*(\d{1,2})/(\d{1,2})/(\d{4})\s*$", txt)
     if m_std:
         d, m_, y = map(int, m_std.groups())
         if 1 <= d <= 31 and 1 <= m_ <= 12 and 1900 <= y <= 2100:
             return f"{d:02d}/{m_:02d}/{y:04d}"
 
-    # casos típicos com dígitos colados (23110/2025 → 23/10/2025)
-    if len(s) >= 7:
-        # tentar ddmmyyyy (ex: 23102025)
-        if len(s) == 8:
-            d, m, y = int(s[:2]), int(s[2:4]), int(s[4:])
-            if 1 <= d <= 31 and 1 <= m <= 12:
-                return f"{d:02d}/{m:02d}/{y:04d}"
-        # tentar dddmmyyyy (ex: 231102025 → 23/10/2025)
-        if len(s) == 9 and s[2] == "1":
-            d, m, y = int(s[:2]), int(s[2:3] + s[3:4]), int(s[4:])
-            if 1 <= d <= 31 and 1 <= m <= 12:
-                return f"{d:02d}/{m:02d}/{y:04d}"
-        # tentar padrão 23110/2025 → 23/10/2025
-        if len(s) >= 8 and s[:5].endswith("10"):
-            d, m, y = int(s[:2]), 10, int(s[-4:])
-            return f"{d:02d}/{m:02d}/{y:04d}"
+    # Controlo posicional: 3º e 6º caracteres
+    if len(txt) >= 7:
+        # 3º e 6º caracteres são barras → formato já delimitado
+        if len(txt) > 6 and txt[2] == "/" and txt[5] == "/":
+            try:
+                d, m_, y = int(txt[:2]), int(txt[3:5]), int(txt[6:10])
+                if 1 <= d <= 31 and 1 <= m_ <= 12 and 1900 <= y <= 2100:
+                    return f"{d:02d}/{m_:02d}/{y:04d}"
+            except Exception:
+                pass
 
-    # como último recurso, tentar detetar 5 dígitos + / + ano
-    m = re.match(r"^(\d{2})(\d{1,2})0?(\d{4})$", s)
-    if m:
-        d, m_, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        if 1 <= d <= 31 and 1 <= m_ <= 12:
+        # Só o 3º é barra (caso típico: 23110/2025)
+        if txt[2] == "/" and len(txt) >= 9:
+            d = int(txt[:2])
+            try:
+                # tentar ler mês/ano a seguir
+                resto = re.sub(r"[^\d]", "", txt[3:])
+                # se o resto começar por 10 → mês 10
+                if resto.startswith("10"):
+                    m_, y = 10, int(resto[-4:])
+                else:
+                    m_, y = int(resto[:2]), int(resto[-4:])
+                if 1 <= d <= 31 and 1 <= m_ <= 12 and 1900 <= y <= 2100:
+                    return f"{d:02d}/{m_:02d}/{y:04d}"
+            except Exception:
+                pass
+
+    # Sem barras — tenta reconstruir 8 dígitos (ddmmyyyy)
+    s = re.sub(r"\D", "", txt)
+    if len(s) == 8:
+        d, m_, y = int(s[:2]), int(s[2:4]), int(s[4:])
+        if 1 <= d <= 31 and 1 <= m_ <= 12 and 1900 <= y <= 2100:
+            return f"{d:02d}/{m_:02d}/{y:04d}"
+
+    # Fallback genérico (ex: 3/1/2025)
+    m_flex = re.match(r"^\s*(\d{1,2})/(\d{1,2})/(\d{2,4})\s*$", txt)
+    if m_flex:
+        d, m_, y = m_flex.groups()
+        y = int(y)
+        if y < 100:  # corrige ano de 2 dígitos
+            y += 2000
+        d, m_ = int(d), int(m_)
+        if 1 <= d <= 31 and 1 <= m_ <= 12 and 1900 <= y <= 2100:
             return f"{d:02d}/{m_:02d}/{y:04d}"
 
     return ""
+
 
 
 def _is_valid_date(value: str) -> bool:
@@ -822,6 +844,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
 
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
     return created_files
+
 
 
 
