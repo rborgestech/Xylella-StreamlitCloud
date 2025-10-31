@@ -95,19 +95,46 @@ def process_pdf(pdf_path: str) -> List[str]:
 # Gerar ZIP com resultados e logs
 # ───────────────────────────────────────────────
 def _extract_summary_info(xlsx_path: str):
-    """Lê o cabeçalho E1:F1 do template para obter nº de amostras declaradas/processadas."""
+    """Lê E1 ou F1 e tenta detetar nº de amostras declaradas/processadas (ex: 'Nº Amostras: 10 / 9')."""
     declared, processed = None, None
     try:
-        wb = load_workbook(xlsx_path, data_only=True)
+        wb = load_workbook(xlsx_path, data_only=False)
         ws = wb.worksheets[0]
-        val = str(ws["E1"].value or "")
-        m = re.search(r"(\d+)\s*/\s*(\d+)", val)
-        if m:
-            declared = int(m.group(1))
-            processed = int(m.group(2))
-    except Exception:
-        pass
+
+        # ler valor literal da célula (sem fórmulas avaliadas)
+        for cell_ref in ("E1", "F1"):
+            val = str(ws[cell_ref].value or "").strip()
+            if not val:
+                continue
+
+            # procurar padrões "Nº Amostras: 10 / 9" ou "10/9"
+            m = re.search(r"(\d+)\s*/\s*(\d+)", val)
+            if m:
+                declared = int(m.group(1))
+                processed = int(m.group(2))
+                break
+
+            # fallback para "Nº Amostras: 10"
+            m2 = re.search(r"(\d+)", val)
+            if m2 and declared is None:
+                declared = int(m2.group(1))
+                processed = None
+
+        # se não encontrar nada em E1/F1, tentar ler texto completo das primeiras células
+        if declared is None:
+            for row in ws.iter_rows(min_row=1, max_row=2, max_col=6, values_only=True):
+                row_text = " ".join([str(v) for v in row if v])
+                m3 = re.search(r"(\d+)\s*/\s*(\d+)", row_text)
+                if m3:
+                    declared = int(m3.group(1))
+                    processed = int(m3.group(2))
+                    break
+
+    except Exception as e:
+        print(f"⚠️ Falha ao ler E1/F1 de {os.path.basename(xlsx_path)}: {e}")
+
     return declared, processed
+
 
 
 def build_zip(file_paths: List[str]) -> bytes:
