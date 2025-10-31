@@ -63,8 +63,9 @@ if start:
         os.makedirs(outdir, exist_ok=True)
         os.environ["OUTPUT_DIR"] = outdir
 
-        logs, ok, fail, summary = [], 0, 0, []
+        logs, ok, fail = [], 0, 0
         created_all = []
+        summary_data = []
 
         for up in uploaded:
             try:
@@ -81,9 +82,24 @@ if start:
                     continue
 
                 created_all.extend(req_files)
-                summary.append(f"{up.name}: {len(req_files)} requisições ({len(req_files)} ficheiros gerados)")
-                for fpath in req_files:
+
+                per_req = []
+                for i, fpath in enumerate(req_files, start=1):
                     st.success(f"✅ {os.path.basename(fpath)} gravado")
+                    per_req.append({
+                        "req": i,
+                        "samples": len(req_files[i-1]) if hasattr(req_files[i-1], "__len__") else "—",
+                        "expected": None,  # valor pode vir do parser no futuro
+                        "file": fpath
+                    })
+
+                summary_data.append({
+                    "pdf": up.name,
+                    "req_count": len(req_files),
+                    "samples_total": sum([len(req_files[i-1]) for i in range(1, len(req_files)+1)
+                                          if hasattr(req_files[i-1], "__len__")]),
+                    "per_req": per_req
+                })
 
                 ok += 1
             except Exception as e:
@@ -92,10 +108,10 @@ if start:
                 st.error(f"❌ Erro ao processar {up.name}: {e}")
                 fail += 1
 
-        # ZIP final
+        # ZIP final com summary.txt detalhado
         if created_all:
             zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
-            zip_bytes = build_zip_with_summary(created_all, summary)
+            zip_bytes = build_zip_with_summary(created_all, summary_data)
             st.success(f"🏁 Processamento concluído • {ok} ok, {fail} com erro.")
             st.download_button("⬇️ Descarregar resultados (ZIP)",
                                data=zip_bytes,
