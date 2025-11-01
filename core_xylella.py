@@ -788,19 +788,21 @@ def append_process_log(pdf_name, req_id, processed, expected, out_path=None, sta
 # ───────────────────────────────────────────────
 # API pública usada pela app Streamlit
 # ───────────────────────────────────────────────
-def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
+from typing import List, Dict, Any
+import os
+from pathlib import Path
+
+def process_pdf_sync(pdf_path: str) -> List[str]:
     """
     Executa o OCR Azure direto ao PDF e o parser Colab integrado.
-    Devolve: lista de requisições, cada uma no formato:
-      {
-        "rows": [ {dados da amostra}, ... ],
-        "expected": nº_declarado
-      }
-    A escrita do Excel é feita a jusante (no xylella_processor.py),
-    1 ficheiro por requisição, com validação esperadas/processadas.
+    Devolve uma lista de paths para os ficheiros Excel gerados (absolutos).
     """
     base = os.path.basename(pdf_path)
     print(f"\n🧪 Início de processamento: {base}")
+
+    # Diretório onde os ficheiros devem ser gravados (recebido do app via variável de ambiente)
+    OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "/tmp")).resolve()
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     # 1️⃣ Executar OCR Azure
     result_json = azure_analyze_pdf(pdf_path)
@@ -817,7 +819,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
     total_amostras = sum(len(req["rows"]) for req in req_results)
     print(f"✅ {base}: {len(req_results)} requisições, {total_amostras} amostras extraídas.")
 
-    # 5️⃣ Escrever ficheiros Excel diretamente (para compatibilidade cloud)
+    # 5️⃣ Escrever ficheiros Excel diretamente para o diretório temporário
     created_files = []
     for i, req in enumerate(req_results, start=1):
         rows = req.get("rows", [])
@@ -829,9 +831,11 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
 
         base_name = os.path.splitext(base)[0]
         out_name = f"{base_name}_req{i}.xlsx" if len(req_results) > 1 else f"{base_name}.xlsx"
+        out_path = OUTPUT_DIR / out_name
 
-        out_path = write_to_template(rows, out_name, expected_count=expected, source_pdf=pdf_path)
-        created_files.append(out_path)
+        # Chamar função que grava o Excel
+        write_to_template(rows, out_path, expected_count=expected, source_pdf=pdf_path)
+        created_files.append(str(out_path))
 
         diff = len(rows) - (expected or 0)
         if expected and diff != 0:
@@ -841,6 +845,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
 
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
     return created_files
+
 
 
 
