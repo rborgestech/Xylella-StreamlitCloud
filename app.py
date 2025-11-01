@@ -208,9 +208,16 @@ elif st.session_state.stage == "processing":
 # ───────────────────────────────────────────────
 # RESET SEGURO APÓS DOWNLOAD
 # ───────────────────────────────────────────────
+# RESET SEGURO APÓS DOWNLOAD (adiado ligeiramente)
 if st.session_state.reset_flag:
+    with st.empty():
+        st.info("🔄 A reiniciar interface...")
+        time.sleep(1.2)
     st.session_state.reset_flag = False
-    shutil.rmtree(tempfile.gettempdir(), ignore_errors=True)
     st.session_state.stage = "idle"
     st.session_state.uploads = None
-    st.experimental_rerun()
+    try:
+        st.rerun()
+    except Exception:
+        pass
+
