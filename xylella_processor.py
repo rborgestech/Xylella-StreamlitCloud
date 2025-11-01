@@ -58,7 +58,7 @@ print(json.dumps(res if isinstance(res, (list, dict)) else str(res)))
         parsed = []
 
     entries = _normalize_result(parsed)
-    return [e["path"] for e in entries]
+    return entries
 
 
 def _normalize_result(result):
@@ -107,13 +107,13 @@ def process_pdf_with_stats(pdf_path: str):
             "file": e.get("path"),
             "samples": e.get("processed", 0),
             "expected": e.get("expected"),
-            "diff": e.get("processed", 0) - (e.get("expected") or 0)
+            "diff": e.get("processed", 0) - (e.get("expected") or 0),
+            "discrepancy": e.get("discrepancy", False)
         })
 
     # Ficheiros de debug (se existirem)
     debug_files = [str(f) for f in OUTPUT_DIR.glob("*_ocr_debug.txt")]
     return [e["path"] for e in entries], stats, debug_files
-
 
 
 def build_zip_with_summary(excel_files, debug_files, summary_text):
