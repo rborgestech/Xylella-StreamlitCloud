@@ -1,135 +1,70 @@
 # -*- coding: utf-8 -*-
-"""
-Módulo Xylella Processor
-Responsável por processar PDFs de requisições e gerar ficheiros Excel por requisição.
-Inclui normalização do output para integração com o front-end Streamlit.
-"""
-
-import os
 from pathlib import Path
-
-# ----------------------------------------------------------------------
-# Função original — mantém a tua lógica existente aqui
-# ----------------------------------------------------------------------
-def process_pdf_original(pdf_path):
-    """
-    Implementação original de processamento.
-    Deve devolver um dos seguintes formatos:
-      1. [(path, samples, discrepancy), ...]
-      2. [{"path": ..., "samples": ..., "discrepancy": ...}, ...]
-      3. ([paths], samples_map, discrepancy_map)
-      4. ([paths], total_samples, total_discrepancies)
-    """
-    # ⚠️ Substitui este exemplo pela tua implementação real:
-    excel_path = Path(pdf_path).with_suffix(".xlsx")
-    # Simulação de resultado
-    return [(str(excel_path), 12, 0)]
+import traceback
+from core_xylella import process_pdf_sync  # ⚠️ Usa o teu módulo que fazia o parsing certo
+from zipfile import ZipFile
+import io
 
 
-# ----------------------------------------------------------------------
-# Normalizador universal — converte qualquer formato em lista de dicionários
-# ----------------------------------------------------------------------
-def _as_list_of_entries(result):
-    entries = []
-
-    # Caso 1: lista de dicionários ou tuples
-    if isinstance(result, list):
-        for item in result:
-            if isinstance(item, dict):
-                p = item.get("path") or item.get("filepath") or item.get("file")
-                if not p:
-                    continue
-                entries.append({
-                    "path": str(p),
-                    "samples": item.get("samples") or item.get("amostras"),
-                    "discrepancy": item.get("discrepancy") or item.get("discrepancias") or 0
-                })
-            elif isinstance(item, (tuple, list)) and len(item) >= 1:
-                p = item[0]
-                smp = item[1] if len(item) > 1 else None
-                dsc = item[2] if len(item) > 2 else 0
-                if p:
-                    entries.append({"path": str(p), "samples": smp, "discrepancy": dsc})
-
-    # Caso 2: tuplo com mapas ou agregados
-    elif isinstance(result, tuple) and len(result) >= 1:
-        paths = result[0] or []
-        if len(result) >= 3 and isinstance(result[1], dict) and isinstance(result[2], dict):
-            # ([paths], samples_map, discrepancy_map)
-            samples_map = result[1]
-            disc_map = result[2]
-            for p in paths:
-                if not p:
-                    continue
-                entries.append({
-                    "path": str(p),
-                    "samples": samples_map.get(p),
-                    "discrepancy": disc_map.get(p, 0)
-                })
-        else:
-            # ([paths], total_samples, total_discrepancies)
-            for p in paths:
-                if not p:
-                    continue
-                entries.append({"path": str(p), "samples": None, "discrepancy": 0})
-
-    return entries
-
-
-# ----------------------------------------------------------------------
-# Função pública usada pelo Streamlit
-# ----------------------------------------------------------------------
+# ───────────────────────────────────────────────
+# 1. Função principal
+# ───────────────────────────────────────────────
 def process_pdf(pdf_path):
-    """Wrapper estável — garante lista de tuplos (path, samples, discrepancies)."""
-    result = process_pdf_original(pdf_path)
+    """
+    Processa um PDF e gera um ou vários ficheiros Excel.
+    Retorna uma lista de tuplos (path, n_amostras, discrepancias).
+    Compatível com múltiplas requisições (req1, req2, ...).
+    """
+    try:
+        result = process_pdf_sync(pdf_path)
 
-    # Normaliza o retorno, qualquer que seja o formato
-    normalized = []
-    if not result:
+        # Caso a função original devolva apenas paths:
+        if isinstance(result, list) and all(isinstance(x, str) for x in result):
+            return [(str(Path(x).resolve()), None, None) for x in result]
+
+        # Caso devolva tuplos (path, amostras, discrepâncias)
+        elif isinstance(result, list) and all(isinstance(x, tuple) for x in result):
+            normalized = []
+            for fp, n, d in result:
+                normalized.append((str(Path(fp).resolve()), n, d))
+            return normalized
+
+        # Caso devolva dicionários
+        elif isinstance(result, list) and all(isinstance(x, dict) for x in result):
+            normalized = []
+            for r in result:
+                normalized.append((
+                    str(Path(r.get("path")).resolve()),
+                    r.get("samples"),
+                    r.get("discrepancies"),
+                ))
+            return normalized
+
+        # Caso raro — um único ficheiro
+        elif isinstance(result, str):
+            return [(str(Path(result).resolve()), None, None)]
+
+        else:
+            print(f"⚠️ Formato inesperado em process_pdf: {type(result)} → {result}")
+            return []
+
+    except Exception as e:
+        print("❌ ERRO no process_pdf:", e)
+        traceback.print_exc()
         return []
 
-    # Caso 1 – lista de tuplos
-    if all(isinstance(r, tuple) for r in result):
-        normalized = result
 
-    # Caso 2 – lista de dicionários
-    elif all(isinstance(r, dict) for r in result):
-        for r in result:
-            normalized.append((r.get("path"), r.get("samples"), r.get("discrepancies")))
-
-    # Caso 3 ou 4 – tuplo com ([paths], info extra)
-    elif isinstance(result, tuple) and len(result) >= 1:
-        paths = result[0]
-        samples = None
-        discrepancies = None
-        if len(result) >= 3:
-            samples = result[1]
-            discrepancies = result[2]
-        elif len(result) == 2:
-            samples = result[1]
-        for p in paths:
-            normalized.append((p, samples, discrepancies))
-
-    # Garante paths resolvidos
-    for i, (path, s, d) in enumerate(normalized):
-        normalized[i] = (str(Path(path).resolve()), s, d)
-
-    return normalized
-
-
-
-# ----------------------------------------------------------------------
-# Função auxiliar de ZIP (mantém a tua implementação)
-# ----------------------------------------------------------------------
-def build_zip(paths_or_entries):
-    """Cria ZIP a partir de paths ou lista de entries."""
-    import io, zipfile
-
+# ───────────────────────────────────────────────
+# 2. Função auxiliar para criar ZIP
+# ───────────────────────────────────────────────
+def build_zip(file_paths):
+    """Cria um ZIP em memória com os ficheiros Excel."""
     zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        for item in paths_or_entries:
-            p = item["path"] if isinstance(item, dict) else item
-            if os.path.exists(p):
-                zf.write(p, arcname=os.path.basename(p))
+    with ZipFile(zip_buffer, "w") as zip_file:
+        for fp in file_paths:
+            try:
+                zip_file.write(fp, arcname=Path(fp).name)
+            except Exception as e:
+                print(f"⚠️ Erro a adicionar {fp} ao ZIP: {e}")
     zip_buffer.seek(0)
     return zip_buffer.getvalue()
