@@ -790,14 +790,23 @@ from typing import List, Dict, Any
 import os
 from pathlib import Path
 
-def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
+from typing import List
+import os
+from pathlib import Path
+from datetime import datetime
+from core_xylella_parsers import parse_all_requisitions
+from azure_ocr import azure_analyze_pdf, extract_all_text
+from write_template import write_to_template
+
+
+def process_pdf_sync(pdf_path: str) -> List[dict]:
     """
     Executa o OCR Azure direto ao PDF e o parser Colab integrado.
-    Devolve uma lista de dicionários com:
+    Devolve lista de dicionários com dados das requisições:
       {
-        "path": caminho_do_excel,
-        "processed": nº_amostras_extraídas,
-        "expected": nº_amostras_declaradas,
+        "path": path_excel,
+        "processed": nº amostras extraídas,
+        "expected": nº declarado (se houver),
         "discrepancy": True/False
       }
     """
@@ -837,11 +846,10 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         out_name = f"{base_name}_req{i}.xlsx" if len(req_results) > 1 else f"{base_name}.xlsx"
         out_path = OUTPUT_DIR / out_name
 
-        # Gravar Excel
         write_to_template(rows, out_path, expected_count=expected, source_pdf=pdf_path)
 
         diff = len(rows) - (expected or 0)
-        discrepancy = expected and diff != 0
+        discrepancy = expected is not None and diff != 0
 
         created_files.append({
             "path": str(out_path),
