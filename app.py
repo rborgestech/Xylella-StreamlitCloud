@@ -187,21 +187,26 @@ elif st.session_state.processing:
         )
       else:
         for fp in created:
-          all_excel.append(fp)
-          base_name = Path(fp).name
-
-          if discrepancias and discrepancias > 0:
-            msg = (
-              f"⚠️ <b>{base_name}</b>: ficheiro gerado. "
-              f"<span style='color:#F57C00;'>⚠️ discrepância detectada ({discrepancias})</span>"
-            )
-            css_class = "warning-box"
-          else:
-            amostras_txt = f"({n_amostras} amostra{'s' if (n_amostras or 0) != 1 else ''} OK)" if n_amostras is not None else ""
-            msg = f"✅ <b>{base_name}</b>: ficheiro gerado. {amostras_txt}"
-            css_class = "success-box"
-
-          generated_panel.markdown(f'<div class="{css_class}">{msg}</div>', unsafe_allow_html=True)
+            all_excel.append(fp)
+            base_name = Path(fp).name
+        
+            # Se houver discrepância
+            if discrepancias and discrepancias > 0:
+                msg = (
+                    f"⚠️ <b>{base_name}</b>: ficheiro gerado. "
+                    f"<span style='color:#F57C00;'>⚠️ discrepância detectada ({discrepancias})</span>"
+                )
+                css_class = "warning-box"
+        
+            # Caso normal
+            else:
+                if n_amostras and n_amostras > 0:
+                    msg = f"✅ <b>{base_name}</b>: ficheiro gerado. <b>({n_amostras} amostra{'s' if n_amostras != 1 else ''} OK)</b>"
+                else:
+                    msg = f"✅ <b>{base_name}</b>: ficheiro gerado."
+                css_class = "success-box"
+        
+            generated_panel.markdown(f'<div class="{css_class}">{msg}</div>', unsafe_allow_html=True)
 
       progress.progress(i / total)
       time.sleep(0.2)
