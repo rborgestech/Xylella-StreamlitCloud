@@ -172,11 +172,11 @@ elif st.session_state.stage == "processing":
 
    shutil.rmtree(session_dir, ignore_errors=True)
 
-  # Espera 3 segundos e regressa automaticamente ao ecrã inicial
-  time.sleep(3)
-  st.session_state.stage = "idle"
-  st.session_state.uploads = None
-  st.rerun()
+    # Espera 3 segundos e regressa automaticamente ao ecrã inicial
+    time.sleep(3)
+    st.session_state.stage = "idle"
+    st.session_state.uploads = None
+    st.rerun()
 
 elif st.session_state.stage == "done":
     st.success("✅ Pronto para novo processamento.")
