@@ -171,7 +171,11 @@ elif st.session_state.stage == "processing":
         st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
 
     shutil.rmtree(session_dir, ignore_errors=True)
-    st.session_state.stage = "done"
+    # Espera 3 segundos e regressa automaticamente ao ecrã inicial
+    time.sleep(3)
+    st.session_state.stage = "idle"
+    st.session_state.uploads = None
+    st.rerun()
 
 
 
