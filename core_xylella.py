@@ -27,6 +27,12 @@ from typing import Dict, Any, List, Optional
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 
+
+from core_xylella_parsers import parse_all_requisitions
+from azure_ocr import azure_analyze_pdf, extract_all_text
+from write_template import write_to_template
+
+
 # ───────────────────────────────────────────────
 # Diretório de saída seguro
 # ───────────────────────────────────────────────
@@ -786,17 +792,7 @@ def append_process_log(pdf_name, req_id, processed, expected, out_path=None, sta
 # ───────────────────────────────────────────────
 # API pública usada pela app Streamlit
 # ───────────────────────────────────────────────
-from typing import List, Dict, Any
-import os
-from pathlib import Path
 
-from typing import List
-import os
-from pathlib import Path
-from datetime import datetime
-from core_xylella_parsers import parse_all_requisitions
-from azure_ocr import azure_analyze_pdf, extract_all_text
-from write_template import write_to_template
 
 
 def process_pdf_sync(pdf_path: str) -> List[dict]:
@@ -836,7 +832,7 @@ def process_pdf_sync(pdf_path: str) -> List[dict]:
     created_files = []
     for i, req in enumerate(req_results, start=1):
         rows = req.get("rows", [])
-        expected = req.get("expected", 0)
+        expected = req.get("expected")
 
         if not rows:
             print(f"⚠️ Requisição {i}: sem amostras — ignorada.")
@@ -865,6 +861,7 @@ def process_pdf_sync(pdf_path: str) -> List[dict]:
 
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
     return created_files
+
 
 
 
