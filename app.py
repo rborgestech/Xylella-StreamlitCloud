@@ -5,156 +5,155 @@ from pathlib import Path
 from datetime import datetime
 from xylella_processor import process_pdf, build_zip
 
-# ───────────────────────────────────────────────
-# Configuração base
-# ───────────────────────────────────────────────
 st.set_page_config(page_title="Xylella Processor", page_icon="🧪", layout="centered")
 st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 Excel por requisição.")
 
-# ───────────────────────────────────────────────
-# CSS — laranja #CA4300 e sem vermelhos
-# ───────────────────────────────────────────────
+# ————— CSS —————
 st.markdown("""
 <style>
-/* Botão principal */
-.stButton > button[kind="primary"] {
-  background-color: #CA4300 !important;
-  border: 1px solid #CA4300 !important;
-  color: #fff !important;
-  font-weight: 600 !important;
-  border-radius: 6px !important;
-  transition: background-color 0.2s ease-in-out !important;
-}
-
-/* Hover, Focus, Active */
-.stButton > button[kind="primary"]:hover,
-.stButton > button[kind="primary"]:focus,
-.stButton > button[kind="primary"]:active {
-  background-color: #A13700 !important;
-  border: 1px solid #A13700 !important;
-  color: #fff !important;
-  box-shadow: none !important;
-  outline: none !important;
-}
-
-/* Disabled */
-.stButton > button[kind="primary"][disabled],
-.stButton > button[kind="primary"][disabled]:hover {
-  background-color: #b3b3b3 !important;
-  border: 1px solid #b3b3b3 !important;
-  color: #f2f2f2 !important;
-  cursor: not-allowed !important;
-  box-shadow: none !important;
-}
-
-/* File uploader */
-[data-testid="stFileUploader"] > div:first-child {
-  border: 2px dashed #CA4300 !important;
-  border-radius: 10px !important;
-  padding: 1rem !important;
-  transition: border-color 0.3s ease-in-out;
-}
-
-[data-testid="stFileUploader"] > div:first-child:hover {
-  border-color: #A13700 !important;
-}
-
-[data-testid="stFileUploader"] > div:focus-within {
-  border-color: #CA4300 !important;
-  box-shadow: none !important;
-}
-
-/* Cores globais */
-:root {
-  --primary-color: #CA4300 !important;
-  --secondary-color: #CA4300 !important;
-  --accent-color: #CA4300 !important;
-  --text-selection-color: #CA4300 !important;
-}
+.success-box{background:#E8F5E9;border-left:5px solid #2E7D32;padding:.7rem 1rem;border-radius:6px;margin:.35rem 0}
+.warning-box{background:#FFF8E1;border-left:5px solid #FBC02D;padding:.7rem 1rem;border-radius:6px;margin:.35rem 0}
+.info-box{background:#E3F2FD;border-left:5px solid #1E88E5;padding:.7rem 1rem;border-radius:6px;margin:.35rem 0}
+.button-row{display:flex;gap:1rem;justify-content:center;margin-top:1rem}
+.stDownloadButton button,.stButton button{background:#fff!important;border:1.5px solid #CA4300!important;color:#CA4300!important;font-weight:600!important;border-radius:8px!important;padding:.6rem 1.2rem!important}
+.stDownloadButton button:hover,.stButton button:hover{background:#CA4300!important;color:#fff!important}
+.st-processing-dots::after{content:' ';animation:dots 1.2s steps(4,end) infinite;color:#CA4300;font-weight:700;margin-left:.15rem}
+@keyframes dots{0%,20%{content:''}40%{content:'.'}60%{content:'..'}80%,100%{content:'...'}}
 </style>
 """, unsafe_allow_html=True)
 
-# ───────────────────────────────────────────────
-# Interface de Upload
-# ───────────────────────────────────────────────
-uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True)
+# ————— Estado —————
+if "processing" not in st.session_state: st.session_state.processing = False
+if "finished"   not in st.session_state: st.session_state.finished   = False
+if "entries"    not in st.session_state: st.session_state.entries    = []
+if "zip_bytes"  not in st.session_state: st.session_state.zip_bytes  = None
+if "zip_name"   not in st.session_state: st.session_state.zip_name   = None
 
-if "processing" not in st.session_state:
-    st.session_state.processing = False
+# ————— Ecrã inicial —————
+if not st.session_state.processing and not st.session_state.finished:
+    uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True)
+    if uploads:
+        if st.button(f"📄 Processar {len(uploads)} ficheiro(s) de Input"):
+            st.session_state.processing = True
+            st.session_state._uploads = uploads
+            st.rerun()
+    else:
+        st.info("💡 Carrega ficheiros PDF para ativar o processamento.")
 
-start = st.button("📄 Processar ficheiros de Input", type="primary",
-                  disabled=st.session_state.processing or not uploads)
+# ————— Processamento —————
+elif st.session_state.processing:
+    uploads = st.session_state._uploads
+    total = len(uploads)
 
-# ───────────────────────────────────────────────
-# Execução principal
-# ───────────────────────────────────────────────
-if start and uploads:
-    st.session_state.processing = True
+    st.markdown('<div class="info-box">⏳ A processar ficheiros... aguarde até o processo terminar.</div>', unsafe_allow_html=True)
+    with st.expander("📄 Ficheiros em processamento", expanded=True):
+        for up in uploads: st.markdown(f"- {up.name}")
+
+    panel = st.expander("📄 Ficheiros gerados", expanded=True)
+    progress = st.progress(0)
+    status = st.empty()
+
+    entries = []
+    total_proc = 0
+    discrep_count = 0
+
     session_dir = tempfile.mkdtemp(prefix="xylella_session_")
-
     try:
-        st.info("⚙️ A processar... isto pode demorar alguns segundos.")
-        all_excel = []
-
-        progress = st.progress(0)
-        total = len(uploads)
-
-        # Validação de segurança: tipo e tamanho
-        for up in uploads:
-            if not up.name.lower().endswith(".pdf"):
-                st.error(f"❌ Ficheiro inválido: {up.name} (apenas PDFs são permitidos)")
-                st.stop()
-            if up.size > 20 * 1024 * 1024:  # 20 MB
-                st.error(f"⚠️ {up.name} excede o limite de 20 MB")
-                st.stop()
-
-        # Processamento dos ficheiros
         for i, up in enumerate(uploads, start=1):
-            st.markdown(f"### 📄 {up.name}")
-            st.write("⏳ Início de processamento...")
+            status.markdown(f'<div class="info-box">📘 <b>A processar ficheiro {i}/{total}</b><span class="st-processing-dots"></span><br>{up.name}</div>', unsafe_allow_html=True)
 
             tmpdir = tempfile.mkdtemp(dir=session_dir)
             tmp_path = os.path.join(tmpdir, up.name)
-            with open(tmp_path, "wb") as f:
-                f.write(up.getbuffer())
+            with open(tmp_path, "wb") as f: f.write(up.getbuffer())
 
-            # Diretório temporário isolado
             os.environ["OUTPUT_DIR"] = tmpdir
-            created = process_pdf(tmp_path)
+            res = process_pdf(tmp_path)  # ← devolve lista de dicts normalizados
 
-            if not created:
-                st.warning(f"⚠️ Nenhum ficheiro gerado para {up.name}")
+            if not res:
+                panel.markdown(f'<div class="warning-box">⚠️ Nenhum ficheiro gerado para <b>{up.name}</b>.</div>', unsafe_allow_html=True)
             else:
-                for fp in created:
-                    all_excel.append(fp)
-                    st.success(f"✅ {Path(fp).name} gravado")
+                for e in res:
+                    base = Path(e["path"]).name
+                    req = e.get("requested")
+                    proc = e.get("processed")
+                    dsc = bool(e.get("discrepancy"))
+                    if dsc:
+                        # amarelo com solicitadas/processadas
+                        if e.get("detail"):
+                            a, b = e["detail"]
+                            msg = f"🟡 <b>{base}</b>: ficheiro gerado. (<b>{a}</b> solicitadas / <b>{b}</b> processadas)"
+                        elif req is not None and proc is not None:
+                            msg = f"🟡 <b>{base}</b>: ficheiro gerado. (<b>{req}</b> solicitadas / <b>{proc}</b> processadas)"
+                        else:
+                            msg = f"🟡 <b>{base}</b>: ficheiro gerado. ⚠️ discrepância"
+                        css = "warning-box"; discrep_count += 1
+                    else:
+                        if proc is not None:
+                            msg = f"✅ <b>{base}</b>: ficheiro gerado. (<b>{proc}</b> amostras OK)"
+                        else:
+                            msg = f"✅ <b>{base}</b>: ficheiro gerado."
+                        css = "success-box"
+
+                    panel.markdown(f'<div class="{css}">{msg}</div>', unsafe_allow_html=True)
+                    entries.append(e)
+                    if proc is not None: total_proc += int(proc)
 
             progress.progress(i / total)
-            time.sleep(0.2)
+            time.sleep(0.15)
 
-        # Criação do ZIP final
-        if all_excel:
-            zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
-            zip_bytes = build_zip(all_excel)
-            st.success(f"🏁 Processamento concluído ({len(all_excel)} ficheiros Excel gerados).")
-            st.download_button("⬇️ Descarregar resultados (ZIP)", data=zip_bytes,
-                               file_name=zip_name, mime="application/zip")
-            st.balloons()
+        # Resumo dentro do painel
+        panel.markdown(
+            f'<div class="info-box"><b>📊 Resumo:</b><br>'
+            f'🧪 Total de amostras processadas: {total_proc}<br>'
+            f'🗂️ Total: {len(entries)} ficheiro(s) Excel<br>'
+            f'🟡 {discrep_count} ficheiro(s) com discrepâncias</div>',
+            unsafe_allow_html=True
+        )
+
+        status.empty()
+
+        # ZIP e fim
+        if entries:
+            with st.spinner("🧩 A gerar ficheiro ZIP…"):
+                zip_bytes = build_zip(entries)  # aceita dicts
+            st.session_state.entries = entries
+            st.session_state.zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
+            st.session_state.zip_bytes = zip_bytes
+            st.session_state.processing = False
+            st.session_state.finished = True
+            st.rerun()
         else:
-            st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
+            st.warning("⚠️ Nenhum ficheiro Excel foi detetado.")
 
     except Exception as e:
         st.error(f"❌ Erro inesperado: {e}")
-
     finally:
-        # Limpeza de ficheiros temporários
-        try:
-            shutil.rmtree(session_dir, ignore_errors=True)
-        except Exception as e:
-            st.warning(f"Não foi possível limpar ficheiros temporários: {e}")
+        shutil.rmtree(session_dir, ignore_errors=True)
 
-        st.session_state.processing = False
+# ————— Final —————
+elif st.session_state.finished and st.session_state.entries:
+    total_proc = sum([(e.get("processed") or 0) for e in st.session_state.entries])
+    num_files = len(st.session_state.entries)
 
-else:
-    st.info("💡 Carrega um ficheiro PDF e clica em **Processar ficheiros de Input**.")
+    st.markdown(
+        f'<div class="success-box" style="text-align:center">'
+        f'<b>✅ Processamento concluído</b><br>'
+        f'{num_files} ficheiro{"s" if num_files!=1 else ""} Excel gerado{"s" if num_files!=1 else ""} · '
+        f'{total_proc} amostra{"s" if total_proc!=1 else ""} no total'
+        f'</div>', unsafe_allow_html=True
+    )
+
+    st.markdown('<div class="button-row">', unsafe_allow_html=True)
+    c1, c2 = st.columns(2)
+    with c1:
+        st.download_button("⬇️ Descarregar resultados (ZIP)",
+                           data=st.session_state.zip_bytes,
+                           file_name=st.session_state.zip_name,
+                           mime="application/zip",
+                           key="zip_dl")
+    with c2:
+        if st.button("🔁 Novo processamento"):
+            for k in list(st.session_state.keys()):
+                del st.session_state[k]
+            st.rerun()
