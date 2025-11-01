@@ -12,39 +12,64 @@ except ImportError:
 
 def process_pdf(pdf_path):
     """
-    Wrapper estável — força execução no diretório do projeto.
-    Garante que debug/ e summary são criados como no teste.
+    Wrapper estável — executa o core diretamente no diretório raiz do projeto.
+    Garante criação de debug/ e summary e preserva o contexto de teste.
     """
+    import subprocess, json, sys
+    from pathlib import Path
+
+    project_root = Path("/workspaces/Xylella-StreamlitCloud").resolve()
     pdf_path = Path(pdf_path).resolve()
-    project_root = Path(__file__).parent.resolve()
     pdf_name = pdf_path.name
+    stable_pdf = project_root / pdf_name
 
-    # Copiar o PDF carregado para o diretório do projeto
-    stable_copy = project_root / pdf_name
-    shutil.copy(pdf_path, stable_copy)
-    print(f"📄 Copiado para {stable_copy}")
+    # Copiar PDF para o diretório do projeto
+    shutil.copy(pdf_path, stable_pdf)
+    print(f"📄 Copiado para {stable_pdf}")
 
-    # ⚙️ Forçar diretório de trabalho do processo principal
-    os.chdir(project_root)
-    print(f"📂 Working dir forçado: {Path.cwd()}")
+    # Criar script temporário que chama o core, tal como no teste
+    helper = project_root / "_run_core_wrapper.py"
+    helper.write_text(f"""
+import json
+from core_xylella import process_pdf_sync
+res = process_pdf_sync(r"{stable_pdf}")
+print(json.dumps(res if isinstance(res, (list, dict)) else str(res)))
+""")
 
-    if not process_pdf_sync:
-        print("⚠️ core_xylella não disponível.")
-        excel_path = stable_copy.with_suffix(".xlsx")
-        return [{"path": str(excel_path), "processed": 0, "discrepancy": False}]
+    print(f"🚀 A executar core_xylella no contexto real: {project_root}")
+    result = subprocess.run(
+        [sys.executable, str(helper)],
+        capture_output=True, text=True, cwd=project_root
+    )
 
-    print(f"🧪 A processar: {stable_copy.name}")
-    result = process_pdf_sync(str(stable_copy))
+    if result.returncode != 0:
+        print("❌ Erro ao executar core_xylella:")
+        print(result.stderr)
+        return []
 
-    # ✅ Confirmar se debug/ e summary existem
-    debug_dir = project_root / "debug"
-    summary_files = list(debug_dir.glob("*_summary.txt")) if debug_dir.exists() else []
-    if summary_files:
-        print(f"🧾 Summary encontrado: {summary_files[-1]}")
-    else:
-        print("⚠️ Nenhum summary encontrado no diretório do projeto!")
+    # Log de depuração
+    print(result.stdout)
 
-    return _normalize_result(result)
+    # Normalizar resposta
+    try:
+        parsed = json.loads(result.stdout)
+    except Exception:
+        parsed = []
+
+    entries = []
+    if isinstance(parsed, list):
+        for r in parsed:
+            if isinstance(r, str):
+                entries.append({"path": r, "processed": 0, "discrepancy": False})
+            elif isinstance(r, dict):
+                entries.append(r)
+            elif isinstance(r, tuple):
+                entries.append({
+                    "path": r[0],
+                    "processed": r[1] if len(r) > 1 else 0,
+                    "discrepancy": bool(r[2]) if len(r) > 2 else False
+                })
+    return entries
 
 
 def _normalize_result(result):
