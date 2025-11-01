@@ -1,9 +1,9 @@
-# app.py (versão corrigida para evitar duplicações)
+# app.py (versão com summary detalhado)
 
 import os
 import streamlit as st
 from pathlib import Path
-from xylella_processor import process_pdf_with_stats, build_zip
+from xylella_processor import process_pdf_with_stats, build_zip_with_summary
 
 # ✨ Configuração base
 st.set_page_config(page_title="Xylella Processor", layout="wide")
@@ -24,6 +24,8 @@ if "generated" not in st.session_state:
     st.session_state.generated = []
 if "processed_files" not in st.session_state:
     st.session_state.processed_files = set()
+if "summary_lines" not in st.session_state:
+    st.session_state.summary_lines = []
 
 # Upload de ficheiros
 uploaded = st.file_uploader("Carrega um ou mais PDFs", type="pdf", accept_multiple_files=True)
@@ -55,6 +57,8 @@ if st.session_state.uploaded_files and not st.session_state.processing:
 if st.session_state.processing:
     with st.spinner("⏳ A processar ficheiros... aguarde até o processo terminar."):
         all_excels = []
+        summary_lines = []
+
         for file_path in st.session_state.uploaded_files:
             if file_path.name in st.session_state.processed_files:
                 continue
@@ -68,12 +72,24 @@ if st.session_state.processing:
                     st.session_state.generated.extend(excels)
                     all_excels.extend(excels)
                     st.session_state.processed_files.add(file_path.name)
+
+                    # Construir linha de resumo
+                    line = f"📄 {stats['pdf_name']}: {stats['req_count']} requisições, {stats['samples_total']} amostras"
+                    for req in stats['per_req']:
+                        if req["expected"] is not None:
+                            diff = req["samples"] - req["expected"]
+                            if diff != 0:
+                                line += f" | Req {req['req']}: {req['samples']} vs {req['expected']} declaradas (diferença {diff:+d})"
+                    summary_lines.append(line)
             except Exception as e:
                 st.error(f"❌ Erro ao processar {file_path.name}: {e}")
 
-        # Gera ZIP com todos os ficheiros
+        st.session_state.summary_lines = summary_lines
+
+        # Gera ZIP com todos os ficheiros + summary
         if all_excels:
-            zip_bytes, zip_name = build_zip(all_excels)
+            summary_text = "Resumo do processamento:\n" + "\n".join(summary_lines)
+            zip_bytes, zip_name = build_zip_with_summary(all_excels, [], summary_text)
             st.download_button("📁 Download ZIP com resultados", zip_bytes, file_name=zip_name)
 
     # Limpar estado após processamento
@@ -82,6 +98,7 @@ if st.session_state.processing:
         st.session_state.generated = []
         st.session_state.processing = False
         st.session_state.processed_files = set()
+        st.session_state.summary_lines = []
         st.rerun()
 
 # Footer
