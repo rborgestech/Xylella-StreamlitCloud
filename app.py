@@ -25,7 +25,7 @@ st.markdown("""
   font-weight: 600 !important;
   border-radius: 6px !important;
 }
-.stButton > button[kind="primary"]::hover {
+.stButton > button[kind="primary"]:hover {
   background-color: #A13700 !important;
   border: 1px solid #A13700 !important;
 }
@@ -151,12 +151,12 @@ elif st.session_state.processing:
     for up in uploads:
       st.markdown(f"- {up.name}")
 
-  # Painel único e contínuo para os ficheiros gerados
   generated_panel = st.expander("📄 Ficheiros gerados", expanded=True)
-
   progress = st.progress(0)
   status_text = st.empty()
   all_excel = []
+  total_amostras = 0
+  ficheiros_com_discrepancias = 0
   session_dir = tempfile.mkdtemp(prefix="xylella_session_")
 
   try:
@@ -187,31 +187,51 @@ elif st.session_state.processing:
         )
       else:
         for fp in created:
-            all_excel.append(fp)
-            base_name = Path(fp).name
-        
-            # Se houver discrepância
-            if discrepancias and discrepancias > 0:
-                msg = (
-                    f"⚠️ <b>{base_name}</b>: ficheiro gerado. "
-                    f"<span style='color:#F57C00;'>⚠️ discrepância detectada ({discrepancias})</span>"
-                )
-                css_class = "warning-box"
-        
-            # Caso normal
-            else:
-                if n_amostras and n_amostras > 0:
-                    msg = f"✅ <b>{base_name}</b>: ficheiro gerado. <b>({n_amostras} amostra{'s' if n_amostras != 1 else ''} OK)</b>"
-                else:
-                    msg = f"✅ <b>{base_name}</b>: ficheiro gerado."
-                css_class = "success-box"
-        
-            generated_panel.markdown(f'<div class="{css_class}">{msg}</div>', unsafe_allow_html=True)
+          all_excel.append(fp)
+          base_name = Path(fp).name
+
+          # Incrementa totais
+          if n_amostras:
+            total_amostras += n_amostras
+          if discrepancias and discrepancias > 0:
+            ficheiros_com_discrepancias += 1
+
+          # Monta mensagem
+          if discrepancias and isinstance(discrepancias, (tuple, list)) and len(discrepancias) == 2:
+            diff_txt = f"⚠️ discrepância ({discrepancias[0]} vs {discrepancias[1]})"
+            msg = f"⚠️ <b>{base_name}</b>: ficheiro gerado. <span style='color:#F57C00;'>{diff_txt}</span>"
+            css_class = "warning-box"
+          elif discrepancias and discrepancias > 0:
+            msg = f"⚠️ <b>{base_name}</b>: ficheiro gerado. <span style='color:#F57C00;'>⚠️ discrepância detectada ({discrepancias})</span>"
+            css_class = "warning-box"
+          else:
+            amostras_txt = (
+              f"({n_amostras} amostra{'s' if n_amostras != 1 else ''} OK)"
+              if n_amostras else ""
+            )
+            msg = f"✅ <b>{base_name}</b>: ficheiro gerado. {amostras_txt}"
+            css_class = "success-box"
+
+          generated_panel.markdown(f'<div class="{css_class}">{msg}</div>', unsafe_allow_html=True)
 
       progress.progress(i / total)
       time.sleep(0.2)
 
-    # Conclusão — indicar claramente que está a gerar o ZIP
+    # ───────────────────────────────────────────────
+    # Resumo final dentro do painel
+    # ───────────────────────────────────────────────
+    icone = "🟡" if ficheiros_com_discrepancias > 0 else "🟢"
+    resumo = f"""
+    <hr style='border-top:1px solid #ccc; margin:0.8rem 0;'>
+    {icone} <b>Resumo de processamento:</b><br>
+    📊 <b>Total:</b> {len(all_excel)} ficheiro{'s' if len(all_excel) > 1 else ''} Excel<br>
+    🧪 <b>Total de amostras processadas:</b> {total_amostras}<br>
+    ⚠️ <b>{ficheiros_com_discrepancias}</b> ficheiro{'s' if ficheiros_com_discrepancias != 1 else ''} com discrepâncias
+    <hr style='border-top:1px solid #ccc; margin:0.8rem 0;'>
+    """
+    generated_panel.markdown(resumo, unsafe_allow_html=True)
+
+    # Conclusão — gerar ZIP
     status_text.empty()
     with st.spinner("🧩 A gerar ficheiro ZIP… aguarde alguns segundos."):
       time.sleep(0.5)
