@@ -36,6 +36,7 @@ st.markdown("""
   border: 1px solid #b3b3b3 !important;
   color: #f2f2f2 !important;
   cursor: not-allowed !important;
+  box-shadow: none !important;
 }
 [data-testid="stFileUploader"] > div:first-child {
   border: 2px dashed #CA4300 !important;
@@ -105,16 +106,20 @@ def build_zip_with_summary(excel_files: List[str], debug_files: List[str], summa
     return mem.read()
 
 # ───────────────────────────────────────────────
-# Interface (oculta durante processamento)
+# Interface — só mostra o botão após upload
 # ───────────────────────────────────────────────
 if not st.session_state.processing:
     uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True,
                                key=st.session_state.uploader_key)
-    start = st.button("📄 Processar ficheiros de Input", type="primary",
-                      disabled=not uploads or st.session_state.processing)
+    if uploads:
+        start = st.button("📄 Processar ficheiros de Input", type="primary", disabled=st.session_state.processing)
+    else:
+        start = False
+        st.info("💡 Carrega um ficheiro PDF para ativar o botão de processamento.")
 else:
     uploads, start = None, False
     st.info("⚙️ A processar... aguarda alguns segundos.")
+    st.markdown("<style>[data-testid='stFileUploader']{display:none}</style>", unsafe_allow_html=True)
 
 # ───────────────────────────────────────────────
 # Execução principal
@@ -159,11 +164,12 @@ if start and uploads:
                         total_samples += proc
                         diff = proc - exp
                         if diff != 0:
-                            discrepancy_msgs.append(
-                                f"⚠️ discrepância ({proc} processadas / {exp} declaradas)"
-                            )
+                            discrepancy_msgs.append(f"{Path(fp).name} ({proc} / {exp})")
 
-                discrep_str = f" ({'; '.join(discrepancy_msgs)})" if discrepancy_msgs else ""
+                discrep_str = ""
+                if discrepancy_msgs:
+                    discrep_str = " ⚠️ discrepância em " + ", ".join(discrepancy_msgs)
+
                 st.success(f"✅ {up.name}: {req_count} requisição(ões), {total_samples} amostras{discrep_str}.")
                 summary_lines.append(f"{up.name}: {req_count} requisições, {total_samples} amostras{discrep_str}.")
 
@@ -180,14 +186,10 @@ if start and uploads:
             st.download_button("⬇️ Descarregar resultados (ZIP)", data=zip_bytes,
                                file_name=zip_name, mime="application/zip")
 
-            # Limpa automaticamente a lista de ficheiros carregados
+            # Auto-limpa o uploader
             st.session_state.uploader_key = f"uploader_{datetime.now().timestamp()}"
         else:
             st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
     finally:
         shutil.rmtree(session_dir, ignore_errors=True)
         st.session_state.processing = False
-
-# Estado inativo
-if not st.session_state.processing:
-    st.info("💡 Carrega um ficheiro PDF e clica em **Processar ficheiros de Input**.")
