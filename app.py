@@ -27,7 +27,7 @@ uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], acce
 if uploads:
     if st.button(f"📄 Processar {len(uploads)} ficheiro(s) de Input"):
         progress = st.progress(0)
-        st.markdown('<div class="info-box">⏳ A processar... aguarde até o processo terminar.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="info-box">⏳ A ar... aguarde até o o terminar.</div>', unsafe_allow_html=True)
 
         all_results = []
         session_dir = tempfile.mkdtemp(prefix="xylella_session_")
@@ -37,11 +37,16 @@ if uploads:
                 tmp_path = os.path.join(session_dir, up.name)
                 with open(tmp_path, "wb") as f:
                     f.write(up.getbuffer())
-
+                
+                # 🔁 Copia o ficheiro carregado para o diretório atual (como no teste)
+                stable_path = Path.cwd() / up.name
+                shutil.copy(tmp_path, stable_path)
+                
                 st.markdown(f"### 📄 {up.name}")
                 st.write("⏳ Início de processamento...")
-
-                results = process_pdf(tmp_path)
+                
+                # 🧠 Chama o core com o ficheiro “real” e nome original
+                results = process_pdf(str(stable_path))
                 if not results:
                     st.markdown(f'<div class="warning-box">⚠️ Nenhum ficheiro gerado para {up.name}</div>', unsafe_allow_html=True)
                 else:
