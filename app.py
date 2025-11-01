@@ -187,16 +187,13 @@ elif st.session_state.stage == "processing":
 
         st.success(f"🏁 Processamento concluído ({len(all_excel)} ficheiros Excel gerados).")
 
-        # Marca que o utilizador fez download
-        def mark_for_reset():
-            st.session_state.reset_flag = True
-
+        # Quando o utilizador faz download → volta automaticamente à secção inicial
         st.download_button(
             "⬇️ Descarregar resultados (ZIP)",
             data=zip_bytes,
             file_name=zip_name,
             mime="application/zip",
-            on_click=mark_for_reset
+            on_click=lambda: st.session_state.update({"reset_flag": True})
         )
     else:
         st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
@@ -206,10 +203,10 @@ elif st.session_state.stage == "processing":
         st.rerun()
 
 # ───────────────────────────────────────────────
-# RESET IMEDIATO APÓS DOWNLOAD
+# RESET IMEDIATO APÓS DOWNLOAD (sem reload)
 # ───────────────────────────────────────────────
 if st.session_state.reset_flag:
     st.session_state.reset_flag = False
     st.session_state.stage = "idle"
     st.session_state.uploads = None
-    st.markdown("<meta http-equiv='refresh' content='0'>", unsafe_allow_html=True)
+    st.rerun()
