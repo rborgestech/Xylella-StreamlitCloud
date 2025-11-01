@@ -80,12 +80,42 @@ def _as_list_of_entries(result):
 # Função pública usada pelo Streamlit
 # ----------------------------------------------------------------------
 def process_pdf(pdf_path):
-    """Wrapper estável — garante lista de dicionários por ficheiro."""
+    """Wrapper estável — garante lista de tuplos (path, samples, discrepancies)."""
     result = process_pdf_original(pdf_path)
-    entries = _as_list_of_entries(result)
-    for e in entries:
-        e["path"] = str(Path(e["path"]).resolve())
-    return entries
+
+    # Normaliza o retorno, qualquer que seja o formato
+    normalized = []
+    if not result:
+        return []
+
+    # Caso 1 – lista de tuplos
+    if all(isinstance(r, tuple) for r in result):
+        normalized = result
+
+    # Caso 2 – lista de dicionários
+    elif all(isinstance(r, dict) for r in result):
+        for r in result:
+            normalized.append((r.get("path"), r.get("samples"), r.get("discrepancies")))
+
+    # Caso 3 ou 4 – tuplo com ([paths], info extra)
+    elif isinstance(result, tuple) and len(result) >= 1:
+        paths = result[0]
+        samples = None
+        discrepancies = None
+        if len(result) >= 3:
+            samples = result[1]
+            discrepancies = result[2]
+        elif len(result) == 2:
+            samples = result[1]
+        for p in paths:
+            normalized.append((p, samples, discrepancies))
+
+    # Garante paths resolvidos
+    for i, (path, s, d) in enumerate(normalized):
+        normalized[i] = (str(Path(path).resolve()), s, d)
+
+    return normalized
+
 
 
 # ----------------------------------------------------------------------
