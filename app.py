@@ -188,13 +188,20 @@ elif st.session_state.stage == "processing":
         st.success(f"🏁 Processamento concluído ({len(all_excel)} ficheiros Excel gerados).")
 
         # Quando o utilizador faz download → volta automaticamente à secção inicial
-        st.download_button(
-            "⬇️ Descarregar resultados (ZIP)",
-            data=zip_bytes,
-            file_name=zip_name,
-            mime="application/zip",
-            on_click=lambda: st.session_state.update({"reset_flag": True})
-        )
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            st.download_button(
+                "⬇️ Descarregar resultados (ZIP)",
+                data=zip_bytes,
+                file_name=zip_name,
+                mime="application/zip",
+            )
+        with col2:
+            if st.button("🔁 Novo processamento", type="primary"):
+                st.session_state.stage = "idle"
+                st.session_state.uploads = None
+                st.rerun()
+
     else:
         st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
         shutil.rmtree(session_dir, ignore_errors=True)
