@@ -103,7 +103,7 @@ else:
 # ───────────────────────────────────────────────
 if start and uploads:
     st.session_state.processing = True
-    st.experimental_rerun()
+    safe_rerun()
 
 # ───────────────────────────────────────────────
 # Execução principal
@@ -119,7 +119,7 @@ if st.session_state.processing and uploads is None:
         uploaded_files = st.session_state.get("last_uploads", [])
         if not uploaded_files:
             st.session_state.processing = False
-            st.experimental_rerun()
+            safe_rerun()
 
         total = len(uploaded_files)
 
