@@ -28,8 +28,8 @@ st.markdown("""
 .button-row{display:flex;justify-content:center;align-items:center;gap:1rem;margin-top:1.5rem}
 .stDownloadButton button,.stButton button{background:#fff!important;border:1.5px solid #CA4300!important;color:#CA4300!important;font-weight:600!important;border-radius:8px!important;padding:.6rem 1.2rem!important;transition:all .2s}
 .stDownloadButton button:hover,.stButton button:hover{background:#CA4300!important;color:#fff!important;border-color:#A13700!important}
-@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
 .fade-in{animation:fadeIn .8s ease-in-out}
+@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
 </style>
 """, unsafe_allow_html=True)
 
@@ -39,72 +39,9 @@ st.markdown("""
 if "processing" not in st.session_state: st.session_state.processing = False
 if "finished"   not in st.session_state: st.session_state.finished   = False
 if "uploads"    not in st.session_state: st.session_state.uploads    = []
-if "entries"    not in st.session_state: st.session_state.entries    = []  # lista por ficheiro: {path, samples, discrepancy}
+if "entries"    not in st.session_state: st.session_state.entries    = []
 if "zip_bytes"  not in st.session_state: st.session_state.zip_bytes  = None
 if "zip_name"   not in st.session_state: st.session_state.zip_name   = None
-
-# ───────────────────────────────────────────────
-# Helpers
-# ───────────────────────────────────────────────
-def normalize_result(result):
-    """
-    Normaliza o retorno do process_pdf para uma lista de entradas por ficheiro:
-    Cada entrada = {"path": <str>, "samples": <int|None>, "discrepancy": <None|int|tuple>}
-    Compatibiliza vários formatos:
-      1) [(path, samples, disc), ...]
-      2) [{"path":..., "samples":..., "discrepancy":...}, ...]
-      3) ( [paths], samples_map, discrepancy_map )
-      4) ( [paths], total_samples, total_discrepancies )  # legacy — atribui None por ficheiro
-    """
-    entries = []
-    # Caso 1/2: lista
-    if isinstance(result, list):
-        for item in result:
-            if isinstance(item, dict):
-                entries.append({
-                    "path": item.get("path") or item.get("filepath") or item.get("file"),
-                    "samples": item.get("samples") or item.get("amostras"),
-                    "discrepancy": item.get("discrepancy") or item.get("discrepancias")
-                })
-            elif isinstance(item, (tuple, list)) and len(item) >= 1:
-                p   = item[0]
-                smp = item[1] if len(item) > 1 else None
-                dsc = item[2] if len(item) > 2 else None
-                entries.append({"path": p, "samples": smp, "discrepancy": dsc})
-    # Caso 3/4: tuplo
-    elif isinstance(result, tuple) and len(result) >= 1:
-        paths = result[0] or []
-        # dicionários por ficheiro
-        if len(result) >= 3 and isinstance(result[1], dict) and isinstance(result[2], dict):
-            samples_map = result[1]; disc_map = result[2]
-            for p in paths:
-                entries.append({
-                    "path": p,
-                    "samples": samples_map.get(p),
-                    "discrepancy": disc_map.get(p)
-                })
-        else:
-            # legacy: números agregados — não conseguimos por ficheiro
-            total_samples = result[1] if len(result) > 1 and isinstance(result[1], (int, float)) else None
-            # Se só existe 1 ficheiro, atribuímos ao único
-            if len(paths) == 1:
-                entries.append({"path": paths[0], "samples": total_samples, "discrepancy": None if len(result) < 3 else result[2]})
-            else:
-                for p in paths:
-                    entries.append({"path": p, "samples": None, "discrepancy": None})
-    # Limpa paths vazios
-    entries = [e for e in entries if e.get("path")]
-    return entries
-
-def fmt_samples(n):
-    if n is None: return ""
-    return f"({n} amostra{'s' if n != 1 else ''} OK)"
-
-def fmt_discrepancy(d):
-    if d is None or d == 0: return None
-    if isinstance(d, (tuple, list)) and len(d) == 2:
-        return f"⚠️ discrepância ({d[0]} vs {d[1]})"
-    return f"⚠️ discrepância detectada ({d})"
 
 # ───────────────────────────────────────────────
 # Ecrã inicial
@@ -133,7 +70,7 @@ elif st.session_state.processing:
     generated_panel = st.expander("📄 Ficheiros gerados", expanded=True)
     progress = st.progress(0)
     status_text = st.empty()
-    all_entries = []  # lista de entradas por ficheiro
+    all_entries = []
     session_dir = tempfile.mkdtemp(prefix="xylella_session_")
 
     try:
@@ -149,9 +86,8 @@ elif st.session_state.processing:
             with open(tmp_path, "wb") as f: f.write(up.getbuffer())
 
             os.environ["OUTPUT_DIR"] = tmpdir
-            result = process_pdf(tmp_path)
+            entries = process_pdf(tmp_path)  # normalizado para lista de dicts
 
-            entries = normalize_result(result)  # ← NORMALIZAÇÃO POR FICHEIRO
             if not entries:
                 generated_panel.markdown(
                     f'<div class="warning-box">⚠️ Nenhum ficheiro gerado para <b>{up.name}</b>.</div>',
@@ -160,52 +96,61 @@ elif st.session_state.processing:
             else:
                 for e in entries:
                     all_entries.append(e)
-                    base_name = Path(e["path"]).name
-                    dmsg = fmt_discrepancy(e.get("discrepancy"))
-                    if dmsg:
-                        msg = f"⚠️ <b>{base_name}</b>: ficheiro gerado. <span style='color:#F57C00;'>{dmsg}</span>"
+                    base = Path(e["path"]).name
+                    samples = e.get("samples")
+                    disc = e.get("discrepancy")
+
+                    if disc and disc != 0:
+                        if isinstance(disc, (tuple, list)) and len(disc) == 2:
+                            msg = f"⚠️ <b>{base}</b>: ficheiro gerado. ⚠️ discrepância ({disc[0]} vs {disc[1]})"
+                        else:
+                            msg = f"⚠️ <b>{base}</b>: ficheiro gerado. ⚠️ discrepância detectada ({disc})"
                         css = "warning-box"
                     else:
-                        smsg = fmt_samples(e.get("samples"))
-                        msg = f"✅ <b>{base_name}</b>: ficheiro gerado. {smsg}"
+                        smp_txt = f"({samples} amostra{'s' if samples != 1 else ''} OK)" if samples else ""
+                        msg = f"✅ <b>{base}</b>: ficheiro gerado. {smp_txt}"
                         css = "success-box"
+
                     generated_panel.markdown(f'<div class="{css}">{msg}</div>', unsafe_allow_html=True)
 
             progress.progress(i / total)
-            time.sleep(0.15)
+            time.sleep(0.2)
 
-        # Resumo dentro do painel
-        status_text.empty()
-        total_samples = sum([e["samples"] or 0 for e in all_entries])
+        # 🧾 Resumo final
+        total_samples = sum([(e.get("samples") or 0) for e in all_entries])
         discrep_files = sum([1 for e in all_entries if e.get("discrepancy") not in (None, 0)])
-        resumo_html = f"""
-<pre style='background:#FAFAFA;border-radius:8px;padding:1rem;font-size:.95rem;border:1px solid #DDD;'>
-🧾 <b>RESUMO DE EXECUÇÃO</b>
-──────────────────────────────────────────
-{chr(10).join([
-  (f"⚠️ {Path(e['path']).name}: ficheiro gerado. " + fmt_discrepancy(e.get('discrepancy')))
-   if e.get('discrepancy') not in (None,0)
-   else (f"✅ {Path(e['path']).name}: ficheiro gerado. {fmt_samples(e.get('samples'))}")
-  for e in all_entries
-])}
-──────────────────────────────────────────
-📊 <b>Total:</b> {len(all_entries)} ficheiro(s) Excel
-🧪 <b>Total de amostras processadas:</b> {total_samples}
-⚠️ <b>{discrep_files}</b> ficheiro(s) com discrepâncias
-──────────────────────────────────────────
-</pre>
-"""
-        generated_panel.markdown(resumo_html, unsafe_allow_html=True)
+        resumo = f"""
+        <div style="background:#FFF; border:1px solid #E5E7EB; border-radius:10px; padding:12px; margin-top:8px;">
+          <div style="font-weight:700; margin-bottom:6px;">🧾 RESUMO DE EXECUÇÃO</div>
+          <div style="line-height:1.5;">
+            {'<br>'.join([
+                (f"⚠️ {Path(e['path']).name}: ficheiro gerado. ⚠️ discrepância ({e['discrepancy'][0]} vs {e['discrepancy'][1]})"
+                 if isinstance(e['discrepancy'], (tuple, list)) and len(e['discrepancy']) == 2 else
+                 f"⚠️ {Path(e['path']).name}: ficheiro gerado. ⚠️ discrepância detectada ({e['discrepancy']})")
+                if e.get('discrepancy') not in (None, 0)
+                else f"✅ {Path(e['path']).name}: ficheiro gerado. ({e.get('samples') or 0} amostras OK)"
+                for e in all_entries
+            ])}
+          </div>
+          <div style="height:10px;"></div>
+          <div style="display:flex; gap:18px; align-items:center; flex-wrap:wrap; font-weight:600;">
+            <span>🧪 Total de amostras processadas: {int(total_samples)}</span>
+            <span>🗂️ Total: {len(all_entries)} ficheiro(s) Excel</span>
+            <span>🟡 {discrep_files} ficheiro(s) com discrepâncias</span>
+          </div>
+        </div>
+        """
+        generated_panel.markdown(resumo, unsafe_allow_html=True)
 
-        # Concluir e preparar ZIP
-        with st.spinner("🧩 A gerar ficheiro ZIP… aguarde alguns segundos."):
-            if all_entries:
-                st.session_state.entries   = all_entries
-                st.session_state.finished  = True
-                st.session_state.zip_name  = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
+        # ZIP final
+        if all_entries:
+            with st.spinner("🧩 A gerar ficheiro ZIP…"):
+                st.session_state.entries = all_entries
+                st.session_state.finished = True
+                st.session_state.zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
                 st.session_state.zip_bytes = build_zip([e["path"] for e in all_entries])
-            else:
-                st.warning("⚠️ Nenhum ficheiro Excel foi detetado.")
+        else:
+            st.warning("⚠️ Nenhum ficheiro Excel foi detetado.")
 
     except Exception as e:
         st.error(f"❌ Erro inesperado: {e}")
@@ -214,33 +159,28 @@ elif st.session_state.processing:
         st.session_state.processing = False
 
 # ───────────────────────────────────────────────
-# Ecrã final — painel de sucesso + botões lado a lado
+# Ecrã final
 # ───────────────────────────────────────────────
 if st.session_state.finished and st.session_state.entries:
     total_samples = sum([(e.get("samples") or 0) for e in st.session_state.entries])
     num_files = len(st.session_state.entries)
 
-    st.markdown(
-        f"""
-        <div class="fade-in" style="
-          background:#E8F5E9; border-left:6px solid #2E7D32; border-radius:10px;
-          padding:1.2rem 1.6rem; margin-top:1.4rem; text-align:center;
-        ">
-          <h4 style="color:#2E7D32; font-weight:600; margin:.2rem 0 .3rem 0;">✅ Processamento concluído</h4>
-          <p style="color:#2E7D32; margin:.2rem 0 0 0;">
-            {num_files} ficheiro{'s' if num_files>1 else ''} Excel gerado{'s' if num_files>1 else ''} ·
-            <b>{total_samples}</b> amostra{'s' if total_samples!=1 else ''} no total
-          </p>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    st.markdown(f"""
+    <div class="fade-in" style="background:#E8F5E9; border-left:6px solid #2E7D32; border-radius:10px;
+         padding:1.2rem 1.6rem; margin-top:1.4rem; text-align:center;">
+      <h4 style="color:#2E7D32; font-weight:600; margin:.2rem 0 .3rem 0;">✅ Processamento concluído</h4>
+      <p style="color:#2E7D32; margin:.2rem 0 0 0;">
+        {num_files} ficheiro{'s' if num_files>1 else ''} Excel gerado{'s' if num_files>1 else ''} ·
+        <b>{int(total_samples)}</b> amostra{'s' if total_samples!=1 else ''} no total
+      </p>
+    </div>
+    """, unsafe_allow_html=True)
 
-    zip_name  = st.session_state.zip_name
+    zip_name = st.session_state.zip_name
     zip_bytes = st.session_state.zip_bytes
 
     st.markdown('<div class="button-row">', unsafe_allow_html=True)
-    c1, c2 = st.columns([1,1])
+    c1, c2 = st.columns([1, 1])
     with c1:
         st.download_button("⬇️ Descarregar resultados (ZIP)", data=zip_bytes,
                            file_name=zip_name, mime="application/zip",
