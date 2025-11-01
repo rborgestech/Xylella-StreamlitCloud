@@ -9,7 +9,7 @@ from xylella_processor import process_pdf, build_zip
 # Configuração base
 # ───────────────────────────────────────────────
 st.set_page_config(page_title="Xylella Processor", page_icon="🦢", layout="centered")
-st.title("\ud83e\udda2 Xylella Processor")
+st.title("Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 Excel por requisição.")
 
 # ───────────────────────────────────────────────
