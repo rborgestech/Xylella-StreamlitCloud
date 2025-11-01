@@ -790,10 +790,16 @@ from typing import List, Dict, Any
 import os
 from pathlib import Path
 
-def process_pdf_sync(pdf_path: str) -> List[str]:
+def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
     """
     Executa o OCR Azure direto ao PDF e o parser Colab integrado.
-    Devolve uma lista de paths para os ficheiros Excel gerados (absolutos).
+    Devolve uma lista de dicionários com:
+      {
+        "path": caminho_do_excel,
+        "processed": nº_amostras_extraídas,
+        "expected": nº_amostras_declaradas,
+        "discrepancy": True/False
+      }
     """
     base = os.path.basename(pdf_path)
     print(f"\n🧪 Início de processamento: {base}")
@@ -831,18 +837,27 @@ def process_pdf_sync(pdf_path: str) -> List[str]:
         out_name = f"{base_name}_req{i}.xlsx" if len(req_results) > 1 else f"{base_name}.xlsx"
         out_path = OUTPUT_DIR / out_name
 
-        # Chamar função que grava o Excel
+        # Gravar Excel
         write_to_template(rows, out_path, expected_count=expected, source_pdf=pdf_path)
-        created_files.append(str(out_path))
 
         diff = len(rows) - (expected or 0)
-        if expected and diff != 0:
+        discrepancy = expected and diff != 0
+
+        created_files.append({
+            "path": str(out_path),
+            "processed": len(rows),
+            "expected": expected,
+            "discrepancy": discrepancy
+        })
+
+        if discrepancy:
             print(f"⚠️ Requisição {i}: {len(rows)} amostras vs {expected} declaradas (diferença {diff:+d}).")
         else:
             print(f"✅ Requisição {i}: {len(rows)} amostras gravadas → {out_path}")
 
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
     return created_files
+
 
 
 
