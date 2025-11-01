@@ -76,9 +76,9 @@ def _norm_entry(item):
     discrepancy_flag = item.get("discrepancy")
     if diff is not None:
         discrepancy = bool(diff)
-    elif discrepancy_flag is not None:
+    else if discrepancy_flag is not None:
         discrepancy = bool(discrepancy_flag)
-    elif processed is not None and requested is not None:
+    else if processed is not None and requested is not None:
         discrepancy = (int(processed) != int(requested))
     else:
         discrepancy = False
@@ -96,7 +96,7 @@ def _norm_entry(item):
     }
 
 # ————— Processamento —————
-elif st.session_state.processing:
+else if st.session_state.processing:
     uploads = st.session_state._uploads
     total = len(uploads)
 
@@ -200,7 +200,7 @@ elif st.session_state.processing:
         shutil.rmtree(session_dir, ignore_errors=True)
 
 # ————— Final —————
-elif st.session_state.finished and st.session_state.entries:
+else if st.session_state.finished and st.session_state.entries:
     total_proc = sum([(e.get("processed") or 0) for e in st.session_state.entries])
     num_files = len(st.session_state.entries)
 
