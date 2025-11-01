@@ -14,7 +14,12 @@ import io, traceback
 from zipfile import ZipFile
 
 # IMPORTA o teu motor original (não alterado)
-from core_xylella import process_pdf_sync
+core_path = Path(__file__).resolve().parent / "core_xylella.py"
+spec = importlib.util.spec_from_file_location("core_xylella", core_path)
+core = importlib.util.module_from_spec(spec)
+sys.modules["core_xylella"] = core
+spec.loader.exec_module(core)
+process_pdf_sync = core.process_pdf_sync
 
 
 def _to_abs(p):
