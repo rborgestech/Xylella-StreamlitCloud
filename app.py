@@ -4,7 +4,15 @@ import tempfile, os, shutil, time
 from pathlib import Path
 from datetime import datetime
 from xylella_processor import process_pdf, build_zip
+import streamlit.runtime.scriptrunner as stsr
 
+def safe_rerun():
+    try:
+        st.experimental_rerun()
+    except stsr.StopExecution:
+        pass
+    except Exception:
+        pass
 # ───────────────────────────────────────────────
 # Configuração base
 # ───────────────────────────────────────────────
