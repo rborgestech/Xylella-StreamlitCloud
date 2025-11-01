@@ -8,13 +8,15 @@ from openpyxl import load_workbook
 from xylella_processor import process_pdf
 
 # ───────────────────────────────────────────────
-# Configuração base e estilo
+# Configuração base
 # ───────────────────────────────────────────────
 st.set_page_config(page_title="Xylella Processor", page_icon="🧪", layout="centered")
 st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 ficheiro Excel por requisição.")
 
-# CSS — laranja + ocultação durante processamento
+# ───────────────────────────────────────────────
+# CSS — laranja e controlo visual
+# ───────────────────────────────────────────────
 st.markdown("""
 <style>
 .stButton > button[kind="primary"] {
@@ -49,11 +51,10 @@ st.markdown("""
   --secondary-color: #CA4300 !important;
   --accent-color: #CA4300 !important;
 }
-/* Nome pequeno */
 .small-text { font-size: 0.85rem; color: #333; }
-/* Ocultar uploader e botões durante processamento */
-.hidden-ui [data-testid="stFileUploader"],
-.hidden-ui .stButton {
+/* Ocultar uploader e botão durante processamento */
+.hide-ui [data-testid="stFileUploader"],
+.hide-ui .stButton {
   display: none !important;
 }
 </style>
@@ -64,8 +65,6 @@ st.markdown("""
 # ───────────────────────────────────────────────
 if "processing" not in st.session_state:
     st.session_state.processing = False
-if "uploader_key" not in st.session_state:
-    st.session_state.uploader_key = "uploader_1"
 
 # ───────────────────────────────────────────────
 # Helpers
@@ -84,54 +83,48 @@ def read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
 
 def collect_debug_files(output_dirs: List[Path]) -> List[str]:
     debug_files = []
-    patterns = ["*_ocr_debug.txt", "process_log.csv", "process_summary_*.txt"]
-    for outdir in output_dirs:
-        for pat in patterns:
-            debug_files.extend(str(f) for f in outdir.glob(pat) if f.exists())
+    for pattern in ["*_ocr_debug.txt", "process_log.csv", "process_summary_*.txt"]:
+        for d in output_dirs:
+            for f in d.glob(pattern):
+                debug_files.append(str(f))
     return debug_files
 
 def build_zip_with_summary(excel_files: List[str], debug_files: List[str], summary_text: str) -> bytes:
     mem = io.BytesIO()
     with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as z:
         for p in excel_files:
-            if p and os.path.exists(p):
+            if os.path.exists(p):
                 z.write(p, arcname=os.path.basename(p))
         for d in debug_files:
-            if d and os.path.exists(d):
+            if os.path.exists(d):
                 z.write(d, arcname=f"debug/{os.path.basename(d)}")
-        z.writestr("summary.txt", summary_text or "")
+        z.writestr("summary.txt", summary_text)
     mem.seek(0)
     return mem.read()
 
 # ───────────────────────────────────────────────
-# Interface — mostra botão só após upload
+# Interface — mostra botão apenas após upload
 # ───────────────────────────────────────────────
-if not st.session_state.processing:
-    uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True,
-                               key=st.session_state.uploader_key)
-    start = st.button("📄 Processar ficheiros de Input", type="primary") if uploads else None
-    if not uploads:
-        st.info("💡 Carrega um ficheiro PDF para ativar o botão de processamento.")
+uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True)
+
+if uploads and not st.session_state.processing:
+    start = st.button("📄 Processar ficheiros de Input", type="primary")
 else:
-    uploads, start = None, False
-    st.markdown("<div class='hidden-ui'></div>", unsafe_allow_html=True)
-    st.info("🔒 A processar... aguarda alguns segundos.")
+    start = False
+    if not st.session_state.processing:
+        st.info("💡 Carrega um ficheiro PDF para ativar o botão de processamento.")
 
 # ───────────────────────────────────────────────
 # Execução principal
 # ───────────────────────────────────────────────
 if start and uploads:
-    # Aplica classe CSS de ocultação imediata
     st.session_state.processing = True
-    st.markdown("<div class='hidden-ui'></div>", unsafe_allow_html=True)
-    st.rerun()
+    # Ocultar uploader e botão imediatamente
+    st.markdown("<div class='hide-ui'></div>", unsafe_allow_html=True)
+    st.info("🔒 A processar... aguarda alguns segundos.")
+    st.divider()
 
-if st.session_state.processing:
     start_time = time.time()
-    uploads = st.session_state.get("last_uploads", [])
-    if not uploads:
-        st.stop()
-
     session_dir = tempfile.mkdtemp(prefix="xylella_session_")
     final_dir = Path.cwd() / "output_final"
     final_dir.mkdir(exist_ok=True)
@@ -149,7 +142,6 @@ if st.session_state.processing:
             tmp_pdf = tmpdir / up.name
             with open(tmp_pdf, "wb") as f:
                 f.write(up.getbuffer())
-
             os.environ["OUTPUT_DIR"] = str(tmpdir)
             outdirs.append(tmpdir)
 
@@ -159,34 +151,41 @@ if st.session_state.processing:
                 summary_lines.append(f"{up.name}: sem ficheiros gerados.")
             else:
                 req_count = len(created)
-                total_samples, discrepancy_msgs = 0, []
+                total_samples, discrepancies = 0, []
                 for fp in created:
                     dest = final_dir / Path(fp).name
                     shutil.copy(fp, dest)
                     all_excel.append(str(dest))
                     exp, proc = read_e1_counts(str(dest))
-                    if exp is not None and proc is not None:
+                    if exp and proc:
                         total_samples += proc
-                        diff = proc - exp
-                        if diff != 0:
-                            discrepancy_msgs.append(f"{Path(fp).name} (processadas: {proc} / declaradas: {exp})")
-                discrep_str = " ⚠️ Discrepâncias em " + "; ".join(discrepancy_msgs) if discrepancy_msgs else ""
+                        if exp != proc:
+                            discrepancies.append(
+                                f"{Path(fp).name} (processadas: {proc} / declaradas: {exp})"
+                            )
+                discrep_str = ""
+                if discrepancies:
+                    discrep_str = " ⚠️ Discrepâncias em " + "; ".join(discrepancies)
                 st.success(f"✅ {up.name}: {req_count} requisição(ões), {total_samples} amostras{discrep_str}.")
                 summary_lines.append(f"{up.name}: {req_count} requisições, {total_samples} amostras{discrep_str}.")
             progress.progress(i / total)
-            time.sleep(0.2)
+            time.sleep(0.3)
 
         total_time = time.time() - start_time
         if all_excel:
             debug_files = collect_debug_files(outdirs)
-            summary_text = "\n".join(summary_lines) + f"\n\n📊 Total: {len(all_excel)} ficheiro(s) Excel\n⏱️ Tempo total: {total_time:.1f} segundos"
+            summary_text = "\n".join(summary_lines)
+            summary_text += f"\n\n📊 Total: {len(all_excel)} ficheiro(s) Excel\n⏱️ Tempo total: {total_time:.1f} segundos"
             zip_bytes = build_zip_with_summary(all_excel, debug_files, summary_text)
             zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
+
             st.success(f"🏁 Processamento concluído ({len(all_excel)} ficheiros Excel gerados).")
-            st.download_button("⬇️ Descarregar resultados (ZIP)", data=zip_bytes, file_name=zip_name, mime="application/zip")
-            st.session_state.uploader_key = f"uploader_{datetime.now().timestamp()}"
+            st.download_button("⬇️ Descarregar resultados (ZIP)", data=zip_bytes,
+                               file_name=zip_name, mime="application/zip")
+            st.session_state.processing = False
         else:
             st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
+
     finally:
         shutil.rmtree(session_dir, ignore_errors=True)
         st.session_state.processing = False
