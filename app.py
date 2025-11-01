@@ -37,7 +37,7 @@ st.markdown("""
   padding: 1rem !important;
 }
 
-/* Caixas coloridas */
+/* Caixas */
 .success-box {
   background-color: #E8F5E9;
   border-left: 5px solid #2E7D32;
@@ -129,15 +129,11 @@ elif st.session_state.processing:
             os.environ["OUTPUT_DIR"] = tmpdir
             results = process_pdf(tmp_path)
 
-            st.markdown("#### 📄 Ficheiros gerados")
             if not results:
                 st.markdown(f'<div class="warning-box">⚠️ Nenhum ficheiro gerado para <b>{up.name}</b>.</div>', unsafe_allow_html=True)
             else:
+                st.markdown("#### 📄 Ficheiros gerados")
                 for r in results:
-                    # Corrige se for string
-                    if isinstance(r, str):
-                        r = {"path": r, "samples": 0, "declared": 0, "diff": 0}
-
                     fp = r.get("path")
                     samples = r.get("samples", 0)
                     declared = r.get("declared", samples)
@@ -145,17 +141,9 @@ elif st.session_state.processing:
                     all_excel.append(fp)
 
                     if diff and diff != 0:
-                        st.markdown(
-                            f'<div class="warning-box">⚠️ <b>{Path(fp).name}</b>: ficheiro gerado. '
-                            f'({samples} vs {declared} — discrepância {diff:+d})</div>',
-                            unsafe_allow_html=True
-                        )
+                        st.markdown(f'<div class="warning-box">⚠️ {Path(fp).name}: ficheiro gerado. ({samples} vs {declared} — discrepância {diff:+d})</div>', unsafe_allow_html=True)
                     else:
-                        st.markdown(
-                            f'<div class="success-box">✅ <b>{Path(fp).name}</b>: ficheiro gerado. '
-                            f'({samples} amostra{"s" if samples != 1 else ""} OK)</div>',
-                            unsafe_allow_html=True
-                        )
+                        st.markdown(f'<div class="success-box">✅ {Path(fp).name}: ficheiro gerado. ({samples} amostras OK)</div>', unsafe_allow_html=True)
 
             progress.progress(i / total)
             time.sleep(0.3)
@@ -183,8 +171,13 @@ if st.session_state.finished and st.session_state.results:
 
     # Estatísticas
     total_files = len(results)
-    total_samples = sum(r["samples"] if isinstance(r, dict) else 0 for r in results)
-    total_discrep = sum(1 for r in results if isinstance(r, dict) and r.get("diff", 0))
+    total_samples = 0
+    total_discrep = 0
+
+    for r in results:
+        total_samples += r.get("samples", 0)
+        if r.get("diff", 0):
+            total_discrep += 1
 
     st.markdown(
         f"""
