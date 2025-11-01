@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import os
-import shutil
 from pathlib import Path
 from datetime import datetime
 
@@ -11,54 +10,24 @@ except ImportError:
 
 # Diretório de saída temporário (definido pelo app)
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "/tmp")).resolve()
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def process_pdf(pdf_path):
     """
-    Executa o core_xylella.py no contexto real do Streamlit Cloud (/mount/src/xylella-streamlitcloud),
-    garantindo a criação de debug/ e summary. Devolve apenas a lista de paths dos ficheiros Excel.
+    Usa diretamente process_pdf_sync do core_xylella.
     """
-    import subprocess, json, sys
-
-    project_root = Path("/mount/src/xylella-streamlitcloud").resolve()
-    pdf_path = Path(pdf_path).resolve()
-    pdf_name = pdf_path.name
-    stable_pdf = project_root / pdf_name
+    if not process_pdf_sync:
+        print("❌ core_xylella não encontrado — funcionalidade limitada.")
+        return []
 
     try:
-        shutil.copy(pdf_path, stable_pdf)
+        parsed = process_pdf_sync(str(pdf_path))
     except Exception as e:
-        print(f"⚠️ Erro ao copiar PDF: {e}")
+        print(f"❌ Erro ao processar PDF: {e}")
         return []
 
-    print(f"📄 Copiado para {stable_pdf}")
-    print(f"📂 Working dir forçado: {project_root}")
-
-    helper = project_root / "_run_core_wrapper.py"
-    helper.write_text(f"""
-import json
-from core_xylella import process_pdf_sync
-res = process_pdf_sync(r"{stable_pdf}")
-print(json.dumps(res if isinstance(res, (list, dict)) else str(res)))
-""")
-
-    result = subprocess.run(
-        [sys.executable, str(helper)],
-        capture_output=True, text=True, cwd=project_root
-    )
-
-    if result.returncode != 0:
-        print("❌ Erro ao executar core_xylella:")
-        print(result.stderr)
-        return []
-
-    try:
-        parsed = json.loads(result.stdout)
-    except Exception:
-        parsed = []
-
-    entries = _normalize_result(parsed)
-    return entries
+    return _normalize_result(parsed)
 
 
 def _normalize_result(result):
@@ -107,8 +76,7 @@ def process_pdf_with_stats(pdf_path: str):
             "file": e.get("path"),
             "samples": e.get("processed", 0),
             "expected": e.get("expected"),
-            "diff": e.get("processed", 0) - (e.get("expected") or 0),
-            "discrepancy": e.get("discrepancy", False)
+            "diff": e.get("processed", 0) - (e.get("expected") or 0)
         })
 
     # Ficheiros de debug (se existirem)
