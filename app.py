@@ -1,4 +1,4 @@
-# app.py (versão final corrigida)
+# app.py (versão corrigida para evitar duplicações)
 
 import os
 import streamlit as st
@@ -22,22 +22,28 @@ if "processing" not in st.session_state:
     st.session_state.processing = False
 if "generated" not in st.session_state:
     st.session_state.generated = []
+if "processed_files" not in st.session_state:
+    st.session_state.processed_files = set()
 
 # Upload de ficheiros
 uploaded = st.file_uploader("Carrega um ou mais PDFs", type="pdf", accept_multiple_files=True)
 if uploaded:
     for f in uploaded:
         dest = temp_dir / f.name
-        with open(dest, "wb") as out:
-            out.write(f.read())
-        st.session_state.uploaded_files.append(dest)
+        if dest not in st.session_state.uploaded_files:
+            with open(dest, "wb") as out:
+                out.write(f.read())
+            st.session_state.uploaded_files.append(dest)
     st.success(f"{len(uploaded)} ficheiro(s) carregado(s). Pronto para processar.")
 
 # Mostrar lista de ficheiros carregados
 if st.session_state.uploaded_files:
     st.markdown("## 📄 Ficheiros em processamento")
+    shown = set()
     for f in st.session_state.uploaded_files:
-        st.write(f.name)
+        if f.name not in shown:
+            st.write(f.name)
+            shown.add(f.name)
 
 # Botão para iniciar processamento
 if st.session_state.uploaded_files and not st.session_state.processing:
@@ -47,9 +53,11 @@ if st.session_state.uploaded_files and not st.session_state.processing:
 
 # Processamento efetivo
 if st.session_state.processing:
-    with st.spinner("\u23f3 A processar ficheiros... aguarde até o processo terminar."):
+    with st.spinner("⏳ A processar ficheiros... aguarde até o processo terminar."):
         all_excels = []
         for file_path in st.session_state.uploaded_files:
+            if file_path.name in st.session_state.processed_files:
+                continue
             st.markdown(f"### 📄 {file_path.name}")
             try:
                 excels, stats, debug = process_pdf_with_stats(str(file_path))
@@ -59,6 +67,7 @@ if st.session_state.processing:
                     st.success(f"✅ {len(excels)} ficheiro(s) gerado(s).")
                     st.session_state.generated.extend(excels)
                     all_excels.extend(excels)
+                    st.session_state.processed_files.add(file_path.name)
             except Exception as e:
                 st.error(f"❌ Erro ao processar {file_path.name}: {e}")
 
@@ -72,6 +81,7 @@ if st.session_state.processing:
         st.session_state.uploaded_files = []
         st.session_state.generated = []
         st.session_state.processing = False
+        st.session_state.processed_files = set()
         st.rerun()
 
 # Footer
