@@ -160,13 +160,13 @@ if st.session_state.processing and uploads is None:
     except Exception as e:
         st.error(f"❌ Erro inesperado: {e}")
 
-   finally:
-          try:
-              shutil.rmtree(session_dir, ignore_errors=True)
-          except Exception as e:
-              st.warning(f"Não foi possível limpar ficheiros temporários: {e}")
-          st.session_state.processing = False
-          st.experimental_rerun()
+finally:
+      try:
+          shutil.rmtree(session_dir, ignore_errors=True)
+      except Exception as e:
+          st.warning(f"Não foi possível limpar ficheiros temporários: {e}")
+      st.session_state.processing = False
+      st.experimental_rerun()
 
 # ───────────────────────────────────────────────
 # Guardar última lista de uploads antes do rerun
