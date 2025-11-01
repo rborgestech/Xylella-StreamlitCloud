@@ -795,35 +795,38 @@ def append_process_log(pdf_name, req_id, processed, expected, out_path=None, sta
 
 
 
-def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
+def process_pdf_sync(pdf_path: str) -> List[str]:
     """
     Executa o OCR Azure direto ao PDF e o parser Colab integrado.
-    Devolve uma lista de dicts com:
-      - path (str): caminho absoluto do Excel
-      - processed (int): nº de amostras extraídas
-      - expected (int|None): nº de amostras declaradas
-      - discrepancy (bool): se há diferença declaradas vs extraídas
+    Devolve uma lista de paths para os ficheiros Excel gerados (absolutos).
     """
     base = os.path.basename(pdf_path)
     print(f"\n🧪 Início de processamento: {base}")
 
+    # Diretório onde os ficheiros devem ser gravados (recebido do app via variável de ambiente)
     OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "/tmp")).resolve()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+    # 1️⃣ Executar OCR Azure
     result_json = azure_analyze_pdf(pdf_path)
 
+    # 2️⃣ Guardar texto OCR global para debug
     txt_path = OUTPUT_DIR / f"{os.path.splitext(base)[0]}_ocr_debug.txt"
     txt_path.write_text(extract_all_text(result_json), encoding="utf-8")
     print(f"📝 Texto OCR bruto guardado em: {txt_path}")
 
+    # 3️⃣ Parser — dividir em requisições e extrair amostras
     req_results = parse_all_requisitions(result_json, pdf_path, str(txt_path))
+
+    # 4️⃣ Log e resumo de validação
     total_amostras = sum(len(req["rows"]) for req in req_results)
     print(f"✅ {base}: {len(req_results)} requisições, {total_amostras} amostras extraídas.")
 
+    # 5️⃣ Escrever ficheiros Excel diretamente para o diretório temporário
     created_files = []
     for i, req in enumerate(req_results, start=1):
         rows = req.get("rows", [])
-        expected = req.get("expected")
+        expected = req.get("expected", 0)
 
         if not rows:
             print(f"⚠️ Requisição {i}: sem amostras — ignorada.")
@@ -833,24 +836,20 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         out_name = f"{base_name}_req{i}.xlsx" if len(req_results) > 1 else f"{base_name}.xlsx"
         out_path = OUTPUT_DIR / out_name
 
+        # Chamar função que grava o Excel
         write_to_template(rows, out_path, expected_count=expected, source_pdf=pdf_path)
+        created_files.append(str(out_path))
 
         diff = len(rows) - (expected or 0)
-        has_discrepancy = expected is not None and diff != 0
-        if has_discrepancy:
+        if expected and diff != 0:
             print(f"⚠️ Requisição {i}: {len(rows)} amostras vs {expected} declaradas (diferença {diff:+d}).")
         else:
             print(f"✅ Requisição {i}: {len(rows)} amostras gravadas → {out_path}")
 
-        created_files.append({
-            "path": str(out_path),
-            "processed": len(rows),
-            "expected": expected,
-            "discrepancy": has_discrepancy
-        })
-
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
     return created_files
+
+
 
 
 
