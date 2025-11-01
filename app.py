@@ -206,37 +206,10 @@ elif st.session_state.stage == "processing":
         st.rerun()
 
 # ───────────────────────────────────────────────
-# RESET SEGURO APÓS DOWNLOAD
+# RESET IMEDIATO APÓS DOWNLOAD
 # ───────────────────────────────────────────────
-# RESET SEGURO APÓS DOWNLOAD (adiado ligeiramente)
 if st.session_state.reset_flag:
-    # Mostra animação de transição antes de limpar
-    fade_style = """
-        <style>
-        .fade-out {
-            opacity: 0;
-            transition: opacity 0.5s ease-out;
-        }
-        </style>
-        <script>
-        const el = parent.document.querySelector('.block-container');
-        if (el) {
-            el.classList.add('fade-out');
-        }
-        </script>
-    """
-    st.markdown(fade_style, unsafe_allow_html=True)
-
-    # Marca o reset e volta ao estado inicial
     st.session_state.reset_flag = False
     st.session_state.stage = "idle"
     st.session_state.uploads = None
-    # ligeiro atraso só para deixar o fade acontecer
-    time.sleep(0.2)
-    try:
-        st.rerun()
-    except Exception:
-        pass
-    except Exception:
-        pass
-
+    st.markdown("<meta http-equiv='refresh' content='0'>", unsafe_allow_html=True)
