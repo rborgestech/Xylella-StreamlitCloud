@@ -63,18 +63,28 @@ def read_e1_counts(xlsx_path: str):
 # ───────────────────────────────────────────────
 # Interface de Upload
 # ───────────────────────────────────────────────
+
 if "processing" not in st.session_state:
     st.session_state.processing = False
 
-# esconder uploader durante processamento
-if not st.session_state.processing:
-    uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True)
-else:
+# Enquanto processa, esconder tudo
+if st.session_state.processing:
+    st.markdown("⏳ **A processar ficheiros...** Aguarda a conclusão antes de iniciar novo processamento.")
     uploads = []
+    start = None
+else:
+    # Mostrar uploader e botão apenas se não estiver a processar
+    uploads = st.file_uploader(
+        "📂 Carrega um ou vários PDFs",
+        type=["pdf"],
+        accept_multiple_files=True,
+        help="Podes arrastar vários PDFs para processar em lote."
+    )
 
-# botão só aparece se houver ficheiros
-start = st.button("📄 Processar ficheiros de Input", type="primary",
-                  disabled=st.session_state.processing or not uploads)
+    if uploads:
+        start = st.button("📄 Processar ficheiros de Input", type="primary")
+    else:
+        start = None
 
 # ───────────────────────────────────────────────
 # Execução principal
