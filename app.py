@@ -17,40 +17,115 @@ st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 Exce
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
-.stButton > button[kind="primary"]{background:#CA4300!important;border:1px solid #CA4300!important;color:#fff!important;font-weight:600!important;border-radius:6px!important}
-.stButton > button[kind="primary"]:hover{background:#A13700!important;border:1px solid #A13700!important}
-[data-testid="stFileUploader"] > div:first-child{border:2px dashed #CA4300!important;border-radius:10px!important;padding:1rem!important}
-.success-box{background:#E8F5E9;border-left:5px solid #2E7D32;padding:.7rem 1rem;border-radius:6px;margin-bottom:.4rem}
-.warning-box{background:#FFF3E0;border-left:5px solid #F57C00;padding:.7rem 1rem;border-radius:6px;margin-bottom:.4rem}
-.info-box{background:#E3F2FD;border-left:5px solid #1E88E5;padding:.7rem 1rem;border-radius:6px;margin-bottom:.4rem}
-.st-processing-dots::after{content:' ';animation:dots 1.2s steps(4,end) infinite;color:#CA4300;font-weight:700;margin-left:.15rem}
-@keyframes dots{0%,20%{content:''}40%{content:'.'}60%{content:'..'}80%,100%{content:'...'}}
-.button-row{display:flex;justify-content:center;align-items:center;gap:1rem;margin-top:1.5rem}
-.stDownloadButton button,.stButton button{background:#fff!important;border:1.5px solid #CA4300!important;color:#CA4300!important;font-weight:600!important;border-radius:8px!important;padding:.6rem 1.2rem!important;transition:all .2s}
-.stDownloadButton button:hover,.stButton button:hover{background:#CA4300!important;color:#fff!important;border-color:#A13700!important}
-.fade-in{animation:fadeIn .8s ease-in-out}
-@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+/* Botão primário laranja SGS */
+.stButton > button[kind="primary"] {
+  background-color: #CA4300 !important;
+  border: 1px solid #CA4300 !important;
+  color: #fff !important;
+  font-weight: 600 !important;
+  border-radius: 6px !important;
+}
+.stButton > button[kind="primary"]:hover {
+  background-color: #A13700 !important;
+  border: 1px solid #A13700 !important;
+}
+
+/* File uploader */
+[data-testid="stFileUploader"] > div:first-child {
+  border: 2px dashed #CA4300 !important;
+  border-radius: 10px !important;
+  padding: 1rem !important;
+}
+
+/* Caixas de estado */
+.success-box {
+  background-color: #E8F5E9;
+  border-left: 5px solid #2E7D32;
+  padding: 0.7rem 1rem;
+  border-radius: 6px;
+  margin-bottom: 0.4rem;
+}
+.warning-box {
+  background-color: #FFF3E0;
+  border-left: 5px solid #F57C00;
+  padding: 0.7rem 1rem;
+  border-radius: 6px;
+  margin-bottom: 0.4rem;
+}
+.info-box {
+  background-color: #E3F2FD;
+  border-left: 5px solid #1E88E5;
+  padding: 0.7rem 1rem;
+  border-radius: 6px;
+  margin-bottom: 0.4rem;
+}
+
+/* Loader animado "..." em laranja SGS */
+.st-processing-dots::after {
+  content: ' ';
+  animation: dots 1.2s steps(4, end) infinite;
+  color: #CA4300;
+  font-weight: 700;
+  margin-left: .15rem;
+}
+@keyframes dots {
+  0%, 20%   { content: ''; }
+  40%       { content: '.'; }
+  60%       { content: '..'; }
+  80%, 100% { content: '...'; }
+}
+
+/* Linha de botões finais lado a lado */
+.button-row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+.stDownloadButton button, .stButton button {
+  background-color: #ffffff !important;
+  border: 1.5px solid #CA4300 !important;
+  color: #CA4300 !important;
+  font-weight: 600 !important;
+  border-radius: 8px !important;
+  padding: 0.6rem 1.2rem !important;
+  transition: all 0.2s ease-in-out;
+}
+.stDownloadButton button:hover, .stButton button:hover {
+  background-color: #CA4300 !important;
+  color: #ffffff !important;
+  border-color: #A13700 !important;
+}
+
+/* Fade-in no painel final */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); opacity: 1; }
+}
+.fade-in {
+  animation: fadeIn 0.8s ease-in-out;
+}
 </style>
 """, unsafe_allow_html=True)
 
 # ───────────────────────────────────────────────
 # Estado
 # ───────────────────────────────────────────────
-if "processing" not in st.session_state: st.session_state.processing = False
-if "finished"   not in st.session_state: st.session_state.finished   = False
-if "uploads"    not in st.session_state: st.session_state.uploads    = []
-if "entries"    not in st.session_state: st.session_state.entries    = []
-if "zip_bytes"  not in st.session_state: st.session_state.zip_bytes  = None
-if "zip_name"   not in st.session_state: st.session_state.zip_name   = None
+for k in ["processing", "finished", "uploads", "all_excel", "zip_bytes", "zip_name"]:
+    if k not in st.session_state:
+        st.session_state[k] = False if k in ["processing", "finished"] else []
 
 # ───────────────────────────────────────────────
 # Ecrã inicial
 # ───────────────────────────────────────────────
 if not st.session_state.processing and not st.session_state.finished:
     uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True)
+
     if uploads:
         st.session_state.uploads = uploads
-        if st.button(f"📄 Processar {len(uploads)} ficheiro(s) de Input", type="primary"):
+        start = st.button(f"📄 Processar {len(uploads)} ficheiro(s) de Input", type="primary")
+        if start:
             st.session_state.processing = True
             st.rerun()
     else:
@@ -64,13 +139,17 @@ elif st.session_state.processing:
     total = len(uploads)
 
     st.markdown('<div class="info-box">⏳ A processar ficheiros... aguarde até o processo terminar.</div>', unsafe_allow_html=True)
+
     with st.expander("📄 Ficheiros em processamento", expanded=True):
-        for up in uploads: st.markdown(f"- {up.name}")
+        for up in uploads:
+            st.markdown(f"- {up.name}")
 
     generated_panel = st.expander("📄 Ficheiros gerados", expanded=True)
     progress = st.progress(0)
     status_text = st.empty()
-    all_entries = []
+    all_excel = []
+    total_amostras = 0
+    ficheiros_com_discrepancias = 0
     session_dir = tempfile.mkdtemp(prefix="xylella_session_")
 
     try:
@@ -83,72 +162,69 @@ elif st.session_state.processing:
 
             tmpdir = tempfile.mkdtemp(dir=session_dir)
             tmp_path = os.path.join(tmpdir, up.name)
-            with open(tmp_path, "wb") as f: f.write(up.getbuffer())
+            with open(tmp_path, "wb") as f:
+                f.write(up.getbuffer())
 
             os.environ["OUTPUT_DIR"] = tmpdir
-            entries = process_pdf(tmp_path)  # normalizado para lista de dicts
+            result = process_pdf(tmp_path)
 
-            if not entries:
+            if not result:
                 generated_panel.markdown(
                     f'<div class="warning-box">⚠️ Nenhum ficheiro gerado para <b>{up.name}</b>.</div>',
                     unsafe_allow_html=True
                 )
             else:
-                for e in entries:
-                    all_entries.append(e)
-                    base = Path(e["path"]).name
-                    samples = e.get("samples")
-                    disc = e.get("discrepancy")
-
-                    if disc and disc != 0:
-                        if isinstance(disc, (tuple, list)) and len(disc) == 2:
-                            msg = f"⚠️ <b>{base}</b>: ficheiro gerado. ⚠️ discrepância ({disc[0]} vs {disc[1]})"
-                        else:
-                            msg = f"⚠️ <b>{base}</b>: ficheiro gerado. ⚠️ discrepância detectada ({disc})"
-                        css = "warning-box"
+                # Cada item pode ser (path, n_amostras, discrepancias)
+                for item in result:
+                    if isinstance(item, tuple):
+                        fp, n_amostras, discrepancias = item
                     else:
-                        smp_txt = f"({samples} amostra{'s' if samples != 1 else ''} OK)" if samples else ""
-                        msg = f"✅ <b>{base}</b>: ficheiro gerado. {smp_txt}"
-                        css = "success-box"
+                        fp, n_amostras, discrepancias = item, None, None
 
-                    generated_panel.markdown(f'<div class="{css}">{msg}</div>', unsafe_allow_html=True)
+                    all_excel.append(fp)
+                    base_name = Path(fp).name
+                    if n_amostras:
+                        total_amostras += n_amostras
+                    if discrepancias:
+                        ficheiros_com_discrepancias += 1
+
+                    # Mensagem
+                    if discrepancias:
+                        msg = (
+                            f"⚠️ <b>{base_name}</b>: ficheiro gerado. "
+                            f"<span style='color:#F57C00;'>⚠️ discrepância detectada ({discrepancias})</span>"
+                        )
+                        css_class = "warning-box"
+                    else:
+                        amostras_txt = (
+                            f"({n_amostras} amostra{'s' if n_amostras != 1 else ''} OK)"
+                            if n_amostras else ""
+                        )
+                        msg = f"✅ <b>{base_name}</b>: ficheiro gerado. {amostras_txt}"
+                        css_class = "success-box"
+
+                    generated_panel.markdown(f'<div class="{css_class}">{msg}</div>', unsafe_allow_html=True)
 
             progress.progress(i / total)
             time.sleep(0.2)
 
-        # 🧾 Resumo final
-        total_samples = sum([(e.get("samples") or 0) for e in all_entries])
-        discrep_files = sum([1 for e in all_entries if e.get("discrepancy") not in (None, 0)])
-        resumo = f"""
-        <div style="background:#FFF; border:1px solid #E5E7EB; border-radius:10px; padding:12px; margin-top:8px;">
-          <div style="font-weight:700; margin-bottom:6px;">🧾 RESUMO DE EXECUÇÃO</div>
-          <div style="line-height:1.5;">
-            {'<br>'.join([
-                (f"⚠️ {Path(e['path']).name}: ficheiro gerado. ⚠️ discrepância ({e['discrepancy'][0]} vs {e['discrepancy'][1]})"
-                 if isinstance(e['discrepancy'], (tuple, list)) and len(e['discrepancy']) == 2 else
-                 f"⚠️ {Path(e['path']).name}: ficheiro gerado. ⚠️ discrepância detectada ({e['discrepancy']})")
-                if e.get('discrepancy') not in (None, 0)
-                else f"✅ {Path(e['path']).name}: ficheiro gerado. ({e.get('samples') or 0} amostras OK)"
-                for e in all_entries
-            ])}
-          </div>
-          <div style="height:10px;"></div>
-          <div style="display:flex; gap:18px; align-items:center; flex-wrap:wrap; font-weight:600;">
-            <span>🧪 Total de amostras processadas: {int(total_samples)}</span>
-            <span>🗂️ Total: {len(all_entries)} ficheiro(s) Excel</span>
-            <span>🟡 {discrep_files} ficheiro(s) com discrepâncias</span>
-          </div>
-        </div>
-        """
-        generated_panel.markdown(resumo, unsafe_allow_html=True)
+        status_text.empty()
 
-        # ZIP final
-        if all_entries:
-            with st.spinner("🧩 A gerar ficheiro ZIP…"):
-                st.session_state.entries = all_entries
-                st.session_state.finished = True
-                st.session_state.zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
-                st.session_state.zip_bytes = build_zip([e["path"] for e in all_entries])
+        # Criar ZIP e finalizar
+        if all_excel:
+            with st.spinner("🧩 A gerar ficheiro ZIP… aguarde alguns segundos."):
+                zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
+                zip_bytes = build_zip(all_excel)
+                st.session_state.update({
+                    "finished": True,
+                    "processing": False,
+                    "all_excel": all_excel,
+                    "zip_name": zip_name,
+                    "zip_bytes": zip_bytes,
+                    "total_amostras": total_amostras,
+                    "ficheiros_com_discrepancias": ficheiros_com_discrepancias
+                })
+                st.rerun()
         else:
             st.warning("⚠️ Nenhum ficheiro Excel foi detetado.")
 
@@ -156,40 +232,54 @@ elif st.session_state.processing:
         st.error(f"❌ Erro inesperado: {e}")
     finally:
         shutil.rmtree(session_dir, ignore_errors=True)
-        st.session_state.processing = False
 
 # ───────────────────────────────────────────────
-# Ecrã final
+# Ecrã final — painel de sucesso + botões lado a lado
 # ───────────────────────────────────────────────
-if st.session_state.finished and st.session_state.entries:
-    total_samples = sum([(e.get("samples") or 0) for e in st.session_state.entries])
-    num_files = len(st.session_state.entries)
+if st.session_state.finished and st.session_state.all_excel:
+    num_files = len(st.session_state.all_excel)
+    total_amostras = st.session_state.get("total_amostras", 0)
 
-    st.markdown(f"""
-    <div class="fade-in" style="background:#E8F5E9; border-left:6px solid #2E7D32; border-radius:10px;
-         padding:1.2rem 1.6rem; margin-top:1.4rem; text-align:center;">
-      <h4 style="color:#2E7D32; font-weight:600; margin:.2rem 0 .3rem 0;">✅ Processamento concluído</h4>
-      <p style="color:#2E7D32; margin:.2rem 0 0 0;">
-        {num_files} ficheiro{'s' if num_files>1 else ''} Excel gerado{'s' if num_files>1 else ''} ·
-        <b>{int(total_samples)}</b> amostra{'s' if total_samples!=1 else ''} no total
-      </p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(
+        f"""
+        <div class="fade-in" style="
+          background:#E8F5E9; border-left:6px solid #2E7D32; border-radius:10px;
+          padding:1.2rem 1.6rem; margin-top:1.4rem; text-align:center;
+        ">
+          <h4 style="color:#2E7D32; font-weight:600; margin:.2rem 0 .3rem 0;">
+            ✅ Processamento concluído
+          </h4>
+          <p style="color:#2E7D32; margin:.2rem 0 0 0;">
+            {num_files} ficheiro{'s' if num_files>1 else ''} Excel gerado{'s' if num_files>1 else ''} · 
+            {total_amostras} amostra{'s' if total_amostras != 1 else ''} no total
+          </p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
     zip_name = st.session_state.zip_name
     zip_bytes = st.session_state.zip_bytes
 
     st.markdown('<div class="button-row">', unsafe_allow_html=True)
-    c1, c2 = st.columns([1, 1])
-    with c1:
-        st.download_button("⬇️ Descarregar resultados (ZIP)", data=zip_bytes,
-                           file_name=zip_name, mime="application/zip",
-                           key="zip_download_final")
-    with c2:
+    col1, col2 = st.columns([1, 1])
+
+    with col1:
+        st.download_button(
+            "⬇️ Descarregar resultados (ZIP)",
+            data=zip_bytes,
+            file_name=zip_name,
+            mime="application/zip",
+            key="zip_download_final"
+        )
+
+    with col2:
         if st.button("🔁 Novo processamento", key="btn_new_run"):
             with st.spinner("🔄 A reiniciar..."):
-                for k in ["processing","finished","uploads","entries","zip_bytes","zip_name"]:
-                    if k in st.session_state: del st.session_state[k]
-                time.sleep(0.5)
+                for k in ["processing", "finished", "uploads", "all_excel", "zip_bytes", "zip_name"]:
+                    if k in st.session_state:
+                        del st.session_state[k]
+                time.sleep(0.6)
                 st.rerun()
+
     st.markdown("</div>", unsafe_allow_html=True)
