@@ -4,7 +4,7 @@ import tempfile, os, shutil, time, io, zipfile, re
 from pathlib import Path
 from datetime import datetime
 from openpyxl import load_workbook
-from xylella_processor import process_pdf, build_zip
+from xylella_processor import process_pdf
 
 # ───────────────────────────────────────────────
 # Configuração base
@@ -63,12 +63,18 @@ def read_e1_counts(xlsx_path: str):
 # ───────────────────────────────────────────────
 # Interface de Upload
 # ───────────────────────────────────────────────
-uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True)
-
 if "processing" not in st.session_state:
     st.session_state.processing = False
 
-start = st.button("📄 Processar ficheiros de Input", type="primary", disabled=st.session_state.processing or not uploads)
+# esconder uploader durante processamento
+if not st.session_state.processing:
+    uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True)
+else:
+    uploads = []
+
+# botão só aparece se houver ficheiros
+start = st.button("📄 Processar ficheiros de Input", type="primary",
+                  disabled=st.session_state.processing or not uploads)
 
 # ───────────────────────────────────────────────
 # Execução principal
@@ -76,8 +82,8 @@ start = st.button("📄 Processar ficheiros de Input", type="primary", disabled=
 if start and uploads:
     st.session_state.processing = True
     try:
-        st.info("⚙️ A processar ficheiros... aguarda alguns segundos.")
-        all_excel, all_debug, summary_lines = [], [], []
+        st.info("⚙️ A processar... isto pode demorar alguns segundos.")
+        all_excel, all_debug = [], []
 
         final_dir = Path.cwd() / "output_final"
         final_dir.mkdir(exist_ok=True)
@@ -97,66 +103,60 @@ if start and uploads:
             os.environ["OUTPUT_DIR"] = str(tmpdir)
             created = process_pdf(str(tmp_path))
 
-            if not created:
-                st.warning(f"⚠️ Nenhum ficheiro gerado para {up.name}")
-            else:
-                total_samples, discrepancies = 0, []
-                for fp in created:
-                    declared, processed = read_e1_counts(fp)
-                    if processed:
-                        total_samples += processed
-                    if declared and processed and declared != processed:
-                        diff = processed - declared
-                        discrepancies.append(f"{Path(fp).name}: Esperado {declared}, Processado {processed} (Δ {diff:+d})")
+            total_samples = 0
+            discrep_details = []
 
-                    dest = final_dir / Path(fp).name
-                    shutil.copy(fp, dest)
-                    all_excel.append(str(dest))
-                    st.success(f"✅ {Path(fp).name} gravado")
+            for fp in created:
+                declared, processed = read_e1_counts(fp)
+                if processed:
+                    total_samples += processed
+                if declared and processed and declared != processed:
+                    diff = processed - declared
+                    discrep_details.append(f"{Path(fp).name}: Esperado {declared}, Processado {processed} (Δ {diff:+d})")
 
-                msg = f"✅ {up.name}: {len(created)} requisições, {total_samples} amostras"
-                if discrepancies:
-                    msg += f" ⚠️ Discrepâncias detectadas: {', '.join(discrepancies)}"
-                st.info(msg)
-                summary_lines.append(msg)
+                dest = final_dir / Path(fp).name
+                shutil.copy(fp, dest)
+                all_excel.append(str(dest))
+                # mensagem completa de cada ficheiro
+                msg = f"✅ {Path(fp).name} gravado — {processed or '?'} amostras"
+                if declared:
+                    msg += f" (esperadas {declared})"
+                st.success(msg)
 
-            # adicionar ficheiros de debug (txt, csv)
-            for pattern in ["*_ocr_debug.txt", "process_log.csv", "process_summary_*.txt"]:
-                for dbg in tmpdir.glob(pattern):
-                    all_debug.append(str(dbg))
+            # resumo por PDF (mesmo bloco)
+            if total_samples > 0:
+                info_msg = f"📊 Total processado: {total_samples} amostras"
+                if discrep_details:
+                    info_msg += f" ⚠️ Discrepâncias: {'; '.join(discrep_details)}"
+                st.info(info_msg)
 
             progress.progress(i / total)
             time.sleep(0.3)
 
-        # ───────────────────────────────────────────────
-        # Criação do ZIP final com debug/ e summary.txt
-        # ───────────────────────────────────────────────
+        # Criação do ZIP
         if all_excel:
-            summary_lines.append(f"\n📊 Total: {len(all_excel)} ficheiro(s) Excel gerado(s)")
-            summary_text = "\n".join(summary_lines)
-
+            zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
             mem = io.BytesIO()
             with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as z:
                 for f in all_excel:
                     z.write(f, arcname=os.path.basename(f))
                 for dbg in all_debug:
                     z.write(dbg, arcname=f"debug/{os.path.basename(dbg)}")
-                z.writestr("summary.txt", summary_text)
             mem.seek(0)
 
-            zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
             st.success(f"🏁 Processamento concluído ({len(all_excel)} ficheiros Excel gerados).")
             st.download_button("⬇️ Descarregar resultados (ZIP)", data=mem.read(),
                                file_name=zip_name, mime="application/zip", type="primary")
 
-            # Botão para limpar lista
+            # botão limpar lista
             if st.button("🗑️ Limpar lista de ficheiros carregados"):
+                st.session_state.processing = False
                 st.experimental_rerun()
         else:
-            st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
+            st.error("⚠️ Nenhum ficheiro Excel foi detetado.")
 
     finally:
         st.session_state.processing = False
 
 else:
-    st.info("💡 Carrega um ficheiro PDF e clica em **Processar ficheiros de Input**.")
+    st.info("💡 Carrega ficheiros PDF para ativar o botão de processamento.")
