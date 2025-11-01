@@ -756,11 +756,9 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
     ws["K1"].fill = gray_fill
 
     # 💾 Guardar ficheiro ---------------------------------------------
-    base_name = os.path.splitext(os.path.basename(out_name))[0]
-    out_path = os.path.join(OUTPUT_DIR, f"{base_name}.xlsx")
-    wb.save(out_path)
-    print(f"🟢 Gravado (com validação E1/F1, origem G1:J1 e timestamp K1:L1): {out_path}")
-    return out_path
+    wb.save(str(out_name))
+    print(f"🟢 Gravado (com validação E1/F1, origem G1:J1 e timestamp K1:L1): {out_name}")
+    return str(out_name)
 
 
 # ───────────────────────────────────────────────
@@ -845,6 +843,7 @@ def process_pdf_sync(pdf_path: str) -> List[str]:
 
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
     return created_files
+
 
 
 
