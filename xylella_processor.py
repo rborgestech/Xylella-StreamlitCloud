@@ -8,22 +8,6 @@ Inclui normalização do output para integração com o front-end Streamlit.
 import os
 from pathlib import Path
 
-# ----------------------------------------------------------------------
-# Função original — mantém a tua lógica existente aqui
-# ----------------------------------------------------------------------
-def process_pdf_original(pdf_path):
-    """
-    Implementação original de processamento.
-    Deve devolver um dos seguintes formatos:
-      1. [(path, samples, discrepancy), ...]
-      2. [{"path": ..., "samples": ..., "discrepancy": ...}, ...]
-      3. ([paths], samples_map, discrepancy_map)
-      4. ([paths], total_samples, total_discrepancies)
-    """
-    # ⚠️ Substitui este exemplo pela tua implementação real:
-    excel_path = Path(pdf_path).with_suffix(".xlsx")
-    # Simulação de resultado
-    return [(str(excel_path), 12, 0)]
 
 
 # ----------------------------------------------------------------------
@@ -79,43 +63,72 @@ def _as_list_of_entries(result):
 # ----------------------------------------------------------------------
 # Função pública usada pelo Streamlit
 # ----------------------------------------------------------------------
-def process_pdf(pdf_path):
-    """Wrapper estável — garante lista de tuplos (path, samples, discrepancies)."""
-    result = process_pdf_original(pdf_path)
+def process_pdf(pdf_path: str) -> List[str]:
+    """
+    Processa um PDF via core_xylella e devolve a lista de caminhos .xlsx criados.
+    Aguenta 3 formatos de retorno do core:
+      A) List[List[Dict]]  -> escreve 1 xlsx por req
+      B) List[Dict]        -> escreve 1 xlsx
+      C) List[str]         -> já são caminhos xlsx -> devolve tal como estão
+    """
+    print(f"\n📄 A processar: {os.path.basename(pdf_path)}")
+    base = os.path.splitext(os.path.basename(pdf_path))[0]
 
-    # Normaliza o retorno, qualquer que seja o formato
-    normalized = []
-    if not result:
+    req_results = core.process_pdf_sync(pdf_path)
+    if not req_results:
+        print(f"⚠️ Nenhuma requisição extraída de {base}.")
         return []
 
-    # Caso 1 – lista de tuplos
-    if all(isinstance(r, tuple) for r in result):
-        normalized = result
+    # Caso C) já são ficheiros .xlsx (strings)
+    if isinstance(req_results, list) and all(isinstance(x, str) for x in req_results):
+        created_files = [p for p in req_results if os.path.exists(p)]
+        print(f"🟢 Core devolveu {len(created_files)} ficheiros já criados.")
+        return created_files
 
-    # Caso 2 – lista de dicionários
-    elif all(isinstance(r, dict) for r in result):
-        for r in result:
-            normalized.append((r.get("path"), r.get("samples"), r.get("discrepancies")))
+    created_files: List[str] = []
 
-    # Caso 3 ou 4 – tuplo com ([paths], info extra)
-    elif isinstance(result, tuple) and len(result) >= 1:
-        paths = result[0]
-        samples = None
-        discrepancies = None
-        if len(result) >= 3:
-            samples = result[1]
-            discrepancies = result[2]
-        elif len(result) == 2:
-            samples = result[1]
-        for p in paths:
-            normalized.append((p, samples, discrepancies))
+    def _write_one_req(rows: list, req_idx: int, total_reqs: int):
+        """Escreve uma requisição (lista de dicts) no template e retorna o caminho."""
+        if not rows or not isinstance(rows, list):
+            return None
+        if not all(isinstance(r, dict) for r in rows):
+            # proteção extra: se por algum motivo vierem strings aqui, ignora
+            print(f"⚠️ Req {req_idx}: formato inesperado (não é lista de dicts). Ignorado.")
+            return None
 
-    # Garante paths resolvidos
-    for i, (path, s, d) in enumerate(normalized):
-        normalized[i] = (str(Path(path).resolve()), s, d)
+        # tenta obter expected se vier embutido em cada row (compatibilidade futura)
+        expected = None
+        try:
+            if rows and isinstance(rows[0], dict) and "expected" in rows[0]:
+                expected = rows[0].get("expected")
+        except Exception:
+            expected = None
 
-    return normalized
+        out_name = f"{base}_req{req_idx}.xlsx" if total_reqs > 1 else f"{base}.xlsx"
+        out_path = core.write_to_template(rows, out_name, expected_count=expected, source_pdf=pdf_path)
+        if out_path and os.path.exists(out_path):
+            print(f"✅ Requisição {req_idx}: {len(rows)} amostras → {os.path.basename(out_path)}")
+            return out_path
+        return None
 
+    # Caso B) uma única requisição (lista de dicts)
+    if isinstance(req_results, list) and req_results and all(isinstance(x, dict) for x in req_results):
+        p = _write_one_req(req_results, 1, 1)
+        return [p] if p else []
+
+    # Caso A) várias requisições (lista de listas de dicts)
+    if isinstance(req_results, list) and all(isinstance(x, list) for x in req_results):
+        total = len(req_results)
+        for i, rows in enumerate(req_results, start=1):
+            p = _write_one_req(rows, i, total)
+            if p:
+                created_files.append(p)
+        print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel criados.")
+        return created_files
+
+    # Formato desconhecido — não faz nada
+    print(f"⚠️ Formato de retorno inesperado de core.process_pdf_sync para {base}.")
+    return []
 
 
 # ----------------------------------------------------------------------
