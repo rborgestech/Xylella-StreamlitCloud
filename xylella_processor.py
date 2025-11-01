@@ -14,21 +14,31 @@ def process_pdf(pdf_path):
     """
     Wrapper estável para processar PDFs via core_xylella.
     - Chama diretamente process_pdf_sync do core.
-    - Cria pasta debug/ e ficheiro summary.
+    - Garante que o core trabalha no diretório do projeto (para criar debug/ e summary).
     - Retorna lista de dicionários: [{path, processed, discrepancy}, ...]
     """
     pdf_path = Path(pdf_path).resolve()
-    pdf_name = pdf_path.stem
-    debug_dir = Path.cwd() / "debug"
-    debug_dir.mkdir(exist_ok=True)
+    project_root = Path.cwd()
+    pdf_name = pdf_path.name
+
+    # Copia o ficheiro para o diretório do projeto antes de processar
+    stable_copy = project_root / pdf_name
+    if not stable_copy.exists():
+        shutil.copy(pdf_path, stable_copy)
+
+    # Define o diretório de trabalho igual ao do projeto
+    os.chdir(project_root)
 
     if not process_pdf_sync:
         print("⚠️ core_xylella não encontrado — devolve simulação.")
-        excel_path = pdf_path.with_suffix(".xlsx")
+        excel_path = stable_copy.with_suffix(".xlsx")
         return [{"path": str(excel_path), "processed": 0, "discrepancy": False}]
 
-    print(f"🧪 Início de processamento: {pdf_path.name}")
-    result = process_pdf_sync(str(pdf_path))
+    print(f"🧪 Início de processamento: {stable_copy.name}")
+    result = process_pdf_sync(str(stable_copy))
+
+    # Volta ao diretório original (por segurança)
+    os.chdir(Path(__file__).parent)
 
     # Normaliza resultados
     entries = []
@@ -45,30 +55,7 @@ def process_pdf(pdf_path):
                     "discrepancy": bool(r[2]) if len(r) > 2 else False
                 })
 
-    # Cria summary.txt dentro de debug
-    summary_path = debug_dir / f"{pdf_name}_summary.txt"
-    with open(summary_path, "w", encoding="utf-8") as f:
-        f.write(f"🧾 RESUMO DE EXECUÇÃO — {datetime.now():%Y-%m-%d %H:%M:%S}\n")
-        f.write(f"PDF: {pdf_path.name}\n\n")
-
-        total_amostras = 0
-        discrep = 0
-        for e in entries:
-            base = Path(e["path"]).name
-            proc = e.get("processed") or 0
-            disc = e.get("discrepancy")
-            if disc:
-                discrep += 1
-                f.write(f"⚠️ {base}: ficheiro gerado com discrepância.\n")
-            else:
-                f.write(f"✅ {base}: ficheiro gerado. ({proc} amostras OK)\n")
-            total_amostras += proc
-
-        f.write(f"\n📊 Total de ficheiros: {len(entries)}\n")
-        f.write(f"🧪 Total de amostras processadas: {total_amostras}\n")
-        f.write(f"⚠️ Ficheiros com discrepâncias: {discrep}\n")
-
-    print(f"✅ Ficheiro summary criado em {summary_path}")
+    print("✅ Processamento concluído no diretório do projeto.")
     return entries
 
 
