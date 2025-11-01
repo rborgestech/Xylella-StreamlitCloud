@@ -12,35 +12,43 @@ except ImportError:
 
 def process_pdf(pdf_path):
     """
-    Wrapper estável para processar PDFs via core_xylella.
-    - Chama diretamente process_pdf_sync do core.
-    - Garante que o core trabalha no diretório do projeto (para criar debug/ e summary).
-    - Retorna lista de dicionários: [{path, processed, discrepancy}, ...]
+    Wrapper estável — força execução no diretório do projeto.
+    Garante que debug/ e summary são criados como no teste.
     """
     pdf_path = Path(pdf_path).resolve()
-    project_root = Path.cwd()
+    project_root = Path(__file__).parent.resolve()
     pdf_name = pdf_path.name
 
-    # Copia o ficheiro para o diretório do projeto antes de processar
+    # Copiar o PDF carregado para o diretório do projeto
     stable_copy = project_root / pdf_name
-    if not stable_copy.exists():
-        shutil.copy(pdf_path, stable_copy)
+    shutil.copy(pdf_path, stable_copy)
+    print(f"📄 Copiado para {stable_copy}")
 
-    # Define o diretório de trabalho igual ao do projeto
+    # ⚙️ Forçar diretório de trabalho do processo principal
     os.chdir(project_root)
+    print(f"📂 Working dir forçado: {Path.cwd()}")
 
     if not process_pdf_sync:
-        print("⚠️ core_xylella não encontrado — devolve simulação.")
+        print("⚠️ core_xylella não disponível.")
         excel_path = stable_copy.with_suffix(".xlsx")
         return [{"path": str(excel_path), "processed": 0, "discrepancy": False}]
 
-    print(f"🧪 Início de processamento: {stable_copy.name}")
+    print(f"🧪 A processar: {stable_copy.name}")
     result = process_pdf_sync(str(stable_copy))
 
-    # Volta ao diretório original (por segurança)
-    os.chdir(Path(__file__).parent)
+    # ✅ Confirmar se debug/ e summary existem
+    debug_dir = project_root / "debug"
+    summary_files = list(debug_dir.glob("*_summary.txt")) if debug_dir.exists() else []
+    if summary_files:
+        print(f"🧾 Summary encontrado: {summary_files[-1]}")
+    else:
+        print("⚠️ Nenhum summary encontrado no diretório do projeto!")
 
-    # Normaliza resultados
+    return _normalize_result(result)
+
+
+def _normalize_result(result):
+    """Normaliza diferentes formatos devolvidos pelo core."""
     entries = []
     if isinstance(result, list):
         for r in result:
@@ -48,14 +56,20 @@ def process_pdf(pdf_path):
                 entries.append({"path": r, "processed": 0, "discrepancy": False})
             elif isinstance(r, dict):
                 entries.append(r)
-            elif isinstance(r, tuple) and len(r) >= 1:
+            elif isinstance(r, tuple):
                 entries.append({
                     "path": r[0],
                     "processed": r[1] if len(r) > 1 else 0,
                     "discrepancy": bool(r[2]) if len(r) > 2 else False
                 })
-
-    print("✅ Processamento concluído no diretório do projeto.")
+    elif isinstance(result, tuple):
+        files, samples, discrepancies = result
+        for i, f in enumerate(files):
+            entries.append({
+                "path": str(f),
+                "processed": samples if isinstance(samples, int) else samples[i] if isinstance(samples, list) else 0,
+                "discrepancy": discrepancies if isinstance(discrepancies, bool) else bool(discrepancies[i]) if isinstance(discrepancies, list) else False
+            })
     return entries
 
 
