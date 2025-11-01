@@ -41,6 +41,60 @@ if not st.session_state.processing and not st.session_state.finished:
     else:
         st.info("💡 Carrega ficheiros PDF para ativar o processamento.")
 
+# ————— Helpers —————
+def _norm_entry(item):
+    """
+    Normaliza um resultado de process_pdf para:
+    {
+        "path": str,
+        "processed": int|None,
+        "requested": int|None,
+        "discrepancy": bool,
+        "detail": (requested, processed) | None
+    }
+    Aceita tanto dicts (com várias chaves possíveis) como strings (apenas path).
+    """
+    if isinstance(item, str):
+        return {"path": item, "processed": None, "requested": None, "discrepancy": False, "detail": None}
+
+    if not isinstance(item, dict):
+        return {"path": str(item), "processed": None, "requested": None, "discrepancy": False, "detail": None}
+
+    # possíveis alias vindos do core/wrapper
+    path = item.get("path") or item.get("file") or item.get("filepath") or item.get("excel") or ""
+    processed = (
+        item.get("processed") or item.get("samples") or item.get("amostras") or
+        item.get("n_amostras") or item.get("count") or None
+    )
+    requested = (
+        item.get("requested") or item.get("declared") or item.get("esperadas") or
+        item.get("expected") or None
+    )
+
+    # discrepância pode vir como diff numérico, flag, ou deduzida
+    diff = item.get("diff")
+    discrepancy_flag = item.get("discrepancy")
+    if diff is not None:
+        discrepancy = bool(diff)
+    elif discrepancy_flag is not None:
+        discrepancy = bool(discrepancy_flag)
+    elif processed is not None and requested is not None:
+        discrepancy = (int(processed) != int(requested))
+    else:
+        discrepancy = False
+
+    detail = None
+    if discrepancy and (requested is not None) and (processed is not None):
+        detail = (int(requested), int(processed))
+
+    return {
+        "path": str(path),
+        "processed": None if processed is None else int(processed),
+        "requested": None if requested is None else int(requested),
+        "discrepancy": discrepancy,
+        "detail": detail
+    }
+
 # ————— Processamento —————
 elif st.session_state.processing:
     uploads = st.session_state._uploads
@@ -48,7 +102,8 @@ elif st.session_state.processing:
 
     st.markdown('<div class="info-box">⏳ A processar ficheiros... aguarde até o processo terminar.</div>', unsafe_allow_html=True)
     with st.expander("📄 Ficheiros em processamento", expanded=True):
-        for up in uploads: st.markdown(f"- {up.name}")
+        for up in uploads:
+            st.markdown(f"- {up.name}")
 
     panel = st.expander("📄 Ficheiros gerados", expanded=True)
     progress = st.progress(0)
@@ -61,43 +116,56 @@ elif st.session_state.processing:
     session_dir = tempfile.mkdtemp(prefix="xylella_session_")
     try:
         for i, up in enumerate(uploads, start=1):
-            status.markdown(f'<div class="info-box">📘 <b>A processar ficheiro {i}/{total}</b><span class="st-processing-dots"></span><br>{up.name}</div>', unsafe_allow_html=True)
+            status.markdown(
+                f'<div class="info-box">📘 <b>A processar ficheiro {i}/{total}</b>'
+                f'<span class="st-processing-dots"></span><br>{up.name}</div>',
+                unsafe_allow_html=True
+            )
 
             tmpdir = tempfile.mkdtemp(dir=session_dir)
             tmp_path = os.path.join(tmpdir, up.name)
-            with open(tmp_path, "wb") as f: f.write(up.getbuffer())
+            with open(tmp_path, "wb") as f:
+                f.write(up.getbuffer())
 
             os.environ["OUTPUT_DIR"] = tmpdir
-            res = process_pdf(tmp_path)  # ← devolve lista de dicts normalizados
+            res = process_pdf(tmp_path)
 
             if not res:
-                panel.markdown(f'<div class="warning-box">⚠️ Nenhum ficheiro gerado para <b>{up.name}</b>.</div>', unsafe_allow_html=True)
+                panel.markdown(
+                    f'<div class="warning-box">⚠️ Nenhum ficheiro gerado para <b>{up.name}</b>.</div>',
+                    unsafe_allow_html=True
+                )
             else:
-                for e in res:
+                for raw in res:
+                    e = _norm_entry(raw)
+
+                    # nome base
                     base = Path(e["path"]).name
-                    req = e.get("requested")
-                    proc = e.get("processed")
-                    dsc = bool(e.get("discrepancy"))
-                    if dsc:
+                    req  = e["requested"]
+                    proc = e["processed"]
+
+                    if e["discrepancy"]:
                         # amarelo com solicitadas/processadas
-                        if e.get("detail"):
+                        if e["detail"]:
                             a, b = e["detail"]
                             msg = f"🟡 <b>{base}</b>: ficheiro gerado. (<b>{a}</b> solicitadas / <b>{b}</b> processadas)"
                         elif req is not None and proc is not None:
                             msg = f"🟡 <b>{base}</b>: ficheiro gerado. (<b>{req}</b> solicitadas / <b>{proc}</b> processadas)"
                         else:
                             msg = f"🟡 <b>{base}</b>: ficheiro gerado. ⚠️ discrepância"
-                        css = "warning-box"; discrep_count += 1
+                        css = "warning-box"
+                        discrep_count += 1
                     else:
                         if proc is not None:
-                            msg = f"✅ <b>{base}</b>: ficheiro gerado. (<b>{proc}</b> amostras OK)"
+                            msg = f"✅ <b>{base}</b>: ficheiro gerado. (<b>{proc}</b> amostra{'s' if proc!=1 else ''} OK)"
                         else:
                             msg = f"✅ <b>{base}</b>: ficheiro gerado."
                         css = "success-box"
 
                     panel.markdown(f'<div class="{css}">{msg}</div>', unsafe_allow_html=True)
                     entries.append(e)
-                    if proc is not None: total_proc += int(proc)
+                    if proc is not None:
+                        total_proc += proc
 
             progress.progress(i / total)
             time.sleep(0.15)
@@ -116,7 +184,7 @@ elif st.session_state.processing:
         # ZIP e fim
         if entries:
             with st.spinner("🧩 A gerar ficheiro ZIP…"):
-                zip_bytes = build_zip(entries)  # aceita dicts
+                zip_bytes = build_zip([e["path"] for e in entries])  # ← só paths!
             st.session_state.entries = entries
             st.session_state.zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
             st.session_state.zip_bytes = zip_bytes
