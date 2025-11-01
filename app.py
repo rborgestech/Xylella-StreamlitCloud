@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import streamlit as st
-import tempfile, os, shutil, time, io, zipfile, re
+import tempfile, os, shutil, time, io, zipfile, re, base64
 from pathlib import Path
 from datetime import datetime
 from typing import List, Tuple
@@ -15,7 +15,7 @@ st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 ficheiro Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# CSS — estilo limpo e azul para blocos
+# CSS — estilo limpo e azul
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -63,8 +63,6 @@ if "stage" not in st.session_state:
     st.session_state.stage = "idle"
 if "uploads" not in st.session_state:
     st.session_state.uploads = None
-if "reset_flag" not in st.session_state:
-    st.session_state.reset_flag = False
 
 # ───────────────────────────────────────────────
 # Funções auxiliares
@@ -114,7 +112,7 @@ if st.session_state.stage == "idle":
     )
 
     if uploads:
-        if st.button("📄 Processar ficheiros de Input", type="primary", key="start_processing"):
+        if st.button("📄 Processar ficheiros de Input", type="primary"):
             st.session_state.uploads = uploads
             st.session_state.stage = "processing"
             st.rerun()
@@ -187,20 +185,34 @@ elif st.session_state.stage == "processing":
 
         st.success(f"🏁 Processamento concluído ({len(all_excel)} ficheiros Excel gerados).")
 
-        # Quando o utilizador faz download → volta automaticamente à secção inicial
-        col1, col2 = st.columns([1, 1])
-        with col1:
-            st.download_button(
-                "⬇️ Descarregar resultados (ZIP)",
-                data=zip_bytes,
-                file_name=zip_name,
-                mime="application/zip",
-            )
-        with col2:
-            if st.button("🔁 Novo processamento", type="primary"):
-                st.session_state.stage = "idle"
-                st.session_state.uploads = None
-                st.rerun()
+        # Conversão segura do ZIP para base64
+        zip_b64 = base64.b64encode(zip_bytes).decode()
+
+        # Botão com reset automático via JS
+        st.markdown(f"""
+            <a href="data:application/zip;base64,{zip_b64}" download="{zip_name}">
+                <button style="
+                    background-color:#CA4300;
+                    border:none;
+                    color:white;
+                    font-weight:600;
+                    padding:0.5rem 1rem;
+                    border-radius:6px;
+                    cursor:pointer;
+                ">
+                ⬇️ Descarregar resultados (ZIP)
+                </button>
+            </a>
+            <script>
+            // Assim que o botão é clicado, recarrega a interface após 0.5s
+            const btn = window.parent.document.querySelector('a[download="{zip_name}"]');
+            if (btn) {{
+                btn.addEventListener('click', () => {{
+                    setTimeout(() => window.parent.location.reload(), 500);
+                }});
+            }}
+            </script>
+        """, unsafe_allow_html=True)
 
     else:
         st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
@@ -208,12 +220,3 @@ elif st.session_state.stage == "processing":
         st.session_state.stage = "idle"
         st.session_state.uploads = None
         st.rerun()
-
-# ───────────────────────────────────────────────
-# RESET IMEDIATO APÓS DOWNLOAD (sem reload)
-# ───────────────────────────────────────────────
-if st.session_state.reset_flag:
-    st.session_state.reset_flag = False
-    st.session_state.stage = "idle"
-    st.session_state.uploads = None
-    st.rerun()
