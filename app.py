@@ -15,7 +15,7 @@ st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 ficheiro Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# CSS — laranja + estilo compacto
+# CSS — laranja + ocultação dinâmica
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -37,15 +37,21 @@ st.markdown("""
   padding: 1rem !important;
 }
 .small-text { font-size: 0.85rem; color: #333; }
+.hidden {display:none !important;}
 </style>
 """, unsafe_allow_html=True)
+
+# ───────────────────────────────────────────────
+# Estado
+# ───────────────────────────────────────────────
+if "processing" not in st.session_state:
+    st.session_state.processing = False
 
 # ───────────────────────────────────────────────
 # Funções auxiliares
 # ───────────────────────────────────────────────
 def read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
     try:
-        from openpyxl import load_workbook
         wb = load_workbook(xlsx_path, data_only=True)
         ws = wb.worksheets[0]
         val = str(ws["E1"].value or "")
@@ -56,6 +62,7 @@ def read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
         pass
     return None, None
 
+
 def collect_debug_files(output_dirs: List[Path]) -> List[str]:
     debug_files = []
     for pattern in ["*_ocr_debug.txt", "process_log.csv", "process_summary_*.txt"]:
@@ -63,6 +70,7 @@ def collect_debug_files(output_dirs: List[Path]) -> List[str]:
             for f in d.glob(pattern):
                 debug_files.append(str(f))
     return debug_files
+
 
 def build_zip_with_summary(excel_files: List[str], debug_files: List[str], summary_text: str) -> bytes:
     mem = io.BytesIO()
@@ -77,24 +85,25 @@ def build_zip_with_summary(excel_files: List[str], debug_files: List[str], summa
     mem.seek(0)
     return mem.read()
 
+
 # ───────────────────────────────────────────────
-# Interface principal
+# Interface — Upload e botão
 # ───────────────────────────────────────────────
-if "processing" not in st.session_state:
-    st.session_state.processing = False
+if not st.session_state.processing:
+    uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True)
+    if uploads:
+        start = st.button("📄 Processar ficheiros de Input", type="primary")
+    else:
+        start = False
+        st.info("💡 Carrega um ficheiro PDF para ativar o botão de processamento.")
+else:
+    st.markdown("<div class='hidden'></div>", unsafe_allow_html=True)
+    uploads = None
+    start = False
 
-# Bloqueia upload e botão se estiver a processar
-disabled = st.session_state.processing
-
-uploads = st.file_uploader(
-    "📂 Carrega um ou vários PDFs",
-    type=["pdf"],
-    accept_multiple_files=True,
-    disabled=disabled
-)
-
-start = st.button("📄 Processar ficheiros de Input", type="primary", disabled=disabled or not uploads)
-
+# ───────────────────────────────────────────────
+# Execução principal
+# ───────────────────────────────────────────────
 if start and uploads:
     st.session_state.processing = True
     st.info("🔒 A processar... aguarda alguns segundos.")
