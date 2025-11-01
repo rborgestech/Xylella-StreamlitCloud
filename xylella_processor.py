@@ -1,114 +1,78 @@
 # -*- coding: utf-8 -*-
-"""
-Xylella Processor Wrapper
--------------------------
-Faz a ponte entre o core_xylella.py e a app Streamlit.
-Garante leitura do ficheiro summary gerado e devolve
-os dados prontos para o painel do utilizador.
-"""
-
 import os
 from pathlib import Path
 from datetime import datetime
-from core_xylella import process_pdf_sync
 
+# Import seguro do core real
+try:
+    from core_xylella import process_pdf_sync
+except ImportError:
+    process_pdf_sync = None
 
-# ───────────────────────────────────────────────
-#  Função principal
-# ───────────────────────────────────────────────
 def process_pdf(pdf_path):
     """
-    Processa um PDF e devolve:
-    [
-      {"path": "ficheiro.xlsx", "samples": 30, "declared": 30, "diff": 0},
-      ...
-    ]
+    Wrapper que invoca o processador real (core_xylella).
+    Cria automaticamente pasta debug/ e summary.
     """
-    entries = process_pdf_sync(pdf_path)
-    if not entries:
-        print("⚠️ Nenhum resultado devolvido pelo core.")
-        return []
+    if not process_pdf_sync:
+        print("⚠️ core_xylella não encontrado — devolve lista simulada.")
+        excel_path = Path(pdf_path).with_suffix(".xlsx")
+        return [{"path": str(excel_path), "processed": 0, "discrepancy": False}]
 
-    # Identifica o ficheiro summary correspondente
-    pdf_stem = Path(pdf_path).stem
-    summary_path = Path("debug") / f"{pdf_stem}_summary.txt"
-    if not summary_path.exists():
-        print(f"⚠️ Ficheiro summary não encontrado: {summary_path}")
-        return entries
+    pdf_name = Path(pdf_path).stem
+    debug_dir = Path.cwd() / "debug"
+    debug_dir.mkdir(exist_ok=True)
 
-    # Lê e interpreta o resumo
-    parsed = []
-    total_amostras = 0
-    ficheiros_discrep = 0
+    # Executa o core
+    print(f"🧪 Início de processamento: {Path(pdf_path).name}")
+    result = process_pdf_sync(pdf_path)
 
-    with open(summary_path, "r", encoding="utf-8") as f:
-        lines = f.readlines()
+    # result pode ser lista de paths ou lista de dicts
+    entries = []
+    if isinstance(result, list):
+        for r in result:
+            if isinstance(r, str):
+                entries.append({"path": r, "processed": None, "discrepancy": False})
+            elif isinstance(r, dict):
+                entries.append(r)
+            elif isinstance(r, tuple) and len(r) >= 1:
+                entries.append({"path": r[0], "processed": None, "discrepancy": False})
 
-    for line in lines:
-        line = line.strip()
-        if not line or line.startswith(("🧾", "PDF:", "📊", "🧪", "⚠️ 0 ficheiro", "Total:")):
-            continue
+    # Cria summary.txt
+    summary_path = debug_dir / f"{pdf_name}_summary.txt"
+    with open(summary_path, "w", encoding="utf-8") as f:
+        f.write(f"🧾 RESUMO DE EXECUÇÃO — {datetime.now():%Y-%m-%d %H:%M:%S}\n")
+        f.write(f"PDF: {Path(pdf_path).name}\n\n")
+        total_amostras = 0
+        discrep_count = 0
+        for e in entries:
+            base = Path(e['path']).name
+            proc = e.get("processed") or 0
+            discrep = e.get("discrepancy")
+            if discrep:
+                discrep_count += 1
+                f.write(f"⚠️ {base}: {proc} amostras (discrepância)\n")
+            else:
+                f.write(f"✅ {base}: {proc} amostras OK\n")
+            total_amostras += proc
+        f.write(f"\n📊 Total de ficheiros: {len(entries)}\n")
+        f.write(f"🧪 Total de amostras processadas: {total_amostras}\n")
+        f.write(f"⚠️ Ficheiros com discrepâncias: {discrep_count}\n")
 
-        # Exemplo: ✅ ficheiro.xlsx: ficheiro gerado. (30 amostras OK)
-        if line.startswith("✅") or line.startswith("⚠️"):
-            item = {"path": None, "samples": 0, "declared": 0, "diff": 0}
-
-            # Nome do ficheiro
-            try:
-                name = line.split(":")[0][2:].strip()
-                item["path"] = name
-            except Exception:
-                continue
-
-            # Amostras e discrepâncias
-            if "amostras OK" in line:
-                try:
-                    num = int(line.split("(")[1].split()[0])
-                    item["samples"] = num
-                    item["declared"] = num
-                except Exception:
-                    pass
-            elif "vs" in line:
-                # ⚠️ ... (12 vs 10 — discrepância +2)
-                try:
-                    left = int(line.split("(")[1].split("vs")[0].strip())
-                    right = int(line.split("vs")[1].split("—")[0].strip())
-                    diff = int(line.split("discrepância")[1].split(")")[0].replace("+", "").strip())
-                    item["samples"], item["declared"], item["diff"] = left, right, diff
-                    ficheiros_discrep += 1
-                except Exception:
-                    pass
-
-            total_amostras += item.get("samples", 0)
-            parsed.append(item)
-
-    print(f"📊 {len(parsed)} ficheiros processados, {total_amostras} amostras, {ficheiros_discrep} discrepância(s).")
-    return parsed
+    print(f"✅ Ficheiro summary criado em {summary_path}")
+    return entries
 
 
-# ───────────────────────────────────────────────
-#  Função build_zip
-# ───────────────────────────────────────────────
-import io, zipfile
-
-def build_zip(file_paths):
-    """Cria um ZIP em memória com os ficheiros fornecidos."""
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zipf:
-        for fp in file_paths:
-            fp = Path(fp)
-            if fp.exists():
-                zipf.write(fp, arcname=fp.name)
-    buf.seek(0)
-    return buf.getvalue()
-
-
-# ───────────────────────────────────────────────
-#  Execução direta (teste)
-# ───────────────────────────────────────────────
-if __name__ == "__main__":
-    pdf = "INPUT/20231023_ReqX02_X03_X04_Lab SGS 23 10 2025.pdf"
-    result = process_pdf(pdf)
-    print("\n🧾 Resultado interpretado:")
-    for r in result:
-        print(r)
+def build_zip(paths):
+    """
+    Gera um ZIP com os paths fornecidos.
+    """
+    import io, zipfile
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as z:
+        for p in paths:
+            p = Path(p)
+            if p.exists():
+                z.write(p, arcname=p.name)
+    zip_buffer.seek(0)
+    return zip_buffer.getvalue()
