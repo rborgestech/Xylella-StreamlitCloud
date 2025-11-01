@@ -47,6 +47,8 @@ if "processing" not in st.session_state:
     st.session_state.processing = False
 if "done" not in st.session_state:
     st.session_state.done = False
+if "uploaded_files" not in st.session_state:
+    st.session_state.uploaded_files = None
 
 # ───────────────────────────────────────────────
 # Funções auxiliares
@@ -63,7 +65,6 @@ def read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
         pass
     return None, None
 
-
 def collect_debug_files(output_dirs: List[Path]) -> List[str]:
     debug_files = []
     for pattern in ["*_ocr_debug.txt", "process_log.csv", "process_summary_*.txt"]:
@@ -71,7 +72,6 @@ def collect_debug_files(output_dirs: List[Path]) -> List[str]:
             for f in d.glob(pattern):
                 debug_files.append(str(f))
     return debug_files
-
 
 def build_zip_with_summary(excel_files: List[str], debug_files: List[str], summary_text: str) -> bytes:
     mem = io.BytesIO()
@@ -86,31 +86,37 @@ def build_zip_with_summary(excel_files: List[str], debug_files: List[str], summa
     mem.seek(0)
     return mem.read()
 
-
 # ───────────────────────────────────────────────
-# Interface — desaparece durante processamento
+# Interface — uploader e botão
 # ───────────────────────────────────────────────
 if not st.session_state.processing:
     with st.container():
-        uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True, key="uploads")
+        uploads = st.file_uploader(
+            "📂 Carrega um ou vários PDFs",
+            type=["pdf"],
+            accept_multiple_files=True,
+            key="uploads_ui"
+        )
         if uploads:
-            start = st.button("📄 Processar ficheiros de Input", type="primary")
+            st.session_state.uploaded_files = uploads
+            start = st.button("📄 Processar ficheiros de Input", type="primary", key="start_btn")
         else:
             start = False
             if not st.session_state.done:
                 st.info("💡 Carrega um ficheiro PDF para ativar o botão de processamento.")
 else:
-    uploads, start = None, False
+    start = False
 
 # ───────────────────────────────────────────────
 # Execução principal
 # ───────────────────────────────────────────────
-if start and uploads:
+if start and st.session_state.uploaded_files:
     st.session_state.processing = True
     st.session_state.done = False
-    st.info("🔒 A processar... aguarda alguns segundos.")
+    st.info("⏳ A processar ficheiros... aguarde até o processo terminar.")
     st.divider()
 
+    uploads = st.session_state.uploaded_files
     session_dir = tempfile.mkdtemp(prefix="xylella_session_")
     final_dir = Path.cwd() / "output_final"
     final_dir.mkdir(exist_ok=True)
@@ -163,11 +169,18 @@ if start and uploads:
         zip_bytes = build_zip_with_summary(all_excel, debug_files, summary_text)
         zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
         st.success(f"🏁 Processamento concluído ({len(all_excel)} ficheiros Excel gerados).")
-        st.download_button("⬇️ Descarregar resultados (ZIP)", data=zip_bytes,
-                           file_name=zip_name, mime="application/zip",
-                           on_click=lambda: st.session_state.update({"processing": False, "done": True, "uploads": []}))
+        st.download_button(
+            "⬇️ Descarregar resultados (ZIP)",
+            data=zip_bytes,
+            file_name=zip_name,
+            mime="application/zip"
+        )
+        st.session_state.processing = False
+        st.session_state.done = True
+        st.session_state.uploaded_files = None
     else:
         st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
+        st.session_state.processing = False
 
     shutil.rmtree(session_dir, ignore_errors=True)
 
