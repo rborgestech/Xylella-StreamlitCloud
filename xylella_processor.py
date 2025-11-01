@@ -105,16 +105,37 @@ def _normalize_result(result):
     return entries
 
 
-def build_zip(paths):
-    """Gera ZIP a partir de paths (strings ou dicts)."""
+# ───────────────────────────────────────────────
+# Wrapper de compatibilidade para app.py (versão com stats)
+# ───────────────────────────────────────────────
+def process_pdf_with_stats(pdf_path: str):
+    """Wrapper que usa a função process_pdf existente e devolve stats compatíveis com o app.py atual."""
+    created = process_pdf(pdf_path)
+    stats = {
+        "pdf_name": os.path.basename(pdf_path),
+        "req_count": len(created),
+        "samples_total": 0,
+        "per_req": [
+            {"req": i+1, "file": f, "samples": 0, "expected": None, "diff": None}
+            for i, f in enumerate(created)
+        ],
+    }
+    debug_files = [str(f) for f in OUTPUT_DIR.glob("*_ocr_debug.txt")]
+    return created, stats, debug_files
+
+
+def build_zip_with_summary(excel_files, debug_files, summary_text):
+    """Wrapper para manter compatibilidade com a versão do app.py que gera summary + debug."""
     import io, zipfile
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as z:
-        for p in paths:
-            if isinstance(p, dict):
-                p = p.get("path")
-            p = Path(p)
-            if p.exists():
-                z.write(p, arcname=p.name)
-    zip_buffer.seek(0)
-    return zip_buffer.getvalue()
+    mem = io.BytesIO()
+    with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as z:
+        for f in excel_files:
+            if os.path.exists(f):
+                z.write(f, arcname=os.path.basename(f))
+        for dbg in debug_files:
+            if os.path.exists(dbg):
+                z.write(dbg, arcname=f"debug/{os.path.basename(dbg)}")
+        z.writestr("summary.txt", summary_text or "")
+    mem.seek(0)
+    zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
+    return mem.read(), zip_name
