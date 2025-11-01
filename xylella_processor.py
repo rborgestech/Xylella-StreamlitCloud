@@ -37,47 +37,46 @@ def process_pdf(pdf_path):
     # Criar script temporário que chama o core, tal como no teste
     helper = project_root / "_run_core_wrapper.py"
     helper.write_text(f"""
-    import json
-    from core_xylella import process_pdf_sync
-    res = process_pdf_sync(r"{stable_pdf}")
-    print(json.dumps(res if isinstance(res, (list, dict)) else str(res)))
-    """)
-    
-        # Executar o core dentro do contexto correto
-        result = subprocess.run(
-            [sys.executable, str(helper)],
-            capture_output=True, text=True, cwd=project_root
-        )
-    
-        if result.returncode != 0:
-            print("❌ Erro ao executar core_xylella:")
-            print(result.stderr)
-            return []
-    
-        # Logar saída bruta
-        print(result.stdout)
-    
-        # Normalizar resposta
-        try:
-            parsed = json.loads(result.stdout)
-        except Exception:
-            parsed = []
-    
-        entries = []
-        if isinstance(parsed, list):
-            for r in parsed:
-                if isinstance(r, str):
-                    entries.append({"path": r, "processed": 0, "discrepancy": False})
-                elif isinstance(r, dict):
-                    entries.append(r)
-                elif isinstance(r, tuple):
-                    entries.append({
-                        "path": r[0],
-                        "processed": r[1] if len(r) > 1 else 0,
-                        "discrepancy": bool(r[2]) if len(r) > 2 else False
-                    })
-        return entries
+import json
+from core_xylella import process_pdf_sync
+res = process_pdf_sync(r"{stable_pdf}")
+print(json.dumps(res if isinstance(res, (list, dict)) else str(res)))
+""")
 
+    # Executar o core dentro do contexto correto
+    result = subprocess.run(
+        [sys.executable, str(helper)],
+        capture_output=True, text=True, cwd=project_root
+    )
+
+    if result.returncode != 0:
+        print("❌ Erro ao executar core_xylella:")
+        print(result.stderr)
+        return []
+
+    # Logar saída bruta
+    print(result.stdout)
+
+    # Normalizar resposta
+    try:
+        parsed = json.loads(result.stdout)
+    except Exception:
+        parsed = []
+
+    entries = []
+    if isinstance(parsed, list):
+        for r in parsed:
+            if isinstance(r, str):
+                entries.append({"path": r, "processed": 0, "discrepancy": False})
+            elif isinstance(r, dict):
+                entries.append(r)
+            elif isinstance(r, tuple):
+                entries.append({
+                    "path": r[0],
+                    "processed": r[1] if len(r) > 1 else 0,
+                    "discrepancy": bool(r[2]) if len(r) > 2 else False
+                })
+    return entries
 
 
 def _normalize_result(result):
