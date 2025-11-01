@@ -14,7 +14,7 @@ st.set_page_config(page_title="Xylella Processor", page_icon="🧪", layout="cen
 st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 ficheiro Excel por requisição.")
 
-# CSS — tons laranja e ocultação dinâmica
+# CSS — laranja + ocultação durante processamento
 st.markdown("""
 <style>
 .stButton > button[kind="primary"] {
@@ -44,22 +44,16 @@ st.markdown("""
 }
 [data-testid="stFileUploader"] > div:first-child:hover { border-color: #A13700 !important; }
 [data-testid="stFileUploader"] > div:focus-within { border-color: #CA4300 !important; box-shadow: none !important; }
-
 :root {
   --primary-color: #CA4300 !important;
   --secondary-color: #CA4300 !important;
   --accent-color: #CA4300 !important;
 }
-
-/* Nome de ficheiro: letra menor */
-.small-text {
-  font-size: 0.85rem;
-  color: #333;
-}
-
-/* Ocultar uploader e botão quando processing */
-.processing [data-testid="stFileUploader"],
-.processing .stButton {
+/* Nome pequeno */
+.small-text { font-size: 0.85rem; color: #333; }
+/* Ocultar uploader e botões durante processamento */
+.hidden-ui [data-testid="stFileUploader"],
+.hidden-ui .stButton {
   display: none !important;
 }
 </style>
@@ -115,23 +109,29 @@ def build_zip_with_summary(excel_files: List[str], debug_files: List[str], summa
 if not st.session_state.processing:
     uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True,
                                key=st.session_state.uploader_key)
-    if uploads:
-        start = st.button("📄 Processar ficheiros de Input", type="primary")
-    else:
-        start = False
+    start = st.button("📄 Processar ficheiros de Input", type="primary") if uploads else None
+    if not uploads:
         st.info("💡 Carrega um ficheiro PDF para ativar o botão de processamento.")
 else:
     uploads, start = None, False
-    st.markdown("<div class='processing'></div>", unsafe_allow_html=True)
-    st.info("⚙️ A processar... aguarda alguns segundos.")
+    st.markdown("<div class='hidden-ui'></div>", unsafe_allow_html=True)
+    st.info("🔒 A processar... aguarda alguns segundos.")
 
 # ───────────────────────────────────────────────
 # Execução principal
 # ───────────────────────────────────────────────
 if start and uploads:
+    # Aplica classe CSS de ocultação imediata
     st.session_state.processing = True
-    st.markdown("<div class='processing'></div>", unsafe_allow_html=True)  # Oculta imediatamente
+    st.markdown("<div class='hidden-ui'></div>", unsafe_allow_html=True)
+    st.rerun()
+
+if st.session_state.processing:
     start_time = time.time()
+    uploads = st.session_state.get("last_uploads", [])
+    if not uploads:
+        st.stop()
+
     session_dir = tempfile.mkdtemp(prefix="xylella_session_")
     final_dir = Path.cwd() / "output_final"
     final_dir.mkdir(exist_ok=True)
@@ -159,54 +159,31 @@ if start and uploads:
                 summary_lines.append(f"{up.name}: sem ficheiros gerados.")
             else:
                 req_count = len(created)
-                total_samples = 0
-                discrepancy_msgs = []
-
+                total_samples, discrepancy_msgs = 0, []
                 for fp in created:
                     dest = final_dir / Path(fp).name
                     shutil.copy(fp, dest)
                     all_excel.append(str(dest))
-
                     exp, proc = read_e1_counts(str(dest))
                     if exp is not None and proc is not None:
                         total_samples += proc
                         diff = proc - exp
                         if diff != 0:
-                            discrepancy_msgs.append(
-                                f"{Path(fp).name} (processadas: {proc} / declaradas: {exp})"
-                            )
-
-                discrep_str = ""
-                if discrepancy_msgs:
-                    discrep_str = " ⚠️ Discrepâncias em " + "; ".join(discrepancy_msgs)
-
-                st.success(
-                    f"✅ {up.name}: {req_count} requisição(ões), {total_samples} amostras{discrep_str}."
-                )
-                summary_lines.append(
-                    f"{up.name}: {req_count} requisições, {total_samples} amostras{discrep_str}."
-                )
-
+                            discrepancy_msgs.append(f"{Path(fp).name} (processadas: {proc} / declaradas: {exp})")
+                discrep_str = " ⚠️ Discrepâncias em " + "; ".join(discrepancy_msgs) if discrepancy_msgs else ""
+                st.success(f"✅ {up.name}: {req_count} requisição(ões), {total_samples} amostras{discrep_str}.")
+                summary_lines.append(f"{up.name}: {req_count} requisições, {total_samples} amostras{discrep_str}.")
             progress.progress(i / total)
             time.sleep(0.2)
 
         total_time = time.time() - start_time
-
         if all_excel:
             debug_files = collect_debug_files(outdirs)
-            summary_text = (
-                "\n".join(summary_lines)
-                + f"\n\n📊 Total: {len(all_excel)} ficheiro(s) Excel"
-                + f"\n⏱️ Tempo total: {total_time:.1f} segundos"
-            )
+            summary_text = "\n".join(summary_lines) + f"\n\n📊 Total: {len(all_excel)} ficheiro(s) Excel\n⏱️ Tempo total: {total_time:.1f} segundos"
             zip_bytes = build_zip_with_summary(all_excel, debug_files, summary_text)
             zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
-
             st.success(f"🏁 Processamento concluído ({len(all_excel)} ficheiros Excel gerados).")
-            st.download_button("⬇️ Descarregar resultados (ZIP)", data=zip_bytes,
-                               file_name=zip_name, mime="application/zip")
-
-            # Auto-limpa o uploader
+            st.download_button("⬇️ Descarregar resultados (ZIP)", data=zip_bytes, file_name=zip_name, mime="application/zip")
             st.session_state.uploader_key = f"uploader_{datetime.now().timestamp()}"
         else:
             st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
