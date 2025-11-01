@@ -15,7 +15,7 @@ st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 ficheiro Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# CSS — laranja + ocultação dinâmica
+# CSS — estilo e ocultação dinâmica
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -37,7 +37,7 @@ st.markdown("""
   padding: 1rem !important;
 }
 .small-text { font-size: 0.85rem; color: #333; }
-.hidden {display:none !important;}
+.fade {opacity:0; transition: opacity 0.5s ease-out;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -46,6 +46,8 @@ st.markdown("""
 # ───────────────────────────────────────────────
 if "processing" not in st.session_state:
     st.session_state.processing = False
+if "done" not in st.session_state:
+    st.session_state.done = False
 
 # ───────────────────────────────────────────────
 # Funções auxiliares
@@ -85,19 +87,20 @@ def build_zip_with_summary(excel_files: List[str], debug_files: List[str], summa
     mem.seek(0)
     return mem.read()
 
-
 # ───────────────────────────────────────────────
-# Interface — Upload e botão
+# Interface — Upload e botão (ocultos durante o processamento)
 # ───────────────────────────────────────────────
 if not st.session_state.processing:
-    uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True)
+    uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True, key="uploads")
     if uploads:
         start = st.button("📄 Processar ficheiros de Input", type="primary")
     else:
         start = False
-        st.info("💡 Carrega um ficheiro PDF para ativar o botão de processamento.")
+        if not st.session_state.done:
+            st.info("💡 Carrega um ficheiro PDF para ativar o botão de processamento.")
 else:
-    st.markdown("<div class='hidden'></div>", unsafe_allow_html=True)
+    # Oculta uploader e botão durante o processamento
+    st.markdown("<div class='fade'></div>", unsafe_allow_html=True)
     uploads = None
     start = False
 
@@ -106,6 +109,7 @@ else:
 # ───────────────────────────────────────────────
 if start and uploads:
     st.session_state.processing = True
+    st.session_state.done = False
     st.info("🔒 A processar... aguarda alguns segundos.")
     st.divider()
 
@@ -162,9 +166,13 @@ if start and uploads:
         zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
         st.success(f"🏁 Processamento concluído ({len(all_excel)} ficheiros Excel gerados).")
         st.download_button("⬇️ Descarregar resultados (ZIP)", data=zip_bytes,
-                           file_name=zip_name, mime="application/zip")
+                           file_name=zip_name, mime="application/zip",
+                           on_click=lambda: st.session_state.update({"processing": False, "done": True, "uploads": []}))
     else:
         st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
 
     shutil.rmtree(session_dir, ignore_errors=True)
-    st.session_state.processing = False
+
+# Após o download, limpa a interface automaticamente
+if st.session_state.done and not st.session_state.processing:
+    st.success("✅ Pronto para novo processamento.")
