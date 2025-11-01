@@ -9,22 +9,22 @@ try:
 except ImportError:
     process_pdf_sync = None
 
+# Diretório de saída temporário (definido pelo app)
+OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "/tmp")).resolve()
+
 
 def process_pdf(pdf_path):
     """
     Executa o core_xylella.py no contexto real do Streamlit Cloud (/mount/src/xylella-streamlitcloud),
-    garantindo a criação de debug/ e summary.
+    garantindo a criação de debug/ e summary. Devolve lista de ficheiros Excel gerados.
     """
     import subprocess, json, sys
-    from pathlib import Path
 
-    # Caminho real onde o core está a correr no Streamlit Cloud
     project_root = Path("/mount/src/xylella-streamlitcloud").resolve()
     pdf_path = Path(pdf_path).resolve()
     pdf_name = pdf_path.name
     stable_pdf = project_root / pdf_name
 
-    # Copiar PDF carregado para o diretório real do projeto
     try:
         shutil.copy(pdf_path, stable_pdf)
     except Exception as e:
@@ -34,7 +34,6 @@ def process_pdf(pdf_path):
     print(f"📄 Copiado para {stable_pdf}")
     print(f"📂 Working dir forçado: {project_root}")
 
-    # Criar script temporário que chama o core, tal como no teste
     helper = project_root / "_run_core_wrapper.py"
     helper.write_text(f"""
 import json
@@ -43,7 +42,6 @@ res = process_pdf_sync(r"{stable_pdf}")
 print(json.dumps(res if isinstance(res, (list, dict)) else str(res)))
 """)
 
-    # Executar o core dentro do contexto correto
     result = subprocess.run(
         [sys.executable, str(helper)],
         capture_output=True, text=True, cwd=project_root
@@ -54,29 +52,12 @@ print(json.dumps(res if isinstance(res, (list, dict)) else str(res)))
         print(result.stderr)
         return []
 
-    # Logar saída bruta
-    print(result.stdout)
-
-    # Normalizar resposta
     try:
         parsed = json.loads(result.stdout)
     except Exception:
         parsed = []
 
-    entries = []
-    if isinstance(parsed, list):
-        for r in parsed:
-            if isinstance(r, str):
-                entries.append({"path": r, "processed": 0, "discrepancy": False})
-            elif isinstance(r, dict):
-                entries.append(r)
-            elif isinstance(r, tuple):
-                entries.append({
-                    "path": r[0],
-                    "processed": r[1] if len(r) > 1 else 0,
-                    "discrepancy": bool(r[2]) if len(r) > 2 else False
-                })
-    return entries
+    return _normalize_result(parsed)
 
 
 def _normalize_result(result):
@@ -105,23 +86,28 @@ def _normalize_result(result):
     return entries
 
 
-# ───────────────────────────────────────────────
-# Wrapper de compatibilidade para app.py (versão com stats)
-# ───────────────────────────────────────────────
 def process_pdf_with_stats(pdf_path: str):
-    """Wrapper que usa a função process_pdf existente e devolve stats compatíveis com o app.py atual."""
-    created = process_pdf(pdf_path)
+    """Wrapper que usa a função process_pdf e devolve stats compatíveis com o app.py atual."""
+    entries = process_pdf(pdf_path)
+
     stats = {
         "pdf_name": os.path.basename(pdf_path),
-        "req_count": len(created),
-        "samples_total": 0,
-        "per_req": [
-            {"req": i+1, "file": f, "samples": 0, "expected": None, "diff": None}
-            for i, f in enumerate(created)
-        ],
+        "req_count": len(entries),
+        "samples_total": sum(e.get("processed", 0) for e in entries),
+        "per_req": []
     }
+
+    for i, e in enumerate(entries):
+        stats["per_req"].append({
+            "req": i + 1,
+            "file": e.get("path"),
+            "samples": e.get("processed", 0),
+            "expected": None,
+            "diff": e.get("discrepancy", False)
+        })
+
     debug_files = [str(f) for f in OUTPUT_DIR.glob("*_ocr_debug.txt")]
-    return created, stats, debug_files
+    return [e["path"] for e in entries], stats, debug_files
 
 
 def build_zip_with_summary(excel_files, debug_files, summary_text):
@@ -139,3 +125,7 @@ def build_zip_with_summary(excel_files, debug_files, summary_text):
     mem.seek(0)
     zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
     return mem.read(), zip_name
+
+
+# Compatibilidade com app.py
+build_zip = lambda excel_files: build_zip_with_summary(excel_files, [], "Resumo do processamento gerado automaticamente.")
