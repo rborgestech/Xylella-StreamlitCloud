@@ -15,7 +15,7 @@ st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 ficheiro Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# CSS — laranja + estilo limpo
+# CSS — estilo limpo
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -41,10 +41,10 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ───────────────────────────────────────────────
-# Estado inicial
+# Estado
 # ───────────────────────────────────────────────
 if "stage" not in st.session_state:
-    st.session_state.stage = "idle"  # idle | processing | done
+    st.session_state.stage = "idle"  # idle | processing
 if "uploads" not in st.session_state:
     st.session_state.uploads = None
 
@@ -104,7 +104,6 @@ if st.session_state.stage == "idle":
         st.info("💡 Carrega um ficheiro PDF para ativar o botão de processamento.")
 
 elif st.session_state.stage == "processing":
-    # Limpa a interface enquanto processa
     st.info("⏳ A processar ficheiros... aguarde até o processo terminar.")
     st.divider()
 
@@ -161,27 +160,24 @@ elif st.session_state.stage == "processing":
         zip_bytes = build_zip_with_summary(all_excel, debug_files, summary_text)
         zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
         st.success(f"🏁 Processamento concluído ({len(all_excel)} ficheiros Excel gerados).")
+
+        # 🔁 Reinício automático após o download
+        def reset_after_download():
+            shutil.rmtree(session_dir, ignore_errors=True)
+            st.session_state.stage = "idle"
+            st.session_state.uploads = None
+            st.rerun()
+
         st.download_button(
             "⬇️ Descarregar resultados (ZIP)",
             data=zip_bytes,
             file_name=zip_name,
-            mime="application/zip"
+            mime="application/zip",
+            on_click=reset_after_download
         )
     else:
         st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
-
-    shutil.rmtree(session_dir, ignore_errors=True)
-    # Espera 3 segundos e regressa automaticamente ao ecrã inicial
-    time.sleep(3)
-    st.session_state.stage = "idle"
-    st.session_state.uploads = None
-    st.rerun()
-
-
-
-elif st.session_state.stage == "done":
-    st.success("✅ Pronto para novo processamento.")
-    if st.button("🔁 Novo processamento"):
+        shutil.rmtree(session_dir, ignore_errors=True)
         st.session_state.stage = "idle"
         st.session_state.uploads = None
         st.rerun()
