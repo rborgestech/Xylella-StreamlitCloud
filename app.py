@@ -15,7 +15,7 @@ st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 ficheiro Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# CSS — laranja e controlo visual
+# CSS — laranja e ocultação durante processamento
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -53,8 +53,8 @@ st.markdown("""
 }
 .small-text { font-size: 0.85rem; color: #333; }
 /* Ocultar uploader e botão durante processamento */
-.hide-ui [data-testid="stFileUploader"],
-.hide-ui .stButton {
+.hidden-ui [data-testid="stFileUploader"],
+.hidden-ui .stButton {
   display: none !important;
 }
 </style>
@@ -65,6 +65,8 @@ st.markdown("""
 # ───────────────────────────────────────────────
 if "processing" not in st.session_state:
     st.session_state.processing = False
+if "uploads" not in st.session_state:
+    st.session_state.uploads = None
 
 # ───────────────────────────────────────────────
 # Helpers
@@ -103,24 +105,29 @@ def build_zip_with_summary(excel_files: List[str], debug_files: List[str], summa
     return mem.read()
 
 # ───────────────────────────────────────────────
-# Interface — mostra botão apenas após upload
+# Interface — uploader e botão
 # ───────────────────────────────────────────────
-uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True)
-
-if uploads and not st.session_state.processing:
-    start = st.button("📄 Processar ficheiros de Input", type="primary")
-else:
-    start = False
-    if not st.session_state.processing:
+if not st.session_state.processing:
+    uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True)
+    if uploads:
+        st.session_state.uploads = uploads
+        start = st.button("📄 Processar ficheiros de Input", type="primary")
+    else:
+        start = False
         st.info("💡 Carrega um ficheiro PDF para ativar o botão de processamento.")
+else:
+    st.markdown("<div class='hidden-ui'></div>", unsafe_allow_html=True)
+    st.info("🔒 A processar... aguarda alguns segundos.")
+    uploads = st.session_state.uploads
+    start = False
 
 # ───────────────────────────────────────────────
 # Execução principal
 # ───────────────────────────────────────────────
-if start and uploads:
+if start and st.session_state.uploads:
     st.session_state.processing = True
-    # Ocultar uploader e botão imediatamente
-    st.markdown("<div class='hide-ui'></div>", unsafe_allow_html=True)
+    uploads = st.session_state.uploads
+    st.markdown("<div class='hidden-ui'></div>", unsafe_allow_html=True)
     st.info("🔒 A processar... aguarda alguns segundos.")
     st.divider()
 
@@ -142,6 +149,7 @@ if start and uploads:
             tmp_pdf = tmpdir / up.name
             with open(tmp_pdf, "wb") as f:
                 f.write(up.getbuffer())
+
             os.environ["OUTPUT_DIR"] = str(tmpdir)
             outdirs.append(tmpdir)
 
@@ -160,12 +168,8 @@ if start and uploads:
                     if exp and proc:
                         total_samples += proc
                         if exp != proc:
-                            discrepancies.append(
-                                f"{Path(fp).name} (processadas: {proc} / declaradas: {exp})"
-                            )
-                discrep_str = ""
-                if discrepancies:
-                    discrep_str = " ⚠️ Discrepâncias em " + "; ".join(discrepancies)
+                            discrepancies.append(f"{Path(fp).name} (processadas: {proc} / declaradas: {exp})")
+                discrep_str = " ⚠️ Discrepâncias em " + "; ".join(discrepancies) if discrepancies else ""
                 st.success(f"✅ {up.name}: {req_count} requisição(ões), {total_samples} amostras{discrep_str}.")
                 summary_lines.append(f"{up.name}: {req_count} requisições, {total_samples} amostras{discrep_str}.")
             progress.progress(i / total)
@@ -182,7 +186,10 @@ if start and uploads:
             st.success(f"🏁 Processamento concluído ({len(all_excel)} ficheiros Excel gerados).")
             st.download_button("⬇️ Descarregar resultados (ZIP)", data=zip_bytes,
                                file_name=zip_name, mime="application/zip")
+
+            # Reset do estado
             st.session_state.processing = False
+            st.session_state.uploads = None
         else:
             st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
 
