@@ -8,6 +8,10 @@ Inclui normalização do output para integração com o front-end Streamlit.
 import os
 from pathlib import Path
 from typing import List, Dict, Any
+import importlib   # ✅ necessário para carregar o core dinamicamente
+
+# carrega o módulo core_xylella
+core = importlib.import_module("core_xylella")
 
 
 
