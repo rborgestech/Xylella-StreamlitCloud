@@ -41,14 +41,12 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ───────────────────────────────────────────────
-# Estado
+# Estado inicial
 # ───────────────────────────────────────────────
-if "processing" not in st.session_state:
-    st.session_state.processing = False
-if "done" not in st.session_state:
-    st.session_state.done = False
-if "uploaded_files" not in st.session_state:
-    st.session_state.uploaded_files = None
+if "stage" not in st.session_state:
+    st.session_state.stage = "idle"  # idle | processing | done
+if "uploads" not in st.session_state:
+    st.session_state.uploads = None
 
 # ───────────────────────────────────────────────
 # Funções auxiliares
@@ -87,36 +85,30 @@ def build_zip_with_summary(excel_files: List[str], debug_files: List[str], summa
     return mem.read()
 
 # ───────────────────────────────────────────────
-# Interface — uploader e botão
+# INTERFACE PRINCIPAL
 # ───────────────────────────────────────────────
-if not st.session_state.processing:
-    with st.container():
-        uploads = st.file_uploader(
-            "📂 Carrega um ou vários PDFs",
-            type=["pdf"],
-            accept_multiple_files=True,
-            key="uploads_ui"
-        )
-        if uploads:
-            st.session_state.uploaded_files = uploads
-            start = st.button("📄 Processar ficheiros de Input", type="primary", key="start_btn")
-        else:
-            start = False
-            if not st.session_state.done:
-                st.info("💡 Carrega um ficheiro PDF para ativar o botão de processamento.")
-else:
-    start = False
+if st.session_state.stage == "idle":
+    uploads = st.file_uploader(
+        "📂 Carrega um ou vários PDFs",
+        type=["pdf"],
+        accept_multiple_files=True,
+        key="file_uploader"
+    )
 
-# ───────────────────────────────────────────────
-# Execução principal
-# ───────────────────────────────────────────────
-if start and st.session_state.uploaded_files:
-    st.session_state.processing = True
-    st.session_state.done = False
+    if uploads:
+        if st.button("📄 Processar ficheiros de Input", type="primary", key="start_processing"):
+            st.session_state.uploads = uploads
+            st.session_state.stage = "processing"
+            st.rerun()
+    else:
+        st.info("💡 Carrega um ficheiro PDF para ativar o botão de processamento.")
+
+elif st.session_state.stage == "processing":
+    # Limpa a interface enquanto processa
     st.info("⏳ A processar ficheiros... aguarde até o processo terminar.")
     st.divider()
 
-    uploads = st.session_state.uploaded_files
+    uploads = st.session_state.uploads
     session_dir = tempfile.mkdtemp(prefix="xylella_session_")
     final_dir = Path.cwd() / "output_final"
     final_dir.mkdir(exist_ok=True)
@@ -175,15 +167,15 @@ if start and st.session_state.uploaded_files:
             file_name=zip_name,
             mime="application/zip"
         )
-        st.session_state.processing = False
-        st.session_state.done = True
-        st.session_state.uploaded_files = None
     else:
         st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
-        st.session_state.processing = False
 
     shutil.rmtree(session_dir, ignore_errors=True)
+    st.session_state.stage = "done"
 
-# Mensagem final
-if st.session_state.done and not st.session_state.processing:
+elif st.session_state.stage == "done":
     st.success("✅ Pronto para novo processamento.")
+    if st.button("🔁 Novo processamento"):
+        st.session_state.stage = "idle"
+        st.session_state.uploads = None
+        st.rerun()
