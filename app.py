@@ -15,7 +15,7 @@ st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 ficheiro Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# CSS — estilo e ocultação dinâmica
+# CSS — laranja + estilo limpo
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -37,7 +37,6 @@ st.markdown("""
   padding: 1rem !important;
 }
 .small-text { font-size: 0.85rem; color: #333; }
-.fade {opacity:0; transition: opacity 0.5s ease-out;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -87,22 +86,21 @@ def build_zip_with_summary(excel_files: List[str], debug_files: List[str], summa
     mem.seek(0)
     return mem.read()
 
+
 # ───────────────────────────────────────────────
-# Interface — Upload e botão (ocultos durante o processamento)
+# Interface — desaparece durante processamento
 # ───────────────────────────────────────────────
 if not st.session_state.processing:
-    uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True, key="uploads")
-    if uploads:
-        start = st.button("📄 Processar ficheiros de Input", type="primary")
-    else:
-        start = False
-        if not st.session_state.done:
-            st.info("💡 Carrega um ficheiro PDF para ativar o botão de processamento.")
+    with st.container():
+        uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True, key="uploads")
+        if uploads:
+            start = st.button("📄 Processar ficheiros de Input", type="primary")
+        else:
+            start = False
+            if not st.session_state.done:
+                st.info("💡 Carrega um ficheiro PDF para ativar o botão de processamento.")
 else:
-    # Oculta uploader e botão durante o processamento
-    st.markdown("<div class='fade'></div>", unsafe_allow_html=True)
-    uploads = None
-    start = False
+    uploads, start = None, False
 
 # ───────────────────────────────────────────────
 # Execução principal
@@ -173,6 +171,6 @@ if start and uploads:
 
     shutil.rmtree(session_dir, ignore_errors=True)
 
-# Após o download, limpa a interface automaticamente
+# Mensagem final
 if st.session_state.done and not st.session_state.processing:
     st.success("✅ Pronto para novo processamento.")
