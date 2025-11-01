@@ -14,9 +14,10 @@ st.set_page_config(page_title="Xylella Processor", page_icon="🧪", layout="cen
 st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 ficheiro Excel por requisição.")
 
-# CSS — tons laranja (#CA4300)
+# CSS — tons laranja (#CA4300) e letra reduzida para ficheiros
 st.markdown("""
 <style>
+/* Botão principal */
 .stButton > button[kind="primary"] {
   background-color: #CA4300 !important;
   border: 1px solid #CA4300 !important;
@@ -36,24 +37,25 @@ st.markdown("""
   border: 1px solid #b3b3b3 !important;
   color: #f2f2f2 !important;
   cursor: not-allowed !important;
-  box-shadow: none !important;
 }
+/* File uploader */
 [data-testid="stFileUploader"] > div:first-child {
   border: 2px dashed #CA4300 !important;
   border-radius: 10px !important;
   padding: 1rem !important;
 }
-[data-testid="stFileUploader"] > div:first-child:hover {
-  border-color: #A13700 !important;
-}
-[data-testid="stFileUploader"] > div:focus-within {
-  border-color: #CA4300 !important;
-  box-shadow: none !important;
-}
+[data-testid="stFileUploader"] > div:first-child:hover { border-color: #A13700 !important; }
+[data-testid="stFileUploader"] > div:focus-within { border-color: #CA4300 !important; box-shadow: none !important; }
+/* Cores globais */
 :root {
   --primary-color: #CA4300 !important;
   --secondary-color: #CA4300 !important;
   --accent-color: #CA4300 !important;
+}
+/* Nome de ficheiro: letra menor */
+.small-text {
+  font-size: 0.85rem;
+  color: #333;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -112,14 +114,15 @@ if not st.session_state.processing:
     uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True,
                                key=st.session_state.uploader_key)
     if uploads:
-        start = st.button("📄 Processar ficheiros de Input", type="primary", disabled=st.session_state.processing)
+        start = st.button("📄 Processar ficheiros de Input", type="primary")
     else:
         start = False
         st.info("💡 Carrega um ficheiro PDF para ativar o botão de processamento.")
 else:
     uploads, start = None, False
     st.info("⚙️ A processar... aguarda alguns segundos.")
-    st.markdown("<style>[data-testid='stFileUploader']{display:none}</style>", unsafe_allow_html=True)
+    # Oculta uploader e botão
+    st.markdown("<style>[data-testid='stFileUploader'], .stButton{display:none}</style>", unsafe_allow_html=True)
 
 # ───────────────────────────────────────────────
 # Execução principal
@@ -132,12 +135,12 @@ if start and uploads:
 
     try:
         all_excel, outdirs, summary_lines = [], [], []
-        progress = st.progress(0)
         total = len(uploads)
+        progress = st.progress(0)
 
         for i, up in enumerate(uploads, start=1):
-            st.markdown(f"### 📄 {up.name}")
-            st.write("⏳ Início de processamento...")
+            st.markdown(f"### 📄 <span class='small-text'>{up.name}</span>", unsafe_allow_html=True)
+            st.write(f"⏳ A processar ficheiro {i}/{total}...")
 
             tmpdir = Path(tempfile.mkdtemp(dir=session_dir))
             tmp_pdf = tmpdir / up.name
@@ -153,7 +156,9 @@ if start and uploads:
                 summary_lines.append(f"{up.name}: sem ficheiros gerados.")
             else:
                 req_count = len(created)
-                total_samples, discrepancy_msgs = 0, []
+                total_samples = 0
+                discrepancy_msgs = []
+
                 for fp in created:
                     dest = final_dir / Path(fp).name
                     shutil.copy(fp, dest)
@@ -164,14 +169,20 @@ if start and uploads:
                         total_samples += proc
                         diff = proc - exp
                         if diff != 0:
-                            discrepancy_msgs.append(f"{Path(fp).name} ({proc} / {exp})")
+                            discrepancy_msgs.append(
+                                f"{Path(fp).name} (processadas: {proc} / declaradas: {exp})"
+                            )
 
                 discrep_str = ""
                 if discrepancy_msgs:
-                    discrep_str = " ⚠️ discrepância em " + ", ".join(discrepancy_msgs)
+                    discrep_str = " ⚠️ Discrepâncias em " + "; ".join(discrepancy_msgs)
 
-                st.success(f"✅ {up.name}: {req_count} requisição(ões), {total_samples} amostras{discrep_str}.")
-                summary_lines.append(f"{up.name}: {req_count} requisições, {total_samples} amostras{discrep_str}.")
+                st.success(
+                    f"✅ {up.name}: {req_count} requisição(ões), {total_samples} amostras{discrep_str}."
+                )
+                summary_lines.append(
+                    f"{up.name}: {req_count} requisições, {total_samples} amostras{discrep_str}."
+                )
 
             progress.progress(i / total)
             time.sleep(0.2)
@@ -186,7 +197,6 @@ if start and uploads:
             st.download_button("⬇️ Descarregar resultados (ZIP)", data=zip_bytes,
                                file_name=zip_name, mime="application/zip")
 
-            # Auto-limpa o uploader
             st.session_state.uploader_key = f"uploader_{datetime.now().timestamp()}"
         else:
             st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
