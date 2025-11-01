@@ -88,8 +88,11 @@ def _normalize_result(result):
 
 
 def process_pdf_with_stats(pdf_path: str):
-    """Wrapper que usa a função process_pdf e devolve stats compatíveis com o app.py atual."""
-    entries = _normalize_result(process_pdf_sync(pdf_path))
+    """
+    Wrapper que usa a função process_pdf e devolve stats compatíveis com o app.py.
+    Garante que amostras e discrepâncias são contabilizadas corretamente.
+    """
+    entries = process_pdf(pdf_path)
 
     stats = {
         "pdf_name": os.path.basename(pdf_path),
@@ -103,12 +106,14 @@ def process_pdf_with_stats(pdf_path: str):
             "req": i + 1,
             "file": e.get("path"),
             "samples": e.get("processed", 0),
-            "expected": None,
-            "diff": e.get("discrepancy", False)
+            "expected": e.get("expected"),
+            "diff": e.get("processed", 0) - (e.get("expected") or 0)
         })
 
+    # Ficheiros de debug (se existirem)
     debug_files = [str(f) for f in OUTPUT_DIR.glob("*_ocr_debug.txt")]
     return [e["path"] for e in entries], stats, debug_files
+
 
 
 def build_zip_with_summary(excel_files, debug_files, summary_text):
