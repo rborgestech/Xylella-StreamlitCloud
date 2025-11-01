@@ -1,6 +1,11 @@
 # -*- coding: utf-8 -*-
 import os
 import shutil
+import subprocess
+import sys
+import json
+import io
+import zipfile
 from pathlib import Path
 from datetime import datetime
 
@@ -18,8 +23,6 @@ def process_pdf(pdf_path):
     Executa o core_xylella.py no contexto real do Streamlit Cloud (/mount/src/xylella-streamlitcloud),
     garantindo a criação de debug/ e summary. Devolve lista de ficheiros Excel gerados.
     """
-    import subprocess, json, sys
-
     project_root = Path("/mount/src/xylella-streamlitcloud").resolve()
     pdf_path = Path(pdf_path).resolve()
     pdf_name = pdf_path.name
@@ -38,7 +41,7 @@ def process_pdf(pdf_path):
     helper.write_text(f"""
 import json
 from core_xylella import process_pdf_sync
-res = process_pdf_sync(r"{stable_pdf}")
+res = process_pdf_sync(r\"{stable_pdf}\")
 print(json.dumps(res if isinstance(res, (list, dict)) else str(res)))
 """)
 
@@ -112,7 +115,6 @@ def process_pdf_with_stats(pdf_path: str):
 
 def build_zip_with_summary(excel_files, debug_files, summary_text):
     """Wrapper para manter compatibilidade com a versão do app.py que gera summary + debug."""
-    import io, zipfile
     mem = io.BytesIO()
     with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as z:
         for f in excel_files:
