@@ -232,7 +232,7 @@ if st.session_state.reset_flag:
     st.session_state.stage = "idle"
     st.session_state.uploads = None
     # ligeiro atraso só para deixar o fade acontecer
-    time.sleep(0.5)
+    time.sleep(0.2)
     try:
         st.rerun()
     except Exception:
