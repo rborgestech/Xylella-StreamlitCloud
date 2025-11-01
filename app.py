@@ -15,7 +15,7 @@ st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 ficheiro Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# CSS — estilo limpo
+# CSS — estilo limpo e azul para blocos
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -36,6 +36,22 @@ st.markdown("""
   border-radius: 10px !important;
   padding: 1rem !important;
 }
+.file-box {
+  background-color: #E8F1FB;
+  border-left: 4px solid #2B6CB0;
+  padding: 0.6rem 1rem;
+  border-radius: 8px;
+  margin-bottom: 0.5rem;
+}
+.file-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #1A365D;
+}
+.file-sub {
+  font-size: 0.8rem;
+  color: #2A4365;
+}
 .small-text { font-size: 0.85rem; color: #333; }
 </style>
 """, unsafe_allow_html=True)
@@ -44,9 +60,11 @@ st.markdown("""
 # Estado
 # ───────────────────────────────────────────────
 if "stage" not in st.session_state:
-    st.session_state.stage = "idle"  # idle | processing
+    st.session_state.stage = "idle"
 if "uploads" not in st.session_state:
     st.session_state.uploads = None
+if "reset_flag" not in st.session_state:
+    st.session_state.reset_flag = False
 
 # ───────────────────────────────────────────────
 # Funções auxiliares
@@ -118,8 +136,15 @@ elif st.session_state.stage == "processing":
     progress = st.progress(0)
 
     for i, up in enumerate(uploads, start=1):
-        st.markdown(f"### 📄 <span class='small-text'>{up.name}</span>", unsafe_allow_html=True)
-        st.write(f"⏳ A processar ficheiro {i}/{total}...")
+        st.markdown(
+            f"""
+            <div class='file-box'>
+                <div class='file-title'>📄 {up.name}</div>
+                <div class='file-sub'>Ficheiro {i} de {total} — a processar...</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
         tmpdir = Path(tempfile.mkdtemp(dir=session_dir))
         tmp_pdf = tmpdir / up.name
@@ -159,21 +184,19 @@ elif st.session_state.stage == "processing":
         summary_text += f"\n\n📊 Total: {len(all_excel)} ficheiro(s) Excel\n⏱️ Tempo total: {total_time:.1f} segundos"
         zip_bytes = build_zip_with_summary(all_excel, debug_files, summary_text)
         zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
+
         st.success(f"🏁 Processamento concluído ({len(all_excel)} ficheiros Excel gerados).")
 
-        # 🔁 Reinício automático após o download
-        def reset_after_download():
-            shutil.rmtree(session_dir, ignore_errors=True)
-            st.session_state.stage = "idle"
-            st.session_state.uploads = None
-            st.rerun()
+        # Marca que o utilizador fez download
+        def mark_for_reset():
+            st.session_state.reset_flag = True
 
         st.download_button(
             "⬇️ Descarregar resultados (ZIP)",
             data=zip_bytes,
             file_name=zip_name,
             mime="application/zip",
-            on_click=reset_after_download
+            on_click=mark_for_reset
         )
     else:
         st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
@@ -181,3 +204,13 @@ elif st.session_state.stage == "processing":
         st.session_state.stage = "idle"
         st.session_state.uploads = None
         st.rerun()
+
+# ───────────────────────────────────────────────
+# RESET SEGURO APÓS DOWNLOAD
+# ───────────────────────────────────────────────
+if st.session_state.reset_flag:
+    st.session_state.reset_flag = False
+    shutil.rmtree(tempfile.gettempdir(), ignore_errors=True)
+    st.session_state.stage = "idle"
+    st.session_state.uploads = None
+    st.experimental_rerun()
