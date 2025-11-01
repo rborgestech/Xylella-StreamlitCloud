@@ -14,10 +14,9 @@ st.set_page_config(page_title="Xylella Processor", page_icon="🧪", layout="cen
 st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 ficheiro Excel por requisição.")
 
-# CSS — tons laranja (#CA4300) e letra reduzida para ficheiros
+# CSS — tons laranja e ocultação dinâmica
 st.markdown("""
 <style>
-/* Botão principal */
 .stButton > button[kind="primary"] {
   background-color: #CA4300 !important;
   border: 1px solid #CA4300 !important;
@@ -38,7 +37,6 @@ st.markdown("""
   color: #f2f2f2 !important;
   cursor: not-allowed !important;
 }
-/* File uploader */
 [data-testid="stFileUploader"] > div:first-child {
   border: 2px dashed #CA4300 !important;
   border-radius: 10px !important;
@@ -46,16 +44,23 @@ st.markdown("""
 }
 [data-testid="stFileUploader"] > div:first-child:hover { border-color: #A13700 !important; }
 [data-testid="stFileUploader"] > div:focus-within { border-color: #CA4300 !important; box-shadow: none !important; }
-/* Cores globais */
+
 :root {
   --primary-color: #CA4300 !important;
   --secondary-color: #CA4300 !important;
   --accent-color: #CA4300 !important;
 }
+
 /* Nome de ficheiro: letra menor */
 .small-text {
   font-size: 0.85rem;
   color: #333;
+}
+
+/* Ocultar uploader e botão quando processing */
+.processing [data-testid="stFileUploader"],
+.processing .stButton {
+  display: none !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -72,7 +77,6 @@ if "uploader_key" not in st.session_state:
 # Helpers
 # ───────────────────────────────────────────────
 def read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
-    """Lê a célula E1 do Excel e extrai 'Nº Amostras: X / Y'."""
     try:
         wb = load_workbook(xlsx_path, data_only=True)
         ws = wb.worksheets[0]
@@ -85,7 +89,6 @@ def read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
     return None, None
 
 def collect_debug_files(output_dirs: List[Path]) -> List[str]:
-    """Recolhe ficheiros de debug (_ocr_debug.txt, process_log.csv, summaries)."""
     debug_files = []
     patterns = ["*_ocr_debug.txt", "process_log.csv", "process_summary_*.txt"]
     for outdir in output_dirs:
@@ -94,7 +97,6 @@ def collect_debug_files(output_dirs: List[Path]) -> List[str]:
     return debug_files
 
 def build_zip_with_summary(excel_files: List[str], debug_files: List[str], summary_text: str) -> bytes:
-    """Constrói um ZIP com Excel, debug/ e summary.txt."""
     mem = io.BytesIO()
     with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as z:
         for p in excel_files:
@@ -108,7 +110,7 @@ def build_zip_with_summary(excel_files: List[str], debug_files: List[str], summa
     return mem.read()
 
 # ───────────────────────────────────────────────
-# Interface — só mostra o botão após upload
+# Interface — mostra botão só após upload
 # ───────────────────────────────────────────────
 if not st.session_state.processing:
     uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True,
@@ -120,15 +122,16 @@ if not st.session_state.processing:
         st.info("💡 Carrega um ficheiro PDF para ativar o botão de processamento.")
 else:
     uploads, start = None, False
+    st.markdown("<div class='processing'></div>", unsafe_allow_html=True)
     st.info("⚙️ A processar... aguarda alguns segundos.")
-    # Oculta uploader e botão
-    st.markdown("<style>[data-testid='stFileUploader'], .stButton{display:none}</style>", unsafe_allow_html=True)
 
 # ───────────────────────────────────────────────
 # Execução principal
 # ───────────────────────────────────────────────
 if start and uploads:
     st.session_state.processing = True
+    st.markdown("<div class='processing'></div>", unsafe_allow_html=True)  # Oculta imediatamente
+    start_time = time.time()
     session_dir = tempfile.mkdtemp(prefix="xylella_session_")
     final_dir = Path.cwd() / "output_final"
     final_dir.mkdir(exist_ok=True)
@@ -187,9 +190,15 @@ if start and uploads:
             progress.progress(i / total)
             time.sleep(0.2)
 
+        total_time = time.time() - start_time
+
         if all_excel:
             debug_files = collect_debug_files(outdirs)
-            summary_text = "\n".join(summary_lines) + f"\n\n📊 Total: {len(all_excel)} ficheiro(s) Excel"
+            summary_text = (
+                "\n".join(summary_lines)
+                + f"\n\n📊 Total: {len(all_excel)} ficheiro(s) Excel"
+                + f"\n⏱️ Tempo total: {total_time:.1f} segundos"
+            )
             zip_bytes = build_zip_with_summary(all_excel, debug_files, summary_text)
             zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
 
@@ -197,6 +206,7 @@ if start and uploads:
             st.download_button("⬇️ Descarregar resultados (ZIP)", data=zip_bytes,
                                file_name=zip_name, mime="application/zip")
 
+            # Auto-limpa o uploader
             st.session_state.uploader_key = f"uploader_{datetime.now().timestamp()}"
         else:
             st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
