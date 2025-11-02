@@ -216,7 +216,7 @@ elif st.session_state.stage == "processing":
             active_html.replace("file-box active", "file-box active fadeOut"),
             unsafe_allow_html=True,
         )
-        time.sleep(0.25)
+        time.sleep(0.15)
         
         # 4) Agora escreve a caixa final (success/warning/error) no MESMO placeholder
         if not created:
