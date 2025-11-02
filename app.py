@@ -190,83 +190,96 @@ elif st.session_state.stage == "processing":
     progress = st.progress(0)
 
     for i, up in enumerate(uploads, start=1):
-        placeholder = st.empty()
+      placeholder = st.empty()
+      
+      # 1) Mostra a caixa azul (visível durante TODO o processamento)
+      active_html = f"""
+      <div class='file-box active'>
+        <div class='file-title'>📄 {up.name}</div>
+        <div class='file-sub'>Ficheiro {i} de {total} — a processar<span class="dots"></span></div>
+      </div>
+      """
+      placeholder.markdown(active_html, unsafe_allow_html=True)
+      
+      # 2) PROCESSA (bloqueante). A caixa azul continua visível enquanto isto corre.
+      tmpdir = Path(tempfile.mkdtemp(dir=session_dir))
+      tmp_pdf = tmpdir / up.name
+      with open(tmp_pdf, "wb") as f:
+          f.write(up.getbuffer())
+      
+      os.environ["OUTPUT_DIR"] = str(tmpdir)
+      outdirs.append(tmpdir)
+      created = process_pdf(str(tmp_pdf))   # ← a UI mantém a caixa azul durante esta chamada
+      
+      # 3) (opcional) fade-out rápido da caixa azul, já DEPOIS do processamento
+      placeholder.markdown(
+          active_html.replace("file-box active", "file-box active fadeOut"),
+          unsafe_allow_html=True,
+      )
+      time.sleep(0.25)
+      
+      # 4) Agora escreve a caixa final (success/warning/error) no MESMO placeholder
+      if not created:
+          html = (
+              f"<div class='file-box error'>"
+              f"<div class='file-title'>📄 {up.name}</div>"
+              f"<div class='file-sub'>❌ Erro: nenhum ficheiro gerado.</div>"
+              f"</div>"
+          )
+          placeholder.markdown(html, unsafe_allow_html=True)
+          summary_lines.append(f"{up.name}: erro - nenhum ficheiro gerado.")
+      else:
+          req_count = len(created)
+          total_samples, discrepancies = 0, []
+          for fp in created:
+              dest = final_dir / Path(fp).name
+              shutil.copy(fp, dest)
+              all_excel.append(str(dest))
+              exp, proc = read_e1_counts(str(dest))
+              if exp and proc:
+                  total_samples += proc
+                  if exp != proc:
+                      discrepancies.append(
+                          f"{Path(fp).name} (processadas: {proc} / declaradas: {exp})"
+                      )
+      
+          if discrepancies:
+              box_class = "warning"
+              discrep_html = (
+                  "<div class='file-sub'>⚠️ <b>"
+                  + str(len(discrepancies))
+                  + "</b> discrepância(s):<br>"
+                  + "<br>".join(discrepancies)
+                  + "</div>"
+              )
+              summary_lines.append(
+                  f"{up.name}: {req_count} requisições, {total_samples} amostras ⚠️ {len(discrepancies)} discrepância(s)."
+              )
+          else:
+              box_class = "success"
+              discrep_html = ""
+              summary_lines.append(
+                  f"{up.name}: {req_count} requisições, {total_samples} amostras"
+              )
+      
+          for fp in created:
+              excel_name = Path(fp).name
+              exp, proc = read_e1_counts(str(fp))
+              if exp and proc and exp != proc:
+                  summary_lines.append(f"   ↳ ⚠️ {excel_name} (processadas: {proc} / declaradas: {exp})")
+              else:
+                  summary_lines.append(f"   ↳ {excel_name}")
+      
+          result_html = (
+              f"<div class='file-box {box_class}'>"
+              f"<div class='file-title'>📄 {up.name}</div>"
+              f"<div class='file-sub'><b>{req_count}</b> requisição(ões), "
+              f"<b>{total_samples}</b> amostras.</div>"
+              f"{discrep_html}"
+              f"</div>"
+          )
+          placeholder.markdown(result_html, unsafe_allow_html=True)
 
-        # Mostra o ficheiro ativo (azul com animação de pontos)
-        placeholder.markdown(
-            f"""
-            <div class='file-box active'>
-                <div class='file-title'>📄 {up.name}</div>
-                <div class='file-sub'>Ficheiro {i} de {total} — a processar<span class="dots"></span></div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        # Fade-out antes da substituição
-        time.sleep(0.5)
-        placeholder.markdown("<div class='file-box active fadeOut'></div>", unsafe_allow_html=True)
-        time.sleep(0.4)
-
-        tmpdir = Path(tempfile.mkdtemp(dir=session_dir))
-        tmp_pdf = tmpdir / up.name
-        with open(tmp_pdf, "wb") as f:
-            f.write(up.getbuffer())
-
-        os.environ["OUTPUT_DIR"] = str(tmpdir)
-        outdirs.append(tmpdir)
-        created = process_pdf(str(tmp_pdf))
-
-        if not created:
-            error_count += 1
-            html = (
-                f"<div class='file-box error'>"
-                f"<div class='file-title'>📄 {up.name}</div>"
-                f"<div class='file-sub'>❌ Erro: nenhum ficheiro gerado.</div>"
-                f"</div>"
-            )
-            placeholder.markdown(html, unsafe_allow_html=True)
-            summary_lines.append(f"{up.name}: erro - nenhum ficheiro gerado.")
-        else:
-            req_count = len(created)
-            total_samples, discrepancies = 0, []
-            for fp in created:
-                dest = final_dir / Path(fp).name
-                shutil.copy(fp, dest)
-                all_excel.append(str(dest))
-                exp, proc = read_e1_counts(str(dest))
-                if exp and proc:
-                    total_samples += proc
-                    if exp != proc:
-                        discrepancies.append(
-                            f"{Path(fp).name} (processadas: {proc} / declaradas: {exp})"
-                        )
-
-            if discrepancies:
-                warning_count += 1
-                box_class = "warning"
-                discrep_html = (
-                    "<div class='file-sub'>⚠️ <b>"
-                    + str(len(discrepancies))
-                    + "</b> discrepância(s):<br>"
-                    + "<br>".join(discrepancies)
-                    + "</div>"
-                )
-                discrep_str = f" ⚠️ {len(discrepancies)} discrepância(s)."
-            else:
-                box_class = "success"
-                discrep_html = ""
-                discrep_str = ""
-
-            html = (
-                f"<div class='file-box {box_class}'>"
-                f"<div class='file-title'>📄 {up.name}</div>"
-                f"<div class='file-sub'><b>{req_count}</b> requisição(ões), "
-                f"<b>{total_samples}</b> amostras.</div>"
-                f"{discrep_html}"
-                f"</div>"
-            )
-            placeholder.markdown(html, unsafe_allow_html=True)
 
             # Adiciona ao resumo detalhado
             if discrepancies:
