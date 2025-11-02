@@ -6,6 +6,8 @@ from datetime import datetime
 from typing import List, Tuple
 from openpyxl import load_workbook
 from xylella_processor import process_pdf
+from streamlit.runtime.scriptrunner import RerunException
+from streamlit.runtime.scriptrunner import RerunData
 
 # ───────────────────────────────────────────────
 # Configuração base
@@ -249,5 +251,7 @@ elif st.session_state.stage == "processing":
             """, unsafe_allow_html=True)
         with col2:
             if st.button("🔁 Novo processamento", type="secondary", use_container_width=True):
-                render_home()  # regressa de imediato ao ecrã inicial
-                st.stop()
+                # Limpa o estado e força a app a reiniciar
+                for key in list(st.session_state.keys()):
+                    del st.session_state[key]
+                raise RerunException(RerunData(page_name=None))
