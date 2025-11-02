@@ -178,7 +178,7 @@ elif st.session_state.stage == "processing":
                 f"""
                 <div class='file-box active'>
                     <div class='file-title'>📄 {up.name}</div>
-                    <div class='file-sub'>Ficheiro {i} de {total} — a processar{frame}</div>
+                    <div class='file-sub'>Ficheiro <b>{i}</b> de <b>{total}</b> — <b>a processar{frame}</b></div>
                 </div>
                 """,
                 unsafe_allow_html=True,
