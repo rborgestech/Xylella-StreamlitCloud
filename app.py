@@ -8,6 +8,15 @@ from openpyxl import load_workbook
 from xylella_processor import process_pdf
 
 # ───────────────────────────────────────────────
+# RESET GLOBAL (executa antes de tudo)
+# ───────────────────────────────────────────────
+if "go_home" in st.session_state and st.session_state.go_home:
+    st.session_state.stage = "idle"
+    st.session_state.uploads = None
+    st.session_state.go_home = False
+    st.experimental_rerun()
+
+# ───────────────────────────────────────────────
 # Configuração base
 # ───────────────────────────────────────────────
 st.set_page_config(page_title="Xylella Processor", page_icon="🧪", layout="centered")
@@ -15,18 +24,7 @@ st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 ficheiro Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# Reset global — tratado no início (NUNCA no fim)
-# ───────────────────────────────────────────────
-if st.session_state.get("reset_pending"):
-    for k in list(st.session_state.keys()):
-        del st.session_state[k]
-    st.session_state.stage = "idle"
-    st.session_state.uploads = None
-    st.session_state.reset_pending = False
-    st.experimental_rerun()
-
-# ───────────────────────────────────────────────
-# CSS — estilo limpo
+# CSS — estilo limpo e azul
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -236,6 +234,5 @@ elif st.session_state.stage == "processing":
             """, unsafe_allow_html=True)
         with col2:
             if st.button("🔁 Novo processamento", type="secondary", use_container_width=True):
-                st.session_state.stage = "idle"
-                st.session_state.uploads = None
+                st.session_state.go_home = True
                 st.stop()
