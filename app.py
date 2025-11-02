@@ -218,7 +218,16 @@ elif st.session_state.stage == "processing":
     lisbon_tz = pytz.timezone("Europe/Lisbon")
     now_local = datetime.now(lisbon_tz)
     total_reqs = len(all_excel)
-    total_amostras = sum(int(m.group(1)) for l in summary_lines if (m := re.search(r"(\d+)\s+amostra", l)))
+    # 🧪 cálculo exato do total de amostras (usa “processadas:” se existir, senão “amostras”)
+    total_amostras = 0
+    for line in summary_lines:
+        # prioridade: "processadas: X"
+        m_proc = re.search(r"processadas:\s*(\d+)", line)
+        m_amostras = re.search(r"(\d+)\s+amostra", line)
+        if m_proc:
+            total_amostras += int(m_proc.group(1))
+        elif m_amostras:
+            total_amostras += int(m_amostras.group(1))
 
     summary_text = "\n".join(summary_lines)
     summary_text += f"\n\n📊 Total: {len(all_excel)} ficheiro(s) Excel"
