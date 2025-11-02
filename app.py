@@ -220,26 +220,17 @@ elif st.session_state.stage == "processing":
     total_reqs = len(all_excel)
     # 🧪 cálculo exato do total de amostras (usa “processadas:” se existir, senão “amostras”)
 
-    total_amostras = 0
-    linhas_contadas = set()
-    pdf_totais = {}
-    
-    for line in summary_lines:
-        # Sub-linhas com "processadas:" (preferência)
-        m_proc = re.search(r"processadas:\s*(\d+)", line)
-        if m_proc:
-            total_amostras += int(m_proc.group(1))
-            continue
-    
-        # Linhas principais (sem sublinhas com discrepância)
-        if line.endswith("amostras") or "amostras." in line:
-            nome_pdf = line.split(":")[0].strip()
-            m_amostras = re.search(r"(\d+)\s+amostra", line)
-            if m_amostras:
-                pdf_totais[nome_pdf] = int(m_amostras.group(1))
-    
-    # Evita duplicar PDFs que já tiveram sublinhas processadas
-    total_amostras += sum(v for k, v in pdf_totais.items())
+  total_amostras = 0
+  for l in summary_lines:
+      # Se existir "processadas:" na linha → prioridade
+      m_proc = re.search(r"processadas:\s*(\d+)", l)
+      if m_proc:
+          total_amostras += int(m_proc.group(1))
+          continue
+      # Caso contrário, procura "amostras" na linha principal
+      m_amos = re.search(r"(\d+)\s+amostra", l)
+      if m_amos:
+          total_amostras += int(m_amos.group(1))
 
 
 
