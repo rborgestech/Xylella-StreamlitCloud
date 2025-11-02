@@ -158,20 +158,18 @@ elif st.session_state.stage == "processing":
     for i, up in enumerate(uploads, start=1):
         placeholder = st.empty()
 
-        # Animação visual azul (ficheiro ativo)
-        dots_placeholder = st.empty()
-        for _ in range(3):  # Mostra animação de pontos por ~2s
-            for frame in [".", "..", "..."]:
-                dots_placeholder.markdown(
-                    f"""
-                    <div class='file-box active'>
-                        <div class='file-title'>📄 {up.name}</div>
-                        <div class='file-sub'>Ficheiro {i} de {total} — a processar{frame}</div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-                time.sleep(0.3)
+        # Mostra o ficheiro ativo (fundo azul + animação ...)
+        for frame in [".", "..", "..."]:
+            placeholder.markdown(
+                f"""
+                <div class='file-box active'>
+                    <div class='file-title'>📄 {up.name}</div>
+                    <div class='file-sub'>Ficheiro {i} de {total} — a processar{frame}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            time.sleep(0.3)
 
         tmpdir = Path(tempfile.mkdtemp(dir=session_dir))
         tmp_pdf = tmpdir / up.name
