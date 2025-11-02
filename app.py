@@ -68,7 +68,7 @@ def show_uploader():
         "📂 Carrega um ou vários PDFs",
         type=["pdf"],
         accept_multiple_files=True,
-        key=f"upload_{int(time.time())}"
+        key="upload_main"
     )
 
     if uploads:
@@ -78,6 +78,7 @@ def show_uploader():
             run_processing(uploads)
     else:
         st.info("💡 Carrega um ficheiro PDF e clica em **Processar ficheiros de Input**.")
+
 
 # ───────────────────────────────────────────────
 # Processamento
