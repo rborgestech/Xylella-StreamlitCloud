@@ -130,3 +130,11 @@ if start and uploads:
             st.success(f"🏁 Processamento concluído ({len(all_excel)} ficheiros Excel gerados).")
             st.download_button("⬇️ Descarregar resultados (ZIP)", data=zip_bytes,
                                file_name=zip_name, mime="application/zip")
+        else:
+            st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
+
+    finally:
+        st.session_state.processing = False
+
+else:
+    st.info("💡 Carrega um ficheiro PDF e clica em **Processar ficheiros de Input**.")
