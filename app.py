@@ -79,7 +79,6 @@ def read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
         pass
     return None, None
 
-
 def collect_debug_files(output_dirs: list[Path]) -> list[str]:
     debug_files = []
     for pattern in ["*_ocr_debug.txt", "process_log.csv", "process_summary_*.txt"]:
@@ -87,7 +86,6 @@ def collect_debug_files(output_dirs: list[Path]) -> list[str]:
             for f in d.glob(pattern):
                 debug_files.append(str(f))
     return debug_files
-
 
 def build_zip_with_summary(excel_files: list[str], debug_files: list[str], summary_text: str) -> bytes:
     mem = io.BytesIO()
@@ -101,7 +99,6 @@ def build_zip_with_summary(excel_files: list[str], debug_files: list[str], summa
         z.writestr("summary.txt", summary_text)
     mem.seek(0)
     return mem.read()
-
 
 # ───────────────────────────────────────────────
 # Interface principal
@@ -124,7 +121,6 @@ if st.session_state.stage == "idle":
 
 elif st.session_state.stage == "processing":
     st.info("⏳ A processar ficheiros... aguarde até o processo terminar.")
-    st.divider()
 
     uploads = st.session_state.uploads
     session_dir = tempfile.mkdtemp(prefix="xylella_session_")
@@ -139,7 +135,7 @@ elif st.session_state.stage == "processing":
     for i, up in enumerate(uploads, start=1):
         placeholder = st.empty()
 
-        # Mostra a animação dos 3 pontos durante o processamento
+        # Animação leve
         for frame in itertools.cycle([".", "..", "..."]):
             placeholder.markdown(
                 f"""
@@ -151,7 +147,6 @@ elif st.session_state.stage == "processing":
                 unsafe_allow_html=True,
             )
             time.sleep(0.3)
-            # interrompe o ciclo quando o ficheiro começa a ser processado
             break
 
         tmpdir = Path(tempfile.mkdtemp(dir=session_dir))
@@ -163,7 +158,6 @@ elif st.session_state.stage == "processing":
         outdirs.append(tmpdir)
         created = process_pdf(str(tmp_pdf))
 
-        # Atualiza estado visual após terminar o ficheiro
         if not created:
             placeholder.warning(f"⚠️ Nenhum ficheiro gerado para {up.name}")
             summary_lines.append(f"{up.name}: sem ficheiros gerados.")
@@ -184,7 +178,7 @@ elif st.session_state.stage == "processing":
             summary_lines.append(f"{up.name}: {req_count} requisições, {total_samples} amostras{discrep_str}.")
 
         progress.progress(i / total)
-        time.sleep(0.3)
+        time.sleep(0.2)
 
     total_time = time.time() - start_time
 
@@ -194,16 +188,16 @@ elif st.session_state.stage == "processing":
         summary_text += f"\n\n📊 Total: {len(all_excel)} ficheiro(s) Excel\n⏱️ Tempo total: {total_time:.1f} segundos"
         zip_bytes = build_zip_with_summary(all_excel, debug_files, summary_text)
         zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
-    
-        # Cálculo correto do total de amostras
+
+        # Totais corretos
         total_reqs = len(all_excel)
         total_amostras = 0
         for line in summary_lines:
             match = re.search(r"(\d+)\s+amostra", line)
             if match:
                 total_amostras += int(match.group(1))
-    
-        # Secção final centralizada
+
+        # Layout final clean
         st.markdown("""
         <style>
         .result-box {
@@ -226,7 +220,7 @@ elif st.session_state.stage == "processing":
         }
         </style>
         """, unsafe_allow_html=True)
-    
+
         st.markdown("<div class='result-box'><h3>🏁 Processamento concluído!</h3></div>", unsafe_allow_html=True)
         st.markdown(f"""
         <div class='result-box'>
@@ -234,9 +228,9 @@ elif st.session_state.stage == "processing":
             Tempo total de execução: <b>{total_time:.1f} segundos</b>.
         </div>
         """, unsafe_allow_html=True)
-    
+
         zip_b64 = base64.b64encode(zip_bytes).decode()
-    
+
         col1, col2 = st.columns(2)
         with col1:
             st.markdown(f"""
@@ -246,13 +240,15 @@ elif st.session_state.stage == "processing":
             """, unsafe_allow_html=True)
         with col2:
             if st.button("🔁 Novo processamento", type="secondary", key="reset_btn", use_container_width=True):
-                st.session_state.stage = "idle"
-                st.session_state.uploads = None
-                st.experimental_rerun()
-    
+                for key in ["stage", "uploads"]:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                st.rerun()
+
     else:
         st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
         shutil.rmtree(session_dir, ignore_errors=True)
-        st.session_state.stage = "idle"
-        st.session_state.uploads = None
-        st.experimental_rerun()
+        for key in ["stage", "uploads"]:
+            if key in st.session_state:
+                del st.session_state[key]
+        st.rerun()
