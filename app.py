@@ -162,11 +162,13 @@ elif st.session_state.stage == "processing":
             active_html.replace("file-box active", "file-box active fadeOut"),
             unsafe_allow_html=True,
         )
-
-        # 👉 flush imediato para forçar o DOM a atualizar antes de seguir
-        st.experimental_update()
-
-        # substitui o delay longo por micro-pausa
+        
+        # 👉 força atualização imediata com placeholder temporário
+        flush = st.empty()
+        flush.markdown("&nbsp;", unsafe_allow_html=True)
+        flush.empty()
+        
+        # segue imediatamente para o resultado
         time.sleep(0.02)
 
         # Substitui por resultado final (sem ecrã branco)
