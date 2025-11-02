@@ -79,6 +79,7 @@ def read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
         pass
     return None, None
 
+
 def collect_debug_files(output_dirs: list[Path]) -> list[str]:
     debug_files = []
     for pattern in ["*_ocr_debug.txt", "process_log.csv", "process_summary_*.txt"]:
@@ -86,6 +87,7 @@ def collect_debug_files(output_dirs: list[Path]) -> list[str]:
             for f in d.glob(pattern):
                 debug_files.append(str(f))
     return debug_files
+
 
 def build_zip_with_summary(excel_files: list[str], debug_files: list[str], summary_text: str) -> bytes:
     mem = io.BytesIO()
@@ -99,6 +101,7 @@ def build_zip_with_summary(excel_files: list[str], debug_files: list[str], summa
         z.writestr("summary.txt", summary_text)
     mem.seek(0)
     return mem.read()
+
 
 # ───────────────────────────────────────────────
 # Interface principal
@@ -136,7 +139,7 @@ elif st.session_state.stage == "processing":
     for i, up in enumerate(uploads, start=1):
         placeholder = st.empty()
 
-        # Animação simples dos "..."
+        # Mostra a animação dos 3 pontos durante o processamento
         for frame in itertools.cycle([".", "..", "..."]):
             placeholder.markdown(
                 f"""
@@ -148,7 +151,7 @@ elif st.session_state.stage == "processing":
                 unsafe_allow_html=True,
             )
             time.sleep(0.3)
-            # sai do loop assim que começamos o processamento real
+            # interrompe o ciclo quando o ficheiro começa a ser processado
             break
 
         tmpdir = Path(tempfile.mkdtemp(dir=session_dir))
@@ -160,6 +163,7 @@ elif st.session_state.stage == "processing":
         outdirs.append(tmpdir)
         created = process_pdf(str(tmp_pdf))
 
+        # Atualiza estado visual após terminar o ficheiro
         if not created:
             placeholder.warning(f"⚠️ Nenhum ficheiro gerado para {up.name}")
             summary_lines.append(f"{up.name}: sem ficheiros gerados.")
@@ -180,7 +184,7 @@ elif st.session_state.stage == "processing":
             summary_lines.append(f"{up.name}: {req_count} requisições, {total_samples} amostras{discrep_str}.")
 
         progress.progress(i / total)
-        time.sleep(0.2)
+        time.sleep(0.3)
 
     total_time = time.time() - start_time
 
@@ -192,21 +196,37 @@ elif st.session_state.stage == "processing":
         zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
 
         st.success(f"🏁 Processamento concluído ({len(all_excel)} ficheiros Excel gerados).")
-
-        # 1️⃣ Renderiza o link de download direto (sem bloqueios)
+       
+        # Mostra o link de download (fica ativo até o utilizador clicar)
         zip_b64 = base64.b64encode(zip_bytes).decode()
+        
         st.markdown(f"""
-        <p><a href="data:application/zip;base64,{zip_b64}" download="{zip_name}"
-           style="background:#CA4300;color:#fff;padding:.5rem 1rem;border-radius:6px;
-                  text-decoration:none;font-weight:600;display:inline-block;">
+        <p>
+        <a id="download_zip" href="data:application/zip;base64,{zip_b64}"
+           download="{zip_name}"
+           style="background:#CA4300;color:#fff;padding:.5rem 1rem;
+                  border-radius:6px;text-decoration:none;font-weight:600;
+                  display:inline-block;">
            ⬇️ Descarregar resultados (ZIP)
-        </a></p>
+        </a>
+        </p>
+        
+        <script>
+        const link = window.parent.document.getElementById("download_zip");
+        if (link) {{
+          link.addEventListener("click", () => {{
+            // aguarda 1 s para garantir que o download começou
+            setTimeout(() => {{
+              window.parent.location.reload();
+            }}, 1000);
+          }});
+        }}
+        </script>
         """, unsafe_allow_html=True)
-
-        # 2️⃣ Reset imediato (sem esperar clique)
-        st.session_state.stage = "idle"
-        st.session_state.uploads = None
-        st.rerun()
+        
+        # Mantém mensagens visíveis até o clique
+        st.info("📦 Clique em “Descarregar resultados (ZIP)” para baixar o ficheiro. "
+                "Após o download, o ecrã será automaticamente reiniciado.")
 
     else:
         st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
