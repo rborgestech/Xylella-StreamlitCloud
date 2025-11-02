@@ -118,9 +118,10 @@ if start and uploads:
                 data=zip_bytes, file_name=zip_name, mime="application/zip", use_container_width=True)
         with col2:
             if st.button("🔁 Novo processamento", type="secondary", use_container_width=True):
-                st.session_state.processing = False
-                st.session_state.done = False
-                st.experimental_rerun()
+                st.markdown("""
+                    <meta http-equiv="refresh" content="0">
+                """, unsafe_allow_html=True)
+                st.stop()
 
         st.session_state.done = True
     else:
