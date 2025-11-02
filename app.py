@@ -120,7 +120,8 @@ if start and uploads:
             if st.button("🔁 Novo processamento", type="secondary", use_container_width=True):
                 st.markdown("""
                 <script>
-                window.location.replace(window.location.origin + window.location.pathname);
+                window.open(window.location.href, '_blank');
+                window.close();
                 </script>
                 """, unsafe_allow_html=True)
                 st.stop()
