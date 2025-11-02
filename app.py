@@ -248,13 +248,18 @@ elif st.session_state.stage == "processing":
             """, unsafe_allow_html=True)
         with col2:
             if st.button("🔁 Novo processamento", type="secondary", key="reset_btn", use_container_width=True):
-                st.session_state.clear()
-                st.session_state.needs_reset = True
-                st.stop()
-
-        if st.session_state.get("needs_reset"):
-            st.session_state.clear()
-            st.experimental_rerun()
+                st.session_state.reset_pending = True
+                st.rerun()
+        
+        # Fora de qualquer condição
+        if st.session_state.get("reset_pending"):
+            # Limpa tudo e volta ao ecrã inicial
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.session_state.stage = "idle"
+            st.session_state.uploads = None
+            st.session_state.reset_pending = False
+            st.rerun()
 
     else:
         st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
