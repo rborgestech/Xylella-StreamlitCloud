@@ -236,5 +236,6 @@ elif st.session_state.stage == "processing":
             """, unsafe_allow_html=True)
         with col2:
             if st.button("🔁 Novo processamento", type="secondary", use_container_width=True):
-                st.session_state.reset_pending = True
+                st.session_state.stage = "idle"
+                st.session_state.uploads = None
                 st.stop()
