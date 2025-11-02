@@ -159,8 +159,12 @@ elif st.session_state.stage == "processing":
         created = process_pdf(str(tmp_pdf))
 
         # fade-out da azul e pequena pausa
-        placeholder.markdown(active_html.replace("file-box active", "file-box active fadeOut"), unsafe_allow_html=True)
+        # 🔹 após terminar, espera 0.5s extra para manter fluidez visual
         time.sleep(0.5)
+        
+        # fade-out da caixa azul e transição imediata para o resultado
+        placeholder.markdown(active_html.replace("file-box active", "file-box active fadeOut"), unsafe_allow_html=True)
+        time.sleep(0.4)
 
         # resultado final
         if not created:
