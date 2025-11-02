@@ -163,7 +163,7 @@ elif st.session_state.stage == "processing":
         placeholder = st.empty()
 
         # Animação breve
-        for frame in itertools.cycle([".", "..", "..."]):
+        for frame in itertools.cycle(["..."]):
             placeholder.markdown(
                 f"""
                 <div class='file-box'>
@@ -200,8 +200,8 @@ elif st.session_state.stage == "processing":
                     total_samples += proc
                     if exp != proc:
                         discrepancies.append(f"{Path(fp).name} (processadas: {proc} / declaradas: {exp})")
-            discrep_str = " ⚠️ Discrepâncias em " + "; ".join(discrepancies) if discrepancies else ""
-            placeholder.success(f"✅ {up.name}: {req_count} requisição(ões), {total_samples} amostras{discrep_str}.")
+            discrep_str = " </br> ⚠️ Discrepâncias em " + "; ".join(discrepancies) if discrepancies else ""
+            placeholder.success(f"✅ {up.name}:</br><b>{req_count}</b> requisição(ões), <b>{total_samples}</b> amostras{discrep_str}.")
             summary_lines.append(f"{up.name}: {req_count} requisições, {total_samples} amostras{discrep_str}.")
 
         progress.progress(i / total)
