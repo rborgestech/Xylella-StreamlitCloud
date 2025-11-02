@@ -66,9 +66,14 @@ if "stage" not in st.session_state:
 if "uploads" not in st.session_state:
     st.session_state.uploads = None
 
+# ✅ Anti-duplicação — evita reprocessar o mesmo PDF duas vezes
+if "processed_files" not in st.session_state:
+    st.session_state.processed_files = set()
+
 def reset_app():
     st.session_state.stage = "idle"
     st.session_state.uploads = None
+    st.session_state.processed_files = set()  # limpa também o registo
 
 # ───────────────────────────────────────────────
 # Auxiliares
@@ -78,7 +83,7 @@ def read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
         wb = load_workbook(xlsx_path, data_only=True)
         ws = wb.worksheets[0]
         val = str(ws["E1"].value or "")
-        m = re.search(r"(\d+)\s*/\s*(\d+)", val)
+        m = re.search(r"(\\d+)\\s*/\\s*(\\d+)", val)
         if m: return int(m.group(1)), int(m.group(2))
     except Exception:
         pass
@@ -134,6 +139,11 @@ elif st.session_state.stage == "processing":
     progress = st.progress(0.0)
 
     for i, up in enumerate(uploads, start=1):
+        # ⚠️ Evita processar o mesmo ficheiro duas vezes
+        if up.name in st.session_state.processed_files:
+            progress.progress(i / total)
+            continue
+
         placeholder = st.empty()
         active_html = f"""
         <div class='file-box active'>
@@ -142,7 +152,6 @@ elif st.session_state.stage == "processing":
         </div>"""
         placeholder.markdown(active_html, unsafe_allow_html=True)
 
-        # 🔹 força o Streamlit a renderizar antes de processar
         flush = st.empty()
         flush.markdown("&nbsp;", unsafe_allow_html=True)
         flush.empty()
@@ -155,41 +164,13 @@ elif st.session_state.stage == "processing":
         os.environ["OUTPUT_DIR"] = str(tmpdir)
         outdirs.append(tmpdir)
 
-        # ⚙️ processamento pesado (UI já visível)
+        # ⚙️ processamento pesado
         created = process_pdf(str(tmp_pdf))
 
-        # fade-out da azul e pequena pausa
-   
-        # fade-out da caixa azul e transição imediata para o resultado
-        # 🔹 assim que termina, substitui diretamente a caixa azul pela final
-        if not created:
-            error_count += 1
-            html = f"<div class='file-box error'><div class='file-title'>📄 {up.name}</div><div class='file-sub'>❌ Erro: nenhum ficheiro gerado.</div></div>"
-            placeholder.markdown(html, unsafe_allow_html=True)
-            summary_lines.append(f"{up.name}: erro - nenhum ficheiro gerado.")
-        else:
-            req_count = len(created)
-            total_samples = 0
-            discrepancies = []
-            for fp in created:
-                dest = final_dir / Path(fp).name
-                shutil.copy(fp, dest)
-                all_excel.append(str(dest))
-                exp, proc = read_e1_counts(str(dest))
-                if exp and proc:
-                    total_samples += proc
-                    if exp != proc:
-                        discrepancies.append(f"⚠️ {Path(fp).name} (processadas: {proc} / declaradas: {exp})")
-            box_class = "warning" if discrepancies else "success"
-            if discrepancies:
-                warning_count += 1
-                discrep_html = "<div class='file-sub'>⚠️ <b>"+str(len(discrepancies))+"</b> discrepância(s):<br>"+"<br>".join(discrepancies)+"</div>"
-            else:
-                discrep_html = ""
-            html = f"<div class='file-box {box_class}'><div class='file-title'>📄 {up.name}</div><div class='file-sub'><b>{req_count}</b> requisição(ões), <b>{total_samples}</b> amostras.</div>{discrep_html}</div>"
-            placeholder.markdown(html, unsafe_allow_html=True)
+        # ✅ Marca este ficheiro como processado
+        st.session_state.processed_files.add(up.name)
 
-        # resultado final
+        # 🔹 Resultado final
         if not created:
             error_count += 1
             html = f"<div class='file-box error'><div class='file-title'>📄 {up.name}</div><div class='file-sub'>❌ Erro: nenhum ficheiro gerado.</div></div>"
@@ -224,22 +205,23 @@ elif st.session_state.stage == "processing":
                     summary_lines.append(f"   ↳ {name}")
 
         progress.progress(i / total)
-        time.sleep(0.5)  # pausa entre ficheiros
+        time.sleep(0.5)
 
     total_time = time.time() - start_ts
     debug_files = collect_debug_files(outdirs)
     lisbon_tz = pytz.timezone("Europe/Lisbon")
     now_local = datetime.now(lisbon_tz)
     total_reqs = len(all_excel)
-    total_amostras = sum(int(m.group(1)) for l in summary_lines if (m := re.search(r"(\d+)\s+amostra", l)))
+    total_amostras = sum(int(m.group(1)) for l in summary_lines if (m := re.search(r"(\\d+)\\s+amostra", l)))
 
-    summary_text = "\n".join(summary_lines)
-    summary_text += f"\n\n📊 Total: {len(all_excel)} ficheiro(s) Excel"
-    summary_text += f"\n🧪 Total de amostras: {total_amostras}"
-    summary_text += f"\n⏱️ Tempo total: {total_time:.1f} segundos"
-    summary_text += f"\n📅 Executado em: {now_local:%d/%m/%Y às %H:%M:%S}"
-    if warning_count: summary_text += f"\n⚠️ {warning_count} ficheiro(s) com discrepâncias"
-    if error_count: summary_text += f"\n❌ {error_count} ficheiro(s) com erro (sem ficheiros Excel gerados)"
+    summary_text = "\\n".join(summary_lines)
+    summary_text += f"\\n\\n📊 Total: {len(all_excel)} ficheiro(s) Excel"
+    summary_text += f"\\n🧪 Total de amostras: {total_amostras}"
+    summary_text += f"\\n⏱️ Tempo total: {total_time:.1f} segundos"
+    summary_text += f"\\n📅 Executado em: {now_local:%d/%m/%Y às %H:%M:%S}"
+    if warning_count: summary_text += f"\\n⚠️ {warning_count} ficheiro(s) com discrepâncias"
+    if error_count: summary_text += f"\\n❌ {error_count} ficheiro(s) com erro (sem ficheiros Excel gerados)"
+
     zip_bytes = build_zip_with_summary(all_excel, debug_files, summary_text)
     zip_name = f"xylella_output_{now_local:%Y%m%d_%H%M%S}.zip"
 
