@@ -189,70 +189,70 @@ elif st.session_state.stage == "processing":
     total_time = time.time() - start_time
 
     if all_excel:
-      debug_files = collect_debug_files(outdirs)
-      summary_text = "\n".join(summary_lines)
-      summary_text += f"\n\n📊 Total: {len(all_excel)} ficheiro(s) Excel\n⏱️ Tempo total: {total_time:.1f} segundos"
-      zip_bytes = build_zip_with_summary(all_excel, debug_files, summary_text)
-      zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
-  
-      # Cálculo correto do total de amostras
-      total_reqs = len(all_excel)
-      total_amostras = 0
-      for line in summary_lines:
-          match = re.search(r"(\d+)\s+amostra", line)
-          if match:
-              total_amostras += int(match.group(1))
-  
-      # Secção final centralizada
-      st.markdown("""
-      <style>
-      .result-box {
-          text-align: center;
-          margin-top: 1.5rem;
-          margin-bottom: 1rem;
-      }
-      .clean-btn {
-          background-color: #fff !important;
-          border: 1px solid #ccc !important;
-          color: #333 !important;
-          font-weight: 600 !important;
-          border-radius: 8px !important;
-          padding: 0.5rem 1.2rem !important;
-          transition: all 0.2s ease-in-out !important;
-      }
-      .clean-btn:hover {
-          border-color: #999 !important;
-          color: #000 !important;
-      }
-      </style>
-      """, unsafe_allow_html=True)
-  
-      st.markdown("<div class='result-box'><h3>🏁 Processamento concluído!</h3></div>", unsafe_allow_html=True)
-      st.markdown(f"""
-      <div class='result-box'>
-          Foram gerados <b>{total_reqs}</b> ficheiro(s) Excel, com um total de <b>{total_amostras}</b> amostras processadas.<br>
-          Tempo total de execução: <b>{total_time:.1f} segundos</b>.
-      </div>
-      """, unsafe_allow_html=True)
-  
-      zip_b64 = base64.b64encode(zip_bytes).decode()
-  
-      col1, col2 = st.columns(2)
-      with col1:
-          st.markdown(f"""
-          <a href="data:application/zip;base64,{zip_b64}" download="{zip_name}">
-              <button class="clean-btn" style="width:100%;">⬇️ Descarregar resultados (ZIP)</button>
-          </a>
-          """, unsafe_allow_html=True)
-      with col2:
-          if st.button("🔁 Novo processamento", type="secondary", key="reset_btn", use_container_width=True):
-              st.session_state.stage = "idle"
-              st.session_state.uploads = None
-              st.experimental_rerun()
-  
-  else:
-      st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
-      shutil.rmtree(session_dir, ignore_errors=True)
+        debug_files = collect_debug_files(outdirs)
+        summary_text = "\n".join(summary_lines)
+        summary_text += f"\n\n📊 Total: {len(all_excel)} ficheiro(s) Excel\n⏱️ Tempo total: {total_time:.1f} segundos"
+        zip_bytes = build_zip_with_summary(all_excel, debug_files, summary_text)
+        zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
+    
+        # Cálculo correto do total de amostras
+        total_reqs = len(all_excel)
+        total_amostras = 0
+        for line in summary_lines:
+            match = re.search(r"(\d+)\s+amostra", line)
+            if match:
+                total_amostras += int(match.group(1))
+    
+        # Secção final centralizada
+        st.markdown("""
+        <style>
+        .result-box {
+            text-align: center;
+            margin-top: 1.5rem;
+            margin-bottom: 1rem;
+        }
+        .clean-btn {
+            background-color: #fff !important;
+            border: 1px solid #ccc !important;
+            color: #333 !important;
+            font-weight: 600 !important;
+            border-radius: 8px !important;
+            padding: 0.5rem 1.2rem !important;
+            transition: all 0.2s ease-in-out !important;
+        }
+        .clean-btn:hover {
+            border-color: #999 !important;
+            color: #000 !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+    
+        st.markdown("<div class='result-box'><h3>🏁 Processamento concluído!</h3></div>", unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class='result-box'>
+            Foram gerados <b>{total_reqs}</b> ficheiro(s) Excel, com um total de <b>{total_amostras}</b> amostras processadas.<br>
+            Tempo total de execução: <b>{total_time:.1f} segundos</b>.
+        </div>
+        """, unsafe_allow_html=True)
+    
+        zip_b64 = base64.b64encode(zip_bytes).decode()
+    
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown(f"""
+            <a href="data:application/zip;base64,{zip_b64}" download="{zip_name}">
+                <button class="clean-btn" style="width:100%;">⬇️ Descarregar resultados (ZIP)</button>
+            </a>
+            """, unsafe_allow_html=True)
+        with col2:
+            if st.button("🔁 Novo processamento", type="secondary", key="reset_btn", use_container_width=True):
+                st.session_state.stage = "idle"
+                st.session_state.uploads = None
+                st.experimental_rerun()
+    
+    else:
+        st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
+        shutil.rmtree(session_dir, ignore_errors=True)
       st.session_state.stage = "idle"
       st.session_state.uploads = None
       st.experimental_rerun()
