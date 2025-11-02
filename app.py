@@ -145,13 +145,10 @@ def run_processing(uploads):
             )
         with col2:
             if st.button("🔁 Novo processamento", type="secondary", use_container_width=True):
-                # Faz refresh completo e reconstrói uploader
+                # Limpa estado e faz reload completo da página
+                st.session_state.clear()
                 st.markdown("""
-                <script>
-                setTimeout(function() {
-                    window.location.reload(true);
-                }, 300);
-                </script>
+                <meta http-equiv="refresh" content="0">
                 """, unsafe_allow_html=True)
                 st.stop()
 
