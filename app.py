@@ -189,44 +189,54 @@ elif st.session_state.stage == "processing":
     total_time = time.time() - start_time
 
     if all_excel:
-        debug_files = collect_debug_files(outdirs)
-        summary_text = "\n".join(summary_lines)
-        summary_text += f"\n\n📊 Total: {len(all_excel)} ficheiro(s) Excel\n⏱️ Tempo total: {total_time:.1f} segundos"
-        zip_bytes = build_zip_with_summary(all_excel, debug_files, summary_text)
-        zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
+      debug_files = collect_debug_files(outdirs)
+      summary_text = "\n".join(summary_lines)
+      summary_text += f"\n\n📊 Total: {len(all_excel)} ficheiro(s) Excel\n⏱️ Tempo total: {total_time:.1f} segundos"
+      zip_bytes = build_zip_with_summary(all_excel, debug_files, summary_text)
+      zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
+      
+      # Dados do resumo
+      total_reqs = len(all_excel)
+      total_amostras = sum(int(re.search(r"(\d+)", line).group(1)) 
+                           for line in summary_lines if re.search(r"(\d+)", line))
+      
+      # Secção final
+      st.markdown("<hr>", unsafe_allow_html=True)
+      st.markdown("<h3 style='text-align:center;'>🏁 Processamento concluído!</h3>", unsafe_allow_html=True)
+      st.markdown(f"""
+      <div style='text-align:center; margin-top:10px; font-size:0.95rem;'>
+          <p>Foram gerados <b>{total_reqs}</b> ficheiro(s) Excel, com um total de <b>{total_amostras}</b> amostras processadas.</p>
+          <p>Tempo total de execução: <b>{total_time:.1f} segundos</b>.</p>
+      </div>
+      """, unsafe_allow_html=True)
+      
+      # Converte o ZIP para base64
+      zip_b64 = base64.b64encode(zip_bytes).decode()
+      
+      # Botões lado a lado
+      col1, col2 = st.columns(2)
+      with col1:
+          st.markdown(f"""
+          <a href="data:application/zip;base64,{zip_b64}" download="{zip_name}"
+             style="background:#CA4300;color:#fff;padding:.6rem 1.2rem;
+                    border-radius:8px;text-decoration:none;font-weight:600;
+                    display:inline-block;text-align:center;width:100%;">
+             ⬇️ Descarregar resultados (ZIP)
+          </a>
+          """, unsafe_allow_html=True)
+      with col2:
+          if st.button("🔁 Novo processamento", type="primary", use_container_width=True):
+              st.session_state.stage = "idle"
+              st.session_state.uploads = None
+              st.rerun()
+    
+    else:
+    st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
+    shutil.rmtree(session_dir, ignore_errors=True)
+    st.session_state.stage = "idle"
+    st.session_state.uploads = None
+    st.rerun()
 
-        st.success(f"🏁 Processamento concluído ({len(all_excel)} ficheiros Excel gerados).")
-       
-        # Mostra o link de download (fica ativo até o utilizador clicar)
-        zip_b64 = base64.b64encode(zip_bytes).decode()
-        
-        st.markdown(f"""
-        <p>
-        <a id="download_zip" href="data:application/zip;base64,{zip_b64}"
-           download="{zip_name}"
-           style="background:#CA4300;color:#fff;padding:.5rem 1rem;
-                  border-radius:6px;text-decoration:none;font-weight:600;
-                  display:inline-block;">
-           ⬇️ Descarregar resultados (ZIP)
-        </a>
-        </p>
-        
-        <script>
-        const link = window.parent.document.getElementById("download_zip");
-        if (link) {{
-          link.addEventListener("click", () => {{
-            // aguarda 1 s para garantir que o download começou
-            setTimeout(() => {{
-              window.parent.location.reload();
-            }}, 1000);
-          }});
-        }}
-        </script>
-        """, unsafe_allow_html=True)
-        
-        # Mantém mensagens visíveis até o clique
-        st.info("📦 Clique em “Descarregar resultados (ZIP)” para baixar o ficheiro. "
-                "Após o download, o ecrã será automaticamente reiniciado.")
 
     else:
         st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
