@@ -20,16 +20,16 @@ st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 fich
 st.markdown("""
 <style>
 .stButton > button[kind="primary"] {
-  background-color: #a13700 !important;
-  border: 1px solid #a13700 !important;
+  background-color: #CA4300 !important;
+  border: 1px solid #CA4300 !important;
   color: #fff !important;
   font-weight: 600 !important;
   border-radius: 6px !important;
   transition: background-color 0.2s ease-in-out !important;
 }
 .stButton > button[kind="primary"]:hover {
-  background-color: #a13700 !important;
-  border-color: #a13700 !important;
+  background-color: #A13700 !important;
+  border-color: #A13700 !important;
 }
 [data-testid="stFileUploader"] > div:first-child {
   border: 2px dashed #CA4300 !important;
@@ -232,17 +232,29 @@ elif st.session_state.stage == "processing":
             )
             placeholder.markdown(result_html, unsafe_allow_html=True)
 
-        st.empty()
         progress.progress(i / total)
-        st.write("")  # força refresh
         time.sleep(0.05)
 
+    # 🔄 Refresh imediato no fim do processamento
+    refresh_placeholder = st.empty()
+    refresh_placeholder.markdown(
+        "<div style='text-align:center;color:#2B6CB0;font-weight:600;'>Finalizando processamento...</div>",
+        unsafe_allow_html=True,
+    )
+    st.progress(1.0)
+    time.sleep(0.3)
+    refresh_placeholder.empty()
+    st.experimental_rerun()
+
+    # ──────────────── RESUMO FINAL ────────────────
     total_time = time.time() - start_time
     debug_files = collect_debug_files(outdirs)
     lisbon_tz = pytz.timezone("Europe/Lisbon")
     now_local = datetime.now(lisbon_tz)
     total_reqs = len(all_excel)
-    total_amostras = sum(int(m.group(1)) for l in summary_lines if (m := re.search(r"(\\d+)\\s+amostra", l)))
+
+    # ✅ regex corrigida
+    total_amostras = sum(int(m.group(1)) for l in summary_lines if (m := re.search(r"(\d+)\s+amostra", l)))
 
     summary_text = "\n".join(summary_lines)
     summary_text += f"\n\n📊 Total: {len(all_excel)} ficheiro(s) Excel"
