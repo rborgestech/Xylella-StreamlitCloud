@@ -247,7 +247,15 @@ elif st.session_state.stage == "processing":
                 <button class="clean-btn" style="width:100%;">⬇️ Descarregar resultados (ZIP)</button>
             </a>
             """, unsafe_allow_html=True)
+        def reset_app():
+            st.session_state.stage = "idle"
+            st.session_state.uploads = None
+        
+        # no final do processamento:
         with col2:
-            if st.button("🔁 Novo processamento", type="secondary", use_container_width=True):
-                render_home()  # regressa de imediato ao ecrã inicial
-                st.stop()
+            st.button(
+                "🔁 Novo processamento",
+                type="secondary",
+                use_container_width=True,
+                on_click=reset_app
+            )
