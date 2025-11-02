@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import streamlit as st
-import tempfile, os, shutil, time, io, zipfile, re, base64
+import tempfile, os, shutil, time, io, zipfile, re, base64, itertools
 from pathlib import Path
 from datetime import datetime
 from typing import List, Tuple
@@ -63,8 +63,6 @@ if "stage" not in st.session_state:
     st.session_state.stage = "idle"
 if "uploads" not in st.session_state:
     st.session_state.uploads = None
-if "download_clicked" not in st.session_state:
-    st.session_state.download_clicked = False
 
 # ───────────────────────────────────────────────
 # Funções auxiliares
@@ -81,7 +79,7 @@ def read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
         pass
     return None, None
 
-def collect_debug_files(output_dirs: List[Path]) -> List[str]:
+def collect_debug_files(output_dirs: list[Path]) -> list[str]:
     debug_files = []
     for pattern in ["*_ocr_debug.txt", "process_log.csv", "process_summary_*.txt"]:
         for d in output_dirs:
@@ -89,7 +87,7 @@ def collect_debug_files(output_dirs: List[Path]) -> List[str]:
                 debug_files.append(str(f))
     return debug_files
 
-def build_zip_with_summary(excel_files: List[str], debug_files: List[str], summary_text: str) -> bytes:
+def build_zip_with_summary(excel_files: list[str], debug_files: list[str], summary_text: str) -> bytes:
     mem = io.BytesIO()
     with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as z:
         for p in excel_files:
@@ -105,14 +103,6 @@ def build_zip_with_summary(excel_files: List[str], debug_files: List[str], summa
 # ───────────────────────────────────────────────
 # Interface principal
 # ───────────────────────────────────────────────
-def reset_interface():
-    """Limpa estado e volta ao ecrã inicial."""
-    st.session_state.stage = "idle"
-    st.session_state.uploads = None
-    st.session_state.download_clicked = False
-    st.rerun()
-
-# Página inicial
 if st.session_state.stage == "idle":
     uploads = st.file_uploader(
         "📂 Carrega um ou vários PDFs",
@@ -129,7 +119,6 @@ if st.session_state.stage == "idle":
     else:
         st.info("💡 Carrega um ficheiro PDF para ativar o botão de processamento.")
 
-# Página de processamento
 elif st.session_state.stage == "processing":
     st.info("⏳ A processar ficheiros... aguarde até o processo terminar.")
     st.divider()
@@ -145,15 +134,22 @@ elif st.session_state.stage == "processing":
     progress = st.progress(0)
 
     for i, up in enumerate(uploads, start=1):
-        st.markdown(
-            f"""
-            <div class='file-box'>
-                <div class='file-title'>📄 {up.name}</div>
-                <div class='file-sub'>Ficheiro {i} de {total} — a processar...</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        placeholder = st.empty()
+
+        # Animação simples dos "..."
+        for frame in itertools.cycle([".", "..", "..."]):
+            placeholder.markdown(
+                f"""
+                <div class='file-box'>
+                    <div class='file-title'>📄 {up.name}</div>
+                    <div class='file-sub'>Ficheiro {i} de {total} — a processar{frame}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            time.sleep(0.3)
+            # sai do loop assim que começamos o processamento real
+            break
 
         tmpdir = Path(tempfile.mkdtemp(dir=session_dir))
         tmp_pdf = tmpdir / up.name
@@ -165,7 +161,7 @@ elif st.session_state.stage == "processing":
         created = process_pdf(str(tmp_pdf))
 
         if not created:
-            st.warning(f"⚠️ Nenhum ficheiro gerado para {up.name}")
+            placeholder.warning(f"⚠️ Nenhum ficheiro gerado para {up.name}")
             summary_lines.append(f"{up.name}: sem ficheiros gerados.")
         else:
             req_count = len(created)
@@ -180,10 +176,11 @@ elif st.session_state.stage == "processing":
                     if exp != proc:
                         discrepancies.append(f"{Path(fp).name} (processadas: {proc} / declaradas: {exp})")
             discrep_str = " ⚠️ Discrepâncias em " + "; ".join(discrepancies) if discrepancies else ""
-            st.success(f"✅ {up.name}: {req_count} requisição(ões), {total_samples} amostras{discrep_str}.")
+            placeholder.success(f"✅ {up.name}: {req_count} requisição(ões), {total_samples} amostras{discrep_str}.")
             summary_lines.append(f"{up.name}: {req_count} requisições, {total_samples} amostras{discrep_str}.")
+
         progress.progress(i / total)
-        time.sleep(0.3)
+        time.sleep(0.2)
 
     total_time = time.time() - start_time
 
@@ -196,22 +193,24 @@ elif st.session_state.stage == "processing":
 
         st.success(f"🏁 Processamento concluído ({len(all_excel)} ficheiros Excel gerados).")
 
-        # Botão de download que dispara reset imediato
-        clicked = st.download_button(
-            "⬇️ Descarregar resultados (ZIP)",
-            data=zip_bytes,
-            file_name=zip_name,
-            mime="application/zip"
-        )
+        # 1️⃣ Renderiza o link de download direto (sem bloqueios)
+        zip_b64 = base64.b64encode(zip_bytes).decode()
+        st.markdown(f"""
+        <p><a href="data:application/zip;base64,{zip_b64}" download="{zip_name}"
+           style="background:#CA4300;color:#fff;padding:.5rem 1rem;border-radius:6px;
+                  text-decoration:none;font-weight:600;display:inline-block;">
+           ⬇️ Descarregar resultados (ZIP)
+        </a></p>
+        """, unsafe_allow_html=True)
 
-        # Assim que o botão é clicado → reset automático
-        if clicked:
-            st.session_state.download_clicked = True
-
-        if st.session_state.download_clicked:
-            reset_interface()
+        # 2️⃣ Reset imediato (sem esperar clique)
+        st.session_state.stage = "idle"
+        st.session_state.uploads = None
+        st.rerun()
 
     else:
         st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
         shutil.rmtree(session_dir, ignore_errors=True)
-        reset_interface()
+        st.session_state.stage = "idle"
+        st.session_state.uploads = None
+        st.rerun()
