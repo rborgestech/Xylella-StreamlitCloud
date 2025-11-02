@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import streamlit as st
-import tempfile, os, shutil, time, io, zipfile, re, base64, pytz
+import tempfile, os, shutil, io, zipfile, re, base64, pytz
 from pathlib import Path
 from datetime import datetime
 from typing import Tuple
@@ -15,7 +15,7 @@ st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 ficheiro Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# CSS — estilo azul + animações suaves
+# CSS — estilo azul + animações suaves e rápidas
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -37,27 +37,27 @@ st.markdown("""
   padding: 1rem !important;
 }
 
-/* Caixas de resultado */
+/* Caixas */
 .file-box {
   border-radius: 8px;
   padding: 0.6rem 1rem;
   margin-bottom: 0.5rem;
   opacity: 0;
-  animation: fadeIn 0.6s ease forwards;
+  animation: fadeIn 0.2s ease forwards;
 }
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(-5px); }
+  from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
 }
 .fadeOut {
-  animation: fadeOut 0.4s ease forwards;
+  animation: fadeOut 0.2s ease forwards;
 }
 @keyframes fadeOut {
   from { opacity: 1; transform: translateY(0); }
-  to { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 0; transform: translateY(-2px); }
 }
 
-/* Cores de estado */
+/* Cores */
 .file-box.success {
   background-color: #e6f9ee;
   border-left: 4px solid #1a7f37;
@@ -83,7 +83,7 @@ st.markdown("""
 .dots::after {
   content: '...';
   display: inline-block;
-  animation: dots 1.5s steps(4, end) infinite;
+  animation: dots 1.2s steps(4, end) infinite;
 }
 @keyframes dots {
   0%, 20% { color: rgba(42, 67, 101, 0); text-shadow: .25em 0 0 rgba(42, 67, 101, 0), .5em 0 0 rgba(42, 67, 101, 0); }
@@ -180,19 +180,18 @@ elif st.session_state.stage == "processing":
     session_dir = tempfile.mkdtemp(prefix="xylella_session_")
     final_dir = Path.cwd() / "output_final"
     final_dir.mkdir(exist_ok=True)
-    start_time = time.time()
+    start_time = datetime.now()
 
     all_excel, outdirs, summary_lines = [], [], []
-    error_count = 0
-    warning_count = 0
-
+    error_count = warning_count = 0
     total = len(uploads)
     progress = st.progress(0)
 
     for i, up in enumerate(uploads, start=1):
+        progress.progress((i - 1) / total)
         placeholder = st.empty()
-        
-        # 1) Mostra a caixa azul (visível durante TODO o processamento)
+
+        # Mostra caixa azul
         active_html = f"""
         <div class='file-box active'>
           <div class='file-title'>📄 {up.name}</div>
@@ -200,26 +199,25 @@ elif st.session_state.stage == "processing":
         </div>
         """
         placeholder.markdown(active_html, unsafe_allow_html=True)
-        
-        # 2) PROCESSA (bloqueante). A caixa azul continua visível enquanto isto corre.
+
         tmpdir = Path(tempfile.mkdtemp(dir=session_dir))
         tmp_pdf = tmpdir / up.name
         with open(tmp_pdf, "wb") as f:
             f.write(up.getbuffer())
-        
+
         os.environ["OUTPUT_DIR"] = str(tmpdir)
         outdirs.append(tmpdir)
-        created = process_pdf(str(tmp_pdf))   # ← a UI mantém a caixa azul durante esta chamada
-        
-        # 3) (opcional) fade-out rápido da caixa azul, já DEPOIS do processamento
+        created = process_pdf(str(tmp_pdf))  # Mantém caixa azul visível durante o processamento
+
+        # Fade rápido
         placeholder.markdown(
             active_html.replace("file-box active", "file-box active fadeOut"),
             unsafe_allow_html=True,
         )
-        time.sleep(0.15)
-        
-        # 4) Agora escreve a caixa final (success/warning/error) no MESMO placeholder
+
+        # Resultado final
         if not created:
+            error_count += 1
             html = (
                 f"<div class='file-box error'>"
                 f"<div class='file-title'>📄 {up.name}</div>"
@@ -239,11 +237,10 @@ elif st.session_state.stage == "processing":
                 if exp and proc:
                     total_samples += proc
                     if exp != proc:
-                        discrepancies.append(
-                            f"{Path(fp).name} (processadas: {proc} / declaradas: {exp})"
-                        )
-        
+                        discrepancies.append(f"{Path(fp).name} (processadas: {proc} / declaradas: {exp})")
+
             if discrepancies:
+                warning_count += 1
                 box_class = "warning"
                 discrep_html = (
                     "<div class='file-sub'>⚠️ <b>"
@@ -252,16 +249,12 @@ elif st.session_state.stage == "processing":
                     + "<br>".join(discrepancies)
                     + "</div>"
                 )
-                summary_lines.append(
-                    f"{up.name}: {req_count} requisições, {total_samples} amostras ⚠️ {len(discrepancies)} discrepância(s)."
-                )
+                summary_lines.append(f"{up.name}: {req_count} requisições, {total_samples} amostras ⚠️ {len(discrepancies)} discrepância(s).")
             else:
                 box_class = "success"
                 discrep_html = ""
-                summary_lines.append(
-                    f"{up.name}: {req_count} requisições, {total_samples} amostras"
-                )
-        
+                summary_lines.append(f"{up.name}: {req_count} requisições, {total_samples} amostras")
+
             for fp in created:
                 excel_name = Path(fp).name
                 exp, proc = read_e1_counts(str(fp))
@@ -269,47 +262,24 @@ elif st.session_state.stage == "processing":
                     summary_lines.append(f"   ↳ ⚠️ {excel_name} (processadas: {proc} / declaradas: {exp})")
                 else:
                     summary_lines.append(f"   ↳ {excel_name}")
-        
-            result_html = (
+
+            html = (
                 f"<div class='file-box {box_class}'>"
                 f"<div class='file-title'>📄 {up.name}</div>"
                 f"<div class='file-sub'><b>{req_count}</b> requisição(ões), "
                 f"<b>{total_samples}</b> amostras.</div>"
-                f"{discrep_html}"
-                f"</div>"
+                f"{discrep_html}</div>"
             )
-            placeholder.markdown(result_html, unsafe_allow_html=True)
-
-
-            # Adiciona ao resumo detalhado
-            if discrepancies:
-                summary_lines.append(
-                    f"{up.name}: {req_count} requisições, {total_samples} amostras ⚠️ {len(discrepancies)} discrepância(s)."
-                )
-            else:
-                summary_lines.append(
-                    f"{up.name}: {req_count} requisições, {total_samples} amostras"
-                )
-
-            for fp in created:
-                excel_name = Path(fp).name
-                exp, proc = read_e1_counts(str(fp))
-                if exp and proc and exp != proc:
-                    summary_lines.append(f"   ↳ ⚠️ {excel_name} (processadas: {proc} / declaradas: {exp})")
-                else:
-                    summary_lines.append(f"   ↳ {excel_name}")
+            placeholder.markdown(html, unsafe_allow_html=True)
 
         progress.progress(i / total)
-        time.sleep(0.2)
 
-    total_time = time.time() - start_time
+    total_time = (datetime.now() - start_time).total_seconds()
+    lisbon_tz = pytz.timezone("Europe/Lisbon")
+    now_local = datetime.now(lisbon_tz)
 
-    # ──────────────── SECÇÃO FINAL ────────────────
     if all_excel:
         debug_files = collect_debug_files(outdirs)
-        lisbon_tz = pytz.timezone("Europe/Lisbon")
-        now_local = datetime.now(lisbon_tz)
-
         total_reqs = len(all_excel)
         total_amostras = sum(
             int(m.group(1)) for l in summary_lines if (m := re.search(r"(\d+)\s+amostra", l))
