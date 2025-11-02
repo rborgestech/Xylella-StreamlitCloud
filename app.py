@@ -159,12 +159,35 @@ elif st.session_state.stage == "processing":
         created = process_pdf(str(tmp_pdf))
 
         # fade-out da azul e pequena pausa
-        # 🔹 após terminar, espera 0.5s extra para manter fluidez visual
-        time.sleep(0.5)
-        
+   
         # fade-out da caixa azul e transição imediata para o resultado
-        placeholder.markdown(active_html.replace("file-box active", "file-box active fadeOut"), unsafe_allow_html=True)
-        time.sleep(0.4)
+        # 🔹 assim que termina, substitui diretamente a caixa azul pela final
+        if not created:
+            error_count += 1
+            html = f"<div class='file-box error'><div class='file-title'>📄 {up.name}</div><div class='file-sub'>❌ Erro: nenhum ficheiro gerado.</div></div>"
+            placeholder.markdown(html, unsafe_allow_html=True)
+            summary_lines.append(f"{up.name}: erro - nenhum ficheiro gerado.")
+        else:
+            req_count = len(created)
+            total_samples = 0
+            discrepancies = []
+            for fp in created:
+                dest = final_dir / Path(fp).name
+                shutil.copy(fp, dest)
+                all_excel.append(str(dest))
+                exp, proc = read_e1_counts(str(dest))
+                if exp and proc:
+                    total_samples += proc
+                    if exp != proc:
+                        discrepancies.append(f"⚠️ {Path(fp).name} (processadas: {proc} / declaradas: {exp})")
+            box_class = "warning" if discrepancies else "success"
+            if discrepancies:
+                warning_count += 1
+                discrep_html = "<div class='file-sub'>⚠️ <b>"+str(len(discrepancies))+"</b> discrepância(s):<br>"+"<br>".join(discrepancies)+"</div>"
+            else:
+                discrep_html = ""
+            html = f"<div class='file-box {box_class}'><div class='file-title'>📄 {up.name}</div><div class='file-sub'><b>{req_count}</b> requisição(ões), <b>{total_samples}</b> amostras.</div>{discrep_html}</div>"
+            placeholder.markdown(html, unsafe_allow_html=True)
 
         # resultado final
         if not created:
