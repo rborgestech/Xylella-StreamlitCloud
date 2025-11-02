@@ -1,21 +1,19 @@
 # -*- coding: utf-8 -*-
 import streamlit as st
-import tempfile, os, shutil, time, io, zipfile, re, base64, itertools, pytz
+import tempfile, os, shutil, time, io, zipfile, re
 from pathlib import Path
 from datetime import datetime
-from typing import List, Tuple
-from openpyxl import load_workbook
-from xylella_processor import process_pdf
+from xylella_processor import process_pdf, build_zip
 
 # ───────────────────────────────────────────────
 # Configuração base
 # ───────────────────────────────────────────────
 st.set_page_config(page_title="Xylella Processor", page_icon="🧪", layout="centered")
 st.title("🧪 Xylella Processor")
-st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 ficheiro Excel por requisição.")
+st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# CSS — estilo limpo e azul
+# CSS — laranja #CA4300 e clean
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -25,7 +23,6 @@ st.markdown("""
   color: #fff !important;
   font-weight: 600 !important;
   border-radius: 6px !important;
-  transition: background-color 0.2s ease-in-out !important;
 }
 .stButton > button[kind="primary"]:hover {
   background-color: #A13700 !important;
@@ -36,15 +33,6 @@ st.markdown("""
   border-radius: 10px !important;
   padding: 1rem !important;
 }
-.file-box {
-  background-color: #E8F1FB;
-  border-left: 4px solid #2B6CB0;
-  padding: 0.6rem 1rem;
-  border-radius: 8px;
-  margin-bottom: 0.5rem;
-}
-.file-title { font-size: 0.9rem; font-weight: 600; color: #1A365D; }
-.file-sub { font-size: 0.8rem; color: #2A4365; }
 .clean-btn {
   background-color: #fff !important;
   border: 1px solid #ccc !important;
@@ -61,167 +49,86 @@ st.markdown("""
 # ───────────────────────────────────────────────
 # Estado
 # ───────────────────────────────────────────────
-if "stage" not in st.session_state:
-    st.session_state.stage = "home"
-if "uploads" not in st.session_state:
-    st.session_state.uploads = None
+if "processing" not in st.session_state:
+    st.session_state.processing = False
+if "done" not in st.session_state:
+    st.session_state.done = False
 
 # ───────────────────────────────────────────────
-# Funções auxiliares
+# Upload
 # ───────────────────────────────────────────────
-def read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
-    try:
-        wb = load_workbook(xlsx_path, data_only=True)
-        ws = wb.worksheets[0]
-        val = str(ws["E1"].value or "")
-        m = re.search(r"(\d+)\s*/\s*(\d+)", val)
-        if m:
-            return int(m.group(1)), int(m.group(2))
-    except Exception:
-        pass
-    return None, None
-
-
-def collect_debug_files(output_dirs: list[Path]) -> list[str]:
-    debug_files = []
-    for pattern in ["*_ocr_debug.txt", "process_log.csv", "process_summary_*.txt"]:
-        for d in output_dirs:
-            for f in d.glob(pattern):
-                debug_files.append(str(f))
-    return debug_files
-
-
-def build_zip_with_summary(excel_files: list[str], debug_files: list[str], summary_text: str) -> bytes:
-    mem = io.BytesIO()
-    with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as z:
-        for p in excel_files:
-            if os.path.exists(p):
-                z.write(p, arcname=os.path.basename(p))
-        for d in debug_files:
-            if os.path.exists(d):
-                z.write(d, arcname=f"debug/{os.path.basename(d)}")
-        z.writestr("summary.txt", summary_text)
-    mem.seek(0)
-    return mem.read()
+if not st.session_state.processing and not st.session_state.done:
+    uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True)
+    start = st.button("📄 Processar ficheiros de Input", type="primary", disabled=not uploads)
+else:
+    uploads, start = None, False
 
 # ───────────────────────────────────────────────
-# Estrutura principal — 2 secções independentes
+# Execução principal
 # ───────────────────────────────────────────────
-stage = st.session_state.get("stage", "home")
+if start and uploads:
+    st.session_state.processing = True
+    st.info("⚙️ A processar... isto pode demorar alguns segundos.")
+    all_excel = []
 
-# ==========================================================
-# 1️⃣ SECÇÃO INICIAL (UPLOAD)
-# ==========================================================
-if stage == "home":
-    uploads = st.file_uploader(
-        "📂 Carrega um ou vários PDFs",
-        type=["pdf"],
-        accept_multiple_files=True,
-        key="file_uploader"
-    )
-
-    if uploads:
-        if st.button("📄 Processar ficheiros de Input", type="primary"):
-            st.session_state.uploads = uploads
-            st.session_state.stage = "processing"
-            st.rerun()
-    else:
-        st.info("💡 Carrega um ficheiro PDF para ativar o botão de processamento.")
-
-# ==========================================================
-# 2️⃣ SECÇÃO DE PROCESSAMENTO
-# ==========================================================
-elif stage == "processing":
-    st.info("⏳ A processar ficheiros... aguarde até o processo terminar.")
-
-    uploads = st.session_state.uploads
-    session_dir = tempfile.mkdtemp(prefix="xylella_session_")
     final_dir = Path.cwd() / "output_final"
     final_dir.mkdir(exist_ok=True)
-    start_time = time.time()
-
-    all_excel, outdirs, summary_lines = [], [], []
-    total = len(uploads)
     progress = st.progress(0)
+    total = len(uploads)
 
     for i, up in enumerate(uploads, start=1):
-        placeholder = st.empty()
-        placeholder.markdown(
-            f"""
-            <div class='file-box'>
-                <div class='file-title'>📄 {up.name}</div>
-                <div class='file-sub'>Ficheiro {i} de {total} — a processar...</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        tmpdir = Path(tempfile.mkdtemp(dir=session_dir))
-        tmp_pdf = tmpdir / up.name
-        with open(tmp_pdf, "wb") as f:
+        st.markdown(f"### 📄 {up.name}")
+        st.write(f"⏳ A processar ficheiro {i}/{total}...")
+        tmpdir = tempfile.mkdtemp()
+        tmp_path = os.path.join(tmpdir, up.name)
+        with open(tmp_path, "wb") as f:
             f.write(up.getbuffer())
 
-        os.environ["OUTPUT_DIR"] = str(tmpdir)
-        outdirs.append(tmpdir)
-        created = process_pdf(str(tmp_pdf))
+        os.environ["OUTPUT_DIR"] = tmpdir
+        created = process_pdf(tmp_path)
 
         if not created:
-            placeholder.warning(f"⚠️ Nenhum ficheiro gerado para {up.name}")
-            summary_lines.append(f"{up.name}: sem ficheiros gerados.")
+            st.warning(f"⚠️ Nenhum ficheiro gerado para {up.name}")
         else:
-            req_count = len(created)
-            total_samples, discrepancies = 0, []
             for fp in created:
                 dest = final_dir / Path(fp).name
                 shutil.copy(fp, dest)
                 all_excel.append(str(dest))
-                exp, proc = read_e1_counts(str(dest))
-                if exp and proc:
-                    total_samples += proc
-                    if exp != proc:
-                        discrepancies.append(f"{Path(fp).name} (processadas: {proc} / declaradas: {exp})")
-            discrep_str = " ⚠️ Discrepâncias em " + "; ".join(discrepancies) if discrepancies else ""
-            placeholder.success(f"✅ {up.name}: {req_count} requisição(ões), {total_samples} amostras{discrep_str}.")
-            summary_lines.append(f"{up.name}: {req_count} requisições, {total_samples} amostras{discrep_str}.")
+                st.success(f"✅ {Path(fp).name} gravado")
 
         progress.progress(i / total)
-        time.sleep(0.2)
-
-    total_time = time.time() - start_time
+        time.sleep(0.3)
 
     if all_excel:
-        debug_files = collect_debug_files(outdirs)
-        lisbon_tz = pytz.timezone("Europe/Lisbon")
-        now_local = datetime.now(lisbon_tz)
+        zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
+        zip_bytes = build_zip(all_excel)
 
-        summary_text = "\n".join(summary_lines)
-        summary_text += f"\n\n📊 Total: {len(all_excel)} ficheiro(s) Excel"
-        summary_text += f"\n⏱️ Tempo total: {total_time:.1f} segundos"
-        summary_text += f"\n📅 Executado em: {now_local:%d/%m/%Y às %H:%M:%S}"
-        zip_bytes = build_zip_with_summary(all_excel, debug_files, summary_text)
-        zip_name = f"xylella_output_{now_local:%Y%m%d_%H%M%S}.zip"
-
-        zip_b64 = base64.b64encode(zip_bytes).decode()
-
+        lisbon_time = datetime.now().strftime("%d/%m/%Y às %H:%M:%S")
         st.markdown(f"""
         <div style='text-align:center;margin-top:1.5rem;'>
             <h3>🏁 Processamento concluído!</h3>
             <p>Foram gerados <b>{len(all_excel)}</b> ficheiro(s) Excel.<br>
-            Tempo total de execução: <b>{total_time:.1f} segundos</b>.<br>
-            Executado em: <b>{now_local:%d/%m/%Y às %H:%M:%S}</b>.</p>
+            Executado em: <b>{lisbon_time}</b>.</p>
         </div>
         """, unsafe_allow_html=True)
 
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown(f"""
-            <a href="data:application/zip;base64,{zip_b64}" download="{zip_name}">
-                <button class="clean-btn" style="width:100%;">⬇️ Descarregar resultados (ZIP)</button>
-            </a>
-            """, unsafe_allow_html=True)
-
+            st.download_button("⬇️ Descarregar resultados (ZIP)",
+                data=zip_bytes, file_name=zip_name, mime="application/zip", use_container_width=True)
         with col2:
             if st.button("🔁 Novo processamento", type="secondary", use_container_width=True):
-                st.session_state.stage = "home"
-                st.session_state.uploads = None
-                st.rerun()
+                st.session_state.processing = False
+                st.session_state.done = False
+                st.experimental_rerun()
+
+        st.session_state.done = True
+    else:
+        st.error("⚠️ Nenhum ficheiro Excel foi detetado.")
+        st.session_state.processing = False
+
+# ───────────────────────────────────────────────
+# Ecrã inicial pós-reset
+# ───────────────────────────────────────────────
+if st.session_state.done and not st.session_state.processing:
+    st.markdown("<br><br>", unsafe_allow_html=True)
