@@ -15,7 +15,7 @@ st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 ficheiro Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# CSS — estilo limpo e azul
+# CSS — estilo azul com cores de estado
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -37,11 +37,21 @@ st.markdown("""
   padding: 1rem !important;
 }
 .file-box {
-  background-color: #E8F1FB;
-  border-left: 4px solid #2B6CB0;
-  padding: 0.6rem 1rem;
   border-radius: 8px;
+  padding: 0.6rem 1rem;
   margin-bottom: 0.5rem;
+}
+.file-box.success {
+  background-color: #e6f9ee;
+  border-left: 4px solid #1a7f37;
+}
+.file-box.error {
+  background-color: #fdeaea;
+  border-left: 4px solid #cc0000;
+}
+.file-box.warning {
+  background-color: #fff8e5;
+  border-left: 4px solid #e6a100;
 }
 .file-title { font-size: 0.9rem; font-weight: 600; color: #1A365D; }
 .file-sub { font-size: 0.8rem; color: #2A4365; }
@@ -64,6 +74,10 @@ st.markdown("""
 if "stage" not in st.session_state:
     st.session_state.stage = "idle"
 if "uploads" not in st.session_state:
+    st.session_state.uploads = None
+
+def reset_app():
+    st.session_state.stage = "idle"
     st.session_state.uploads = None
 
 # ───────────────────────────────────────────────
@@ -105,29 +119,6 @@ def build_zip_with_summary(excel_files: list[str], debug_files: list[str], summa
     return mem.read()
 
 # ───────────────────────────────────────────────
-# Função: renderiza ecrã inicial (upload)
-# ───────────────────────────────────────────────
-def render_home():
-    st.session_state.stage = "idle"
-    st.session_state.uploads = None
-    st.markdown("<h3>🧪 Xylella Processor</h3>", unsafe_allow_html=True)
-    st.caption("Carrega um ou vários PDFs para processar novamente.")
-    uploads = st.file_uploader(
-        "📂 Carrega um ou vários PDFs",
-        type=["pdf"],
-        accept_multiple_files=True,
-        key=f"file_uploader_{time.time()}"  # força widget novo
-    )
-    if uploads:
-        if st.button("📄 Processar ficheiros de Input", type="primary"):
-            st.session_state.uploads = uploads
-            st.session_state.stage = "processing"
-            st.experimental_rerun()
-    else:
-        st.info("💡 Carrega um ficheiro PDF para ativar o botão de processamento.")
-    return
-
-# ───────────────────────────────────────────────
 # Interface principal
 # ───────────────────────────────────────────────
 if st.session_state.stage == "idle":
@@ -156,6 +147,9 @@ elif st.session_state.stage == "processing":
     start_time = time.time()
 
     all_excel, outdirs, summary_lines = [], [], []
+    error_count = 0
+    warning_count = 0
+
     total = len(uploads)
     progress = st.progress(0)
 
@@ -163,7 +157,7 @@ elif st.session_state.stage == "processing":
         placeholder = st.empty()
 
         # Animação breve
-        for frame in itertools.cycle(["..."]):
+        for frame in itertools.cycle([".", "..", "..."]):
             placeholder.markdown(
                 f"""
                 <div class='file-box'>
@@ -186,8 +180,15 @@ elif st.session_state.stage == "processing":
         created = process_pdf(str(tmp_pdf))
 
         if not created:
-            placeholder.warning(f"⚠️ Nenhum ficheiro gerado para {up.name}")
-            summary_lines.append(f"{up.name}: sem ficheiros gerados.")
+            error_count += 1
+            html = (
+                f"<div class='file-box error'>"
+                f"<div class='file-title'>📄 {up.name}</div>"
+                f"<div class='file-sub'>❌ Erro: nenhum ficheiro gerado.</div>"
+                f"</div>"
+            )
+            placeholder.markdown(html, unsafe_allow_html=True)
+            summary_lines.append(f"{up.name}: erro - nenhum ficheiro gerado.")
         else:
             req_count = len(created)
             total_samples, discrepancies = 0, []
@@ -199,19 +200,38 @@ elif st.session_state.stage == "processing":
                 if exp and proc:
                     total_samples += proc
                     if exp != proc:
-                        discrepancies.append(f"{Path(fp).name} (processadas: {proc} / declaradas: {exp})")
-            discrep_str = " </br> ⚠️ Discrepâncias em " + "; ".join(discrepancies) if discrepancies else ""
-            formatted_text = (
-                f"<div class='file-box'>"
+                        discrepancies.append(
+                            f"{Path(fp).name} (processadas: <b>{proc}</b> / declaradas: <b>{exp}</b>)"
+                        )
+
+            if discrepancies:
+                warning_count += 1
+                box_class = "warning"
+                discrep_html = (
+                    "<div class='file-sub'>⚠️ <b>"
+                    + str(len(discrepancies))
+                    + "</b> discrepância(s):<br>"
+                    + "<br>".join(discrepancies)
+                    + "</div>"
+                )
+            else:
+                box_class = "success"
+                discrep_html = ""
+
+            html = (
+                f"<div class='file-box {box_class}'>"
                 f"<div class='file-title'>📄 {up.name}</div>"
-                f"<div class='file-sub'>"
-                f"<b>{req_count}</b> requisição(ões), "
-                f"<b>{total_samples}</b> amostras"
-                f"{discrep_str}."
-                f"</div></div>"
+                f"<div class='file-sub'><b>{req_count}</b> requisição(ões), "
+                f"<b>{total_samples}</b> amostras.</div>"
+                f"{discrep_html}"
+                f"</div>"
             )
-            placeholder.markdown(formatted_text, unsafe_allow_html=True)
-            summary_lines.append(f"{up.name}: {req_count} requisições, {total_samples} amostras{discrep_str}.")
+
+            placeholder.markdown(html, unsafe_allow_html=True)
+            discrep_str = f" ⚠️ {len(discrepancies)} discrepância(s)" if discrepancies else ""
+            summary_lines.append(
+                f"{up.name}: {req_count} requisições, {total_samples} amostras{discrep_str}."
+            )
 
         progress.progress(i / total)
         time.sleep(0.2)
@@ -224,18 +244,23 @@ elif st.session_state.stage == "processing":
         lisbon_tz = pytz.timezone("Europe/Lisbon")
         now_local = datetime.now(lisbon_tz)
 
-        summary_text = "\n".join(summary_lines)
-        summary_text += f"\n\n📊 Total: {len(all_excel)} ficheiro(s) Excel"
-        summary_text += f"\n🧪 Total de amostras: {sum(int(m.group(1)) for l in summary_lines if (m := re.search(r'(\\d+)\\s+amostra', l)))}"
-        summary_text += f"\n⏱️ Tempo total: {total_time:.1f} segundos"
-        summary_text += f"\n📅 Executado em: {now_local:%d/%m/%Y às %H:%M:%S}"
-        zip_bytes = build_zip_with_summary(all_excel, debug_files, summary_text)
-        zip_name = f"xylella_output_{now_local:%Y%m%d_%H%M%S}.zip"
-
         total_reqs = len(all_excel)
         total_amostras = sum(
             int(m.group(1)) for l in summary_lines if (m := re.search(r"(\d+)\s+amostra", l))
         )
+
+        summary_text = "\n".join(summary_lines)
+        summary_text += f"\n\n📊 Total: {len(all_excel)} ficheiro(s) Excel"
+        summary_text += f"\n🧪 Total de amostras: {total_amostras}"
+        summary_text += f"\n⏱️ Tempo total: {total_time:.1f} segundos"
+        summary_text += f"\n📅 Executado em: {now_local:%d/%m/%Y às %H:%M:%S}"
+        if warning_count:
+            summary_text += f"\n⚠️ {warning_count} ficheiro(s) com discrepâncias"
+        if error_count:
+            summary_text += f"\n❌ {error_count} ficheiro(s) com erro (sem ficheiros Excel gerados)"
+
+        zip_bytes = build_zip_with_summary(all_excel, debug_files, summary_text)
+        zip_name = f"xylella_output_{now_local:%Y%m%d_%H%M%S}.zip"
 
         st.markdown(f"""
         <div style='text-align:center;margin-top:1.5rem;'>
@@ -247,6 +272,13 @@ elif st.session_state.stage == "processing":
         </div>
         """, unsafe_allow_html=True)
 
+        if warning_count or error_count:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if warning_count:
+                st.markdown(f"⚠️ <b>{warning_count}</b> ficheiro(s) com discrepâncias.", unsafe_allow_html=True)
+            if error_count:
+                st.markdown(f"❌ <b>{error_count}</b> ficheiro(s) com erro (sem ficheiros Excel gerados).", unsafe_allow_html=True)
+
         zip_b64 = base64.b64encode(zip_bytes).decode()
 
         col1, col2 = st.columns(2)
@@ -256,15 +288,5 @@ elif st.session_state.stage == "processing":
                 <button class="clean-btn" style="width:100%;">⬇️ Descarregar resultados (ZIP)</button>
             </a>
             """, unsafe_allow_html=True)
-        def reset_app():
-            st.session_state.stage = "idle"
-            st.session_state.uploads = None
-        
-        # no final do processamento:
         with col2:
-            st.button(
-                "🔁 Novo processamento",
-                type="secondary",
-                use_container_width=True,
-                on_click=reset_app
-            )
+            st.button("🔁 Novo processamento", type="secondary", use_container_width=True, on_click=reset_app)
