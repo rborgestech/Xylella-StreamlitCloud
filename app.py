@@ -53,6 +53,10 @@ st.markdown("""
   background-color: #fff8e5;
   border-left: 4px solid #e6a100;
 }
+.file-box.active {
+  background-color: #E8F1FB;      /* azul suave */
+  border-left: 4px solid #2B6CB0; /* azul escuro */
+}
 .file-title { font-size: 0.9rem; font-weight: 600; color: #1A365D; }
 .file-sub { font-size: 0.8rem; color: #2A4365; }
 .clean-btn {
