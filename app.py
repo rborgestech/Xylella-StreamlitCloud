@@ -140,18 +140,25 @@ elif st.session_state.stage == "processing":
           <div class='file-title'>📄 {up.name}</div>
           <div class='file-sub'>Ficheiro {i} de {total} — a processar<span class="dots"></span></div>
         </div>"""
-        # 🔹 Mostra a caixa azul e força renderização imediata
         placeholder.markdown(active_html, unsafe_allow_html=True)
+
+        # 🔹 força o Streamlit a renderizar antes de processar
         flush = st.empty()
         flush.markdown("&nbsp;", unsafe_allow_html=True)
         flush.empty()
-        
-        # ⚙️ Faz pequeno yield de CPU para o Streamlit desenhar antes do cálculo pesado
         time.sleep(0.05)
-        st.experimental_rerun = None
+
+        tmpdir = Path(tempfile.mkdtemp(dir=session_dir))
+        tmp_pdf = tmpdir / up.name
+        with open(tmp_pdf, "wb") as f:
+            f.write(up.getbuffer())
+        os.environ["OUTPUT_DIR"] = str(tmpdir)
+        outdirs.append(tmpdir)
+
+        # ⚙️ processamento pesado (UI já visível)
         created = process_pdf(str(tmp_pdf))
 
-        # fade-out suave e pequena pausa
+        # fade-out da azul e pequena pausa
         placeholder.markdown(active_html.replace("file-box active", "file-box active fadeOut"), unsafe_allow_html=True)
         time.sleep(0.5)
 
@@ -190,7 +197,7 @@ elif st.session_state.stage == "processing":
                     summary_lines.append(f"   ↳ {name}")
 
         progress.progress(i / total)
-        time.sleep(0.5)  # pequena pausa antes do ficheiro seguinte
+        time.sleep(0.5)  # pausa entre ficheiros
 
     total_time = time.time() - start_ts
     debug_files = collect_debug_files(outdirs)
