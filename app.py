@@ -13,7 +13,7 @@ st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# CSS — estilo laranja limpo
+# CSS — laranja #CA4300 e clean
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -76,8 +76,6 @@ if start and uploads:
     progress = st.progress(0)
     total = len(uploads)
 
-    start_time = time.time()
-
     for i, up in enumerate(uploads, start=1):
         st.markdown(f"### 📄 {up.name}")
         st.write(f"⏳ A processar ficheiro {i}/{total}...")
@@ -101,51 +99,36 @@ if start and uploads:
         progress.progress(i / total)
         time.sleep(0.3)
 
-    total_time = time.time() - start_time
-
     if all_excel:
         zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
         zip_bytes = build_zip(all_excel)
-        lisbon_time = datetime.now().strftime("%d/%m/%Y às %H:%M:%S")
 
+        lisbon_time = datetime.now().strftime("%d/%m/%Y às %H:%M:%S")
         st.markdown(f"""
         <div style='text-align:center;margin-top:1.5rem;'>
             <h3>🏁 Processamento concluído!</h3>
             <p>Foram gerados <b>{len(all_excel)}</b> ficheiro(s) Excel.<br>
-            Tempo total de execução: <b>{total_time:.1f} segundos</b>.<br>
             Executado em: <b>{lisbon_time}</b>.</p>
         </div>
         """, unsafe_allow_html=True)
 
         col1, col2 = st.columns(2)
         with col1:
-            st.download_button(
-                "⬇️ Descarregar resultados (ZIP)",
-                data=zip_bytes,
-                file_name=zip_name,
-                mime="application/zip",
-                use_container_width=True
-            )
+            st.download_button("⬇️ Descarregar resultados (ZIP)",
+                data=zip_bytes, file_name=zip_name, mime="application/zip", use_container_width=True)
         with col2:
             if st.button("🔁 Novo processamento", type="secondary", use_container_width=True):
-                st.markdown("""
-                <script>
-                setTimeout(function() {
-                    window.location.reload(true);
-                }, 300);
-                </script>
-                """, unsafe_allow_html=True)
-                st.stop()
+                st.session_state.processing = False
+                st.session_state.done = False
+                st.experimental_rerun()
 
         st.session_state.done = True
-        st.session_state.processing = False
-
     else:
         st.error("⚠️ Nenhum ficheiro Excel foi detetado.")
         st.session_state.processing = False
 
 # ───────────────────────────────────────────────
-# Mensagem inicial
+# Ecrã inicial pós-reset
 # ───────────────────────────────────────────────
-if not start and not st.session_state.processing and not st.session_state.done:
-    st.info("💡 Carrega um ficheiro PDF e clica em **Processar ficheiros de Input**.")
+if st.session_state.done and not st.session_state.processing:
+    st.markdown("<br><br>", unsafe_allow_html=True)
