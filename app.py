@@ -201,7 +201,16 @@ elif st.session_state.stage == "processing":
                     if exp != proc:
                         discrepancies.append(f"{Path(fp).name} (processadas: {proc} / declaradas: {exp})")
             discrep_str = " </br> ⚠️ Discrepâncias em " + "; ".join(discrepancies) if discrepancies else ""
-            placeholder.success(f"✅ {up.name}:</br><b>{req_count}</b> requisição(ões), <b>{total_samples}</b> amostras{discrep_str}.")
+            formatted_text = (
+                f"<div class='file-box'>"
+                f"<div class='file-title'>📄 {up.name}</div>"
+                f"<div class='file-sub'>"
+                f"<b>{req_count}</b> requisição(ões), "
+                f"<b>{total_samples}</b> amostras"
+                f"{discrep_str}."
+                f"</div></div>"
+            )
+            placeholder.markdown(formatted_text, unsafe_allow_html=True)
             summary_lines.append(f"{up.name}: {req_count} requisições, {total_samples} amostras{discrep_str}.")
 
         progress.progress(i / total)
