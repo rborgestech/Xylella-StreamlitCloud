@@ -15,7 +15,18 @@ st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 ficheiro Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# CSS — estilo limpo e azul
+# Reset global — tratado no início (NUNCA no fim)
+# ───────────────────────────────────────────────
+if st.session_state.get("reset_pending"):
+    for k in list(st.session_state.keys()):
+        del st.session_state[k]
+    st.session_state.stage = "idle"
+    st.session_state.uploads = None
+    st.session_state.reset_pending = False
+    st.experimental_rerun()
+
+# ───────────────────────────────────────────────
+# CSS — estilo limpo
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -43,16 +54,18 @@ st.markdown("""
   border-radius: 8px;
   margin-bottom: 0.5rem;
 }
-.file-title {
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: #1A365D;
+.file-title { font-size: 0.9rem; font-weight: 600; color: #1A365D; }
+.file-sub { font-size: 0.8rem; color: #2A4365; }
+.clean-btn {
+  background-color: #fff !important;
+  border: 1px solid #ccc !important;
+  color: #333 !important;
+  font-weight: 600 !important;
+  border-radius: 8px !important;
+  padding: 0.5rem 1.2rem !important;
+  transition: all 0.2s ease-in-out !important;
 }
-.file-sub {
-  font-size: 0.8rem;
-  color: #2A4365;
-}
-.small-text { font-size: 0.85rem; color: #333; }
+.clean-btn:hover { border-color: #999 !important; color: #000 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -101,7 +114,6 @@ def build_zip_with_summary(excel_files: list[str], debug_files: list[str], summa
         z.writestr("summary.txt", summary_text)
     mem.seek(0)
     return mem.read()
-
 
 # ───────────────────────────────────────────────
 # Interface principal
@@ -198,42 +210,18 @@ elif st.session_state.stage == "processing":
         zip_bytes = build_zip_with_summary(all_excel, debug_files, summary_text)
         zip_name = f"xylella_output_{now_local:%Y%m%d_%H%M%S}.zip"
 
-        # Totais corretos
         total_reqs = len(all_excel)
         total_amostras = sum(
             int(m.group(1)) for l in summary_lines if (m := re.search(r"(\d+)\s+amostra", l))
         )
 
-        # Layout clean
-        st.markdown("""
-        <style>
-        .result-box {
-            text-align: center;
-            margin-top: 1.5rem;
-            margin-bottom: 1rem;
-        }
-        .clean-btn {
-            background-color: #fff !important;
-            border: 1px solid #ccc !important;
-            color: #333 !important;
-            font-weight: 600 !important;
-            border-radius: 8px !important;
-            padding: 0.5rem 1.2rem !important;
-            transition: all 0.2s ease-in-out !important;
-        }
-        .clean-btn:hover {
-            border-color: #999 !important;
-            color: #000 !important;
-        }
-        </style>
-        """, unsafe_allow_html=True)
-
-        st.markdown("<div class='result-box'><h3>🏁 Processamento concluído!</h3></div>", unsafe_allow_html=True)
         st.markdown(f"""
-        <div class='result-box'>
-            Foram gerados <b>{total_reqs}</b> ficheiro(s) Excel, com um total de <b>{total_amostras}</b> amostras processadas.<br>
+        <div style='text-align:center;margin-top:1.5rem;'>
+            <h3>🏁 Processamento concluído!</h3>
+            <p>Foram gerados <b>{total_reqs}</b> ficheiro(s) Excel,
+            com um total de <b>{total_amostras}</b> amostras processadas.<br>
             Tempo total de execução: <b>{total_time:.1f} segundos</b>.<br>
-            Executado em: <b>{now_local:%d/%m/%Y às %H:%M:%S}</b>.
+            Executado em: <b>{now_local:%d/%m/%Y às %H:%M:%S}</b>.</p>
         </div>
         """, unsafe_allow_html=True)
 
@@ -247,22 +235,6 @@ elif st.session_state.stage == "processing":
             </a>
             """, unsafe_allow_html=True)
         with col2:
-            if st.button("🔁 Novo processamento", type="secondary", key="reset_btn", use_container_width=True):
+            if st.button("🔁 Novo processamento", type="secondary", use_container_width=True):
                 st.session_state.reset_pending = True
-                st.rerun()
-        
-        # Fora de qualquer condição
-        if st.session_state.get("reset_pending"):
-            # Limpa tudo e volta ao ecrã inicial
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.session_state.stage = "idle"
-            st.session_state.uploads = None
-            st.session_state.reset_pending = False
-            st.rerun()
-
-    else:
-        st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
-        shutil.rmtree(session_dir, ignore_errors=True)
-        st.session_state.clear()
-        st.experimental_rerun()
+                st.stop()
