@@ -194,12 +194,12 @@ elif st.session_state.stage == "processing":
       summary_text += f"\n\n📊 Total: {len(all_excel)} ficheiro(s) Excel\n⏱️ Tempo total: {total_time:.1f} segundos"
       zip_bytes = build_zip_with_summary(all_excel, debug_files, summary_text)
       zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
-      
+  
       # Dados do resumo
       total_reqs = len(all_excel)
       total_amostras = sum(int(re.search(r"(\d+)", line).group(1)) 
                            for line in summary_lines if re.search(r"(\d+)", line))
-      
+  
       # Secção final
       st.markdown("<hr>", unsafe_allow_html=True)
       st.markdown("<h3 style='text-align:center;'>🏁 Processamento concluído!</h3>", unsafe_allow_html=True)
@@ -209,10 +209,10 @@ elif st.session_state.stage == "processing":
           <p>Tempo total de execução: <b>{total_time:.1f} segundos</b>.</p>
       </div>
       """, unsafe_allow_html=True)
-      
+  
       # Converte o ZIP para base64
       zip_b64 = base64.b64encode(zip_bytes).decode()
-      
+  
       # Botões lado a lado
       col1, col2 = st.columns(2)
       with col1:
@@ -229,18 +229,10 @@ elif st.session_state.stage == "processing":
               st.session_state.stage = "idle"
               st.session_state.uploads = None
               st.rerun()
-    
-    else:
-    st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
-    shutil.rmtree(session_dir, ignore_errors=True)
-    st.session_state.stage = "idle"
-    st.session_state.uploads = None
-    st.rerun()
-
-
-    else:
-        st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
-        shutil.rmtree(session_dir, ignore_errors=True)
-        st.session_state.stage = "idle"
-        st.session_state.uploads = None
-        st.rerun()
+  
+  else:
+      st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
+      shutil.rmtree(session_dir, ignore_errors=True)
+      st.session_state.stage = "idle"
+      st.session_state.uploads = None
+      st.rerun()
