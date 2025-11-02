@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 import streamlit as st
-import tempfile, os, shutil, time, io, zipfile, re, base64, itertools, pytz
+import tempfile, os, shutil, time, io, zipfile, re, base64, pytz
 from pathlib import Path
 from datetime import datetime
-from typing import List, Tuple
+from typing import Tuple
 from openpyxl import load_workbook
 from xylella_processor import process_pdf
 
@@ -54,8 +54,8 @@ st.markdown("""
   border-left: 4px solid #e6a100;
 }
 .file-box.active {
-  background-color: #E8F1FB;      /* azul suave */
-  border-left: 4px solid #2B6CB0; /* azul escuro */
+  background-color: #E8F1FB;
+  border-left: 4px solid #2B6CB0;
 }
 .file-title { font-size: 0.9rem; font-weight: 600; color: #1A365D; }
 .file-sub { font-size: 0.8rem; color: #2A4365; }
@@ -99,7 +99,6 @@ def read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
         pass
     return None, None
 
-
 def collect_debug_files(output_dirs: list[Path]) -> list[str]:
     debug_files = []
     for pattern in ["*_ocr_debug.txt", "process_log.csv", "process_summary_*.txt"]:
@@ -107,7 +106,6 @@ def collect_debug_files(output_dirs: list[Path]) -> list[str]:
             for f in d.glob(pattern):
                 debug_files.append(str(f))
     return debug_files
-
 
 def build_zip_with_summary(excel_files: list[str], debug_files: list[str], summary_text: str) -> bytes:
     mem = io.BytesIO()
@@ -160,19 +158,20 @@ elif st.session_state.stage == "processing":
     for i, up in enumerate(uploads, start=1):
         placeholder = st.empty()
 
-        # Animação breve
-        for frame in itertools.cycle([".", "..", "..."]):
-            placeholder.markdown(
-                f"""
-                <div class='file-box'>
-                    <div class='file-title'>📄 {up.name}</div>
-                    <div class='file-sub'>Ficheiro {i} de {total} — a processar{frame}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            time.sleep(0.3)
-            break
+        # Animação visual azul (ficheiro ativo)
+        dots_placeholder = st.empty()
+        for _ in range(3):  # Mostra animação de pontos por ~2s
+            for frame in [".", "..", "..."]:
+                dots_placeholder.markdown(
+                    f"""
+                    <div class='file-box active'>
+                        <div class='file-title'>📄 {up.name}</div>
+                        <div class='file-sub'>Ficheiro {i} de {total} — a processar{frame}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                time.sleep(0.3)
 
         tmpdir = Path(tempfile.mkdtemp(dir=session_dir))
         tmp_pdf = tmpdir / up.name
