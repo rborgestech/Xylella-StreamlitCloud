@@ -63,6 +63,8 @@ if "stage" not in st.session_state:
     st.session_state.stage = "idle"
 if "uploads" not in st.session_state:
     st.session_state.uploads = None
+if "download_clicked" not in st.session_state:
+    st.session_state.download_clicked = False
 
 # ───────────────────────────────────────────────
 # Funções auxiliares
@@ -101,8 +103,16 @@ def build_zip_with_summary(excel_files: List[str], debug_files: List[str], summa
     return mem.read()
 
 # ───────────────────────────────────────────────
-# INTERFACE PRINCIPAL
+# Interface principal
 # ───────────────────────────────────────────────
+def reset_interface():
+    """Limpa estado e volta ao ecrã inicial."""
+    st.session_state.stage = "idle"
+    st.session_state.uploads = None
+    st.session_state.download_clicked = False
+    st.rerun()
+
+# Página inicial
 if st.session_state.stage == "idle":
     uploads = st.file_uploader(
         "📂 Carrega um ou vários PDFs",
@@ -119,6 +129,7 @@ if st.session_state.stage == "idle":
     else:
         st.info("💡 Carrega um ficheiro PDF para ativar o botão de processamento.")
 
+# Página de processamento
 elif st.session_state.stage == "processing":
     st.info("⏳ A processar ficheiros... aguarde até o processo terminar.")
     st.divider()
@@ -185,38 +196,22 @@ elif st.session_state.stage == "processing":
 
         st.success(f"🏁 Processamento concluído ({len(all_excel)} ficheiros Excel gerados).")
 
-        # Conversão segura do ZIP para base64
-        zip_b64 = base64.b64encode(zip_bytes).decode()
+        # Botão de download que dispara reset imediato
+        clicked = st.download_button(
+            "⬇️ Descarregar resultados (ZIP)",
+            data=zip_bytes,
+            file_name=zip_name,
+            mime="application/zip"
+        )
 
-        # Botão com reset automático via JS
-        st.markdown(f"""
-            <a href="data:application/zip;base64,{zip_b64}" download="{zip_name}">
-                <button style="
-                    background-color:#CA4300;
-                    border:none;
-                    color:white;
-                    font-weight:600;
-                    padding:0.5rem 1rem;
-                    border-radius:6px;
-                    cursor:pointer;
-                ">
-                ⬇️ Descarregar resultados (ZIP)
-                </button>
-            </a>
-            <script>
-            // Assim que o botão é clicado, recarrega a interface após 0.5s
-            const btn = window.parent.document.querySelector('a[download="{zip_name}"]');
-            if (btn) {{
-                btn.addEventListener('click', () => {{
-                    setTimeout(() => window.parent.location.reload(), 500);
-                }});
-            }}
-            </script>
-        """, unsafe_allow_html=True)
+        # Assim que o botão é clicado → reset automático
+        if clicked:
+            st.session_state.download_clicked = True
+
+        if st.session_state.download_clicked:
+            reset_interface()
 
     else:
         st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
         shutil.rmtree(session_dir, ignore_errors=True)
-        st.session_state.stage = "idle"
-        st.session_state.uploads = None
-        st.rerun()
+        reset_interface()
