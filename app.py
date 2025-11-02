@@ -238,13 +238,14 @@ elif st.session_state.stage == "processing":
     # 🔄 Refresh imediato no fim do processamento
     refresh_placeholder = st.empty()
     refresh_placeholder.markdown(
-        "<div style='text-align:center;color:#2B6CB0;font-weight:600;'>Finalizando processamento...</div>",
+        "<div style='text-align:center;color:#2B6CB0;font-weight:600;'>Finalizando processamento<span class='dots'></span></div>",
         unsafe_allow_html=True,
     )
     st.progress(1.0)
-    time.sleep(0.3)
+    st.session_state["flush_time"] = time.time()
+    time.sleep(0.5)
     refresh_placeholder.empty()
-    st.experimental_rerun()
+    st.write("")  # força flush do buffer de renderização
 
     # ──────────────── RESUMO FINAL ────────────────
     total_time = time.time() - start_time
