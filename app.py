@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import streamlit as st
-import tempfile, os, shutil, time, io, zipfile, re, base64, itertools
+import tempfile, os, shutil, time, io, zipfile, re, base64, itertools, pytz
 from pathlib import Path
 from datetime import datetime
 from typing import List, Tuple
@@ -79,6 +79,7 @@ def read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
         pass
     return None, None
 
+
 def collect_debug_files(output_dirs: list[Path]) -> list[str]:
     debug_files = []
     for pattern in ["*_ocr_debug.txt", "process_log.csv", "process_summary_*.txt"]:
@@ -86,6 +87,7 @@ def collect_debug_files(output_dirs: list[Path]) -> list[str]:
             for f in d.glob(pattern):
                 debug_files.append(str(f))
     return debug_files
+
 
 def build_zip_with_summary(excel_files: list[str], debug_files: list[str], summary_text: str) -> bytes:
     mem = io.BytesIO()
@@ -99,6 +101,7 @@ def build_zip_with_summary(excel_files: list[str], debug_files: list[str], summa
         z.writestr("summary.txt", summary_text)
     mem.seek(0)
     return mem.read()
+
 
 # ───────────────────────────────────────────────
 # Interface principal
@@ -135,7 +138,7 @@ elif st.session_state.stage == "processing":
     for i, up in enumerate(uploads, start=1):
         placeholder = st.empty()
 
-        # Animação leve
+        # Animação breve
         for frame in itertools.cycle([".", "..", "..."]):
             placeholder.markdown(
                 f"""
@@ -184,20 +187,24 @@ elif st.session_state.stage == "processing":
 
     if all_excel:
         debug_files = collect_debug_files(outdirs)
+        lisbon_tz = pytz.timezone("Europe/Lisbon")
+        now_local = datetime.now(lisbon_tz)
+
         summary_text = "\n".join(summary_lines)
-        summary_text += f"\n\n📊 Total: {len(all_excel)} ficheiro(s) Excel\n⏱️ Tempo total: {total_time:.1f} segundos"
+        summary_text += f"\n\n📊 Total: {len(all_excel)} ficheiro(s) Excel"
+        summary_text += f"\n🧪 Total de amostras: {sum(int(m.group(1)) for l in summary_lines if (m := re.search(r'(\\d+)\\s+amostra', l)))}"
+        summary_text += f"\n⏱️ Tempo total: {total_time:.1f} segundos"
+        summary_text += f"\n📅 Executado em: {now_local:%d/%m/%Y às %H:%M:%S}"
         zip_bytes = build_zip_with_summary(all_excel, debug_files, summary_text)
-        zip_name = f"xylella_output_{datetime.now():%Y%m%d_%H%M%S}.zip"
+        zip_name = f"xylella_output_{now_local:%Y%m%d_%H%M%S}.zip"
 
         # Totais corretos
         total_reqs = len(all_excel)
-        total_amostras = 0
-        for line in summary_lines:
-            match = re.search(r"(\d+)\s+amostra", line)
-            if match:
-                total_amostras += int(match.group(1))
+        total_amostras = sum(
+            int(m.group(1)) for l in summary_lines if (m := re.search(r"(\d+)\s+amostra", l))
+        )
 
-        # Layout final clean
+        # Layout clean
         st.markdown("""
         <style>
         .result-box {
@@ -225,7 +232,8 @@ elif st.session_state.stage == "processing":
         st.markdown(f"""
         <div class='result-box'>
             Foram gerados <b>{total_reqs}</b> ficheiro(s) Excel, com um total de <b>{total_amostras}</b> amostras processadas.<br>
-            Tempo total de execução: <b>{total_time:.1f} segundos</b>.
+            Tempo total de execução: <b>{total_time:.1f} segundos</b>.<br>
+            Executado em: <b>{now_local:%d/%m/%Y às %H:%M:%S}</b>.
         </div>
         """, unsafe_allow_html=True)
 
@@ -240,15 +248,16 @@ elif st.session_state.stage == "processing":
             """, unsafe_allow_html=True)
         with col2:
             if st.button("🔁 Novo processamento", type="secondary", key="reset_btn", use_container_width=True):
-                for key in ["stage", "uploads"]:
-                    if key in st.session_state:
-                        del st.session_state[key]
-                st.rerun()
+                st.session_state.clear()
+                st.session_state.needs_reset = True
+                st.stop()
+
+        if st.session_state.get("needs_reset"):
+            st.session_state.clear()
+            st.experimental_rerun()
 
     else:
         st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no ZIP.")
         shutil.rmtree(session_dir, ignore_errors=True)
-        for key in ["stage", "uploads"]:
-            if key in st.session_state:
-                del st.session_state[key]
-        st.rerun()
+        st.session_state.clear()
+        st.experimental_rerun()
