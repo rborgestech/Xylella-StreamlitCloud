@@ -220,17 +220,30 @@ elif st.session_state.stage == "processing":
     total_reqs = len(all_excel)
     # 🧪 cálculo exato do total de amostras (usa “processadas:” se existir, senão “amostras”)
 
+    # 🧪 cálculo rigoroso — soma só 1 valor por PDF
     total_amostras = 0
+    pdf_seen = set()
+    
     for l in summary_lines:
-        # Se existir "processadas:" na linha → prioridade
+        # ignora sublinhas (↳ …)
+        if l.strip().startswith("↳"):
+            continue
+    
+        # nome do ficheiro PDF
+        pdf_name = l.split(":")[0].strip()
+        if pdf_name in pdf_seen:
+            continue
+        pdf_seen.add(pdf_name)
+    
+        # se existir "processadas" usa esse valor, senão usa "amostras"
         m_proc = re.search(r"processadas:\s*(\d+)", l)
+        m_amos = re.search(r"(\d+)\s+amostra", l)
+    
         if m_proc:
             total_amostras += int(m_proc.group(1))
-            continue
-        # Caso contrário, procura "amostras" na linha principal
-        m_amos = re.search(r"(\d+)\s+amostra", l)
-        if m_amos:
+        elif m_amos:
             total_amostras += int(m_amos.group(1))
+
 
     summary_text = "\n".join(summary_lines)
     summary_text += f"\n\n📊 Total: {len(all_excel)} ficheiro(s) Excel"
