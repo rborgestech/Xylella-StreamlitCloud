@@ -6,8 +6,6 @@ from datetime import datetime
 from typing import List, Tuple
 from openpyxl import load_workbook
 from xylella_processor import process_pdf
-from streamlit.runtime.scriptrunner import RerunException
-from streamlit.runtime.scriptrunner import RerunData
 
 # ───────────────────────────────────────────────
 # Configuração base
@@ -64,7 +62,7 @@ st.markdown("""
 # Estado
 # ───────────────────────────────────────────────
 if "stage" not in st.session_state:
-    st.session_state.stage = "idle"
+    st.session_state.stage = "home"
 if "uploads" not in st.session_state:
     st.session_state.uploads = None
 
@@ -107,32 +105,14 @@ def build_zip_with_summary(excel_files: list[str], debug_files: list[str], summa
     return mem.read()
 
 # ───────────────────────────────────────────────
-# Função: renderiza ecrã inicial (upload)
+# Estrutura principal — 2 secções independentes
 # ───────────────────────────────────────────────
-def render_home():
-    st.session_state.stage = "idle"
-    st.session_state.uploads = None
-    st.markdown("<h3>🧪 Xylella Processor</h3>", unsafe_allow_html=True)
-    st.caption("Carrega um ou vários PDFs para processar novamente.")
-    uploads = st.file_uploader(
-        "📂 Carrega um ou vários PDFs",
-        type=["pdf"],
-        accept_multiple_files=True,
-        key=f"file_uploader_{time.time()}"  # força widget novo
-    )
-    if uploads:
-        if st.button("📄 Processar ficheiros de Input", type="primary"):
-            st.session_state.uploads = uploads
-            st.session_state.stage = "processing"
-            st.experimental_rerun()
-    else:
-        st.info("💡 Carrega um ficheiro PDF para ativar o botão de processamento.")
-    return
+stage = st.session_state.get("stage", "home")
 
-# ───────────────────────────────────────────────
-# Interface principal
-# ───────────────────────────────────────────────
-if st.session_state.stage == "idle":
+# ==========================================================
+# 1️⃣ SECÇÃO INICIAL (UPLOAD)
+# ==========================================================
+if stage == "home":
     uploads = st.file_uploader(
         "📂 Carrega um ou vários PDFs",
         type=["pdf"],
@@ -148,7 +128,10 @@ if st.session_state.stage == "idle":
     else:
         st.info("💡 Carrega um ficheiro PDF para ativar o botão de processamento.")
 
-elif st.session_state.stage == "processing":
+# ==========================================================
+# 2️⃣ SECÇÃO DE PROCESSAMENTO
+# ==========================================================
+elif stage == "processing":
     st.info("⏳ A processar ficheiros... aguarde até o processo terminar.")
 
     uploads = st.session_state.uploads
@@ -163,20 +146,15 @@ elif st.session_state.stage == "processing":
 
     for i, up in enumerate(uploads, start=1):
         placeholder = st.empty()
-
-        # Animação breve
-        for frame in itertools.cycle([".", "..", "..."]):
-            placeholder.markdown(
-                f"""
-                <div class='file-box'>
-                    <div class='file-title'>📄 {up.name}</div>
-                    <div class='file-sub'>Ficheiro {i} de {total} — a processar{frame}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            time.sleep(0.3)
-            break
+        placeholder.markdown(
+            f"""
+            <div class='file-box'>
+                <div class='file-title'>📄 {up.name}</div>
+                <div class='file-sub'>Ficheiro {i} de {total} — a processar...</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
         tmpdir = Path(tempfile.mkdtemp(dir=session_dir))
         tmp_pdf = tmpdir / up.name
@@ -211,7 +189,6 @@ elif st.session_state.stage == "processing":
 
     total_time = time.time() - start_time
 
-    # ──────────────── SECÇÃO FINAL ────────────────
     if all_excel:
         debug_files = collect_debug_files(outdirs)
         lisbon_tz = pytz.timezone("Europe/Lisbon")
@@ -219,28 +196,21 @@ elif st.session_state.stage == "processing":
 
         summary_text = "\n".join(summary_lines)
         summary_text += f"\n\n📊 Total: {len(all_excel)} ficheiro(s) Excel"
-        summary_text += f"\n🧪 Total de amostras: {sum(int(m.group(1)) for l in summary_lines if (m := re.search(r'(\\d+)\\s+amostra', l)))}"
         summary_text += f"\n⏱️ Tempo total: {total_time:.1f} segundos"
         summary_text += f"\n📅 Executado em: {now_local:%d/%m/%Y às %H:%M:%S}"
         zip_bytes = build_zip_with_summary(all_excel, debug_files, summary_text)
         zip_name = f"xylella_output_{now_local:%Y%m%d_%H%M%S}.zip"
 
-        total_reqs = len(all_excel)
-        total_amostras = sum(
-            int(m.group(1)) for l in summary_lines if (m := re.search(r"(\d+)\s+amostra", l))
-        )
+        zip_b64 = base64.b64encode(zip_bytes).decode()
 
         st.markdown(f"""
         <div style='text-align:center;margin-top:1.5rem;'>
             <h3>🏁 Processamento concluído!</h3>
-            <p>Foram gerados <b>{total_reqs}</b> ficheiro(s) Excel,
-            com um total de <b>{total_amostras}</b> amostras processadas.<br>
+            <p>Foram gerados <b>{len(all_excel)}</b> ficheiro(s) Excel.<br>
             Tempo total de execução: <b>{total_time:.1f} segundos</b>.<br>
             Executado em: <b>{now_local:%d/%m/%Y às %H:%M:%S}</b>.</p>
         </div>
         """, unsafe_allow_html=True)
-
-        zip_b64 = base64.b64encode(zip_bytes).decode()
 
         col1, col2 = st.columns(2)
         with col1:
@@ -249,9 +219,9 @@ elif st.session_state.stage == "processing":
                 <button class="clean-btn" style="width:100%;">⬇️ Descarregar resultados (ZIP)</button>
             </a>
             """, unsafe_allow_html=True)
+
         with col2:
             if st.button("🔁 Novo processamento", type="secondary", use_container_width=True):
-                # Limpa o estado e força a app a reiniciar
-                for key in list(st.session_state.keys()):
-                    del st.session_state[key]
-                raise RerunException(RerunData(page_name=None))
+                st.session_state.stage = "home"
+                st.session_state.uploads = None
+                st.rerun()
