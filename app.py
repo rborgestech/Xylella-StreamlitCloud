@@ -221,19 +221,27 @@ elif st.session_state.stage == "processing":
     # 🧪 cálculo exato do total de amostras (usa “processadas:” se existir, senão “amostras”)
 
     total_amostras = 0
-    linhas_processadas = set()
+    linhas_contadas = set()
+    pdf_totais = {}
     
     for line in summary_lines:
-        # Se for uma linha de sub-item "processadas", usa esse número
+        # Sub-linhas com "processadas:" (preferência)
         m_proc = re.search(r"processadas:\s*(\d+)", line)
         if m_proc:
             total_amostras += int(m_proc.group(1))
             continue
     
-        # Se for linha principal "X amostras" mas não tiver sublinhas associadas, conta aqui
-        m_amostras = re.search(r"(\d+)\s+amostra", line)
-        if m_amostras and "⚠️" not in line:  # ignora linhas de discrepância (já contadas)
-            total_amostras += int(m_amostras.group(1))
+        # Linhas principais (sem sublinhas com discrepância)
+        if line.endswith("amostras") or "amostras." in line:
+            nome_pdf = line.split(":")[0].strip()
+            m_amostras = re.search(r"(\d+)\s+amostra", line)
+            if m_amostras:
+                pdf_totais[nome_pdf] = int(m_amostras.group(1))
+    
+    # Evita duplicar PDFs que já tiveram sublinhas processadas
+    total_amostras += sum(v for k, v in pdf_totais.items())
+
+
 
 
     summary_text = "\n".join(summary_lines)
