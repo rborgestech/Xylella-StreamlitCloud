@@ -232,9 +232,9 @@ elif st.session_state.stage == "processing":
             )
             placeholder.markdown(result_html, unsafe_allow_html=True)
 
-          progress.progress(i / total)
-          st.experimental_rerun = None  # garante que não há chamadas pendentes
-          time.sleep(0.1)  # 100ms é suficiente para refresh visual suave
+        progress.progress(i / total)
+        st.experimental_rerun = None  # garante que não há chamadas pendentes
+        time.sleep(0.1)  # 100ms é suficiente para refresh visual suave
 
     # 🔄 Refresh imediato no fim do processamento
     refresh_placeholder = st.empty()
