@@ -55,18 +55,34 @@ if "done" not in st.session_state:
     st.session_state.done = False
 
 # ───────────────────────────────────────────────
-# Upload
+# Placeholder principal (garante re-render)
 # ───────────────────────────────────────────────
-if not st.session_state.processing and not st.session_state.done:
-    uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True)
-    start = st.button("📄 Processar ficheiros de Input", type="primary", disabled=not uploads)
-else:
-    uploads, start = None, False
+placeholder = st.empty()
 
 # ───────────────────────────────────────────────
-# Execução principal
+# Função principal
 # ───────────────────────────────────────────────
-if start and uploads:
+def show_uploader():
+    """Mostra o uploader de ficheiros, sempre reconstruído após refresh."""
+    uploads = placeholder.file_uploader(
+        "📂 Carrega um ou vários PDFs",
+        type=["pdf"],
+        accept_multiple_files=True,
+        key=f"upload_{int(time.time())}"
+    )
+
+    if uploads:
+        start = placeholder.button("📄 Processar ficheiros de Input", type="primary")
+        if start:
+            placeholder.empty()
+            run_processing(uploads)
+    else:
+        st.info("💡 Carrega um ficheiro PDF e clica em **Processar ficheiros de Input**.")
+
+# ───────────────────────────────────────────────
+# Processamento
+# ───────────────────────────────────────────────
+def run_processing(uploads):
     st.session_state.processing = True
     st.info("⚙️ A processar... isto pode demorar alguns segundos.")
     all_excel = []
@@ -99,7 +115,7 @@ if start and uploads:
                 st.success(f"✅ {Path(fp).name} gravado")
 
         progress.progress(i / total)
-        time.sleep(0.3)
+        time.sleep(0.2)
 
     total_time = time.time() - start_time
 
@@ -128,6 +144,7 @@ if start and uploads:
             )
         with col2:
             if st.button("🔁 Novo processamento", type="secondary", use_container_width=True):
+                # Faz refresh completo e reconstrói uploader
                 st.markdown("""
                 <script>
                 setTimeout(function() {
@@ -139,13 +156,12 @@ if start and uploads:
 
         st.session_state.done = True
         st.session_state.processing = False
-
     else:
         st.error("⚠️ Nenhum ficheiro Excel foi detetado.")
         st.session_state.processing = False
 
 # ───────────────────────────────────────────────
-# Mensagem inicial
+# Execução inicial
 # ───────────────────────────────────────────────
-if not start and not st.session_state.processing and not st.session_state.done:
-    st.info("💡 Carrega um ficheiro PDF e clica em **Processar ficheiros de Input**.")
+if not st.session_state.processing and not st.session_state.done:
+    show_uploader()
