@@ -219,15 +219,22 @@ elif st.session_state.stage == "processing":
     now_local = datetime.now(lisbon_tz)
     total_reqs = len(all_excel)
     # 🧪 cálculo exato do total de amostras (usa “processadas:” se existir, senão “amostras”)
+
     total_amostras = 0
+    linhas_processadas = set()
+    
     for line in summary_lines:
-        # prioridade: "processadas: X"
+        # Se for uma linha de sub-item "processadas", usa esse número
         m_proc = re.search(r"processadas:\s*(\d+)", line)
-        m_amostras = re.search(r"(\d+)\s+amostra", line)
         if m_proc:
             total_amostras += int(m_proc.group(1))
-        elif m_amostras:
+            continue
+    
+        # Se for linha principal "X amostras" mas não tiver sublinhas associadas, conta aqui
+        m_amostras = re.search(r"(\d+)\s+amostra", line)
+        if m_amostras and "⚠️" not in line:  # ignora linhas de discrepância (já contadas)
             total_amostras += int(m_amostras.group(1))
+
 
     summary_text = "\n".join(summary_lines)
     summary_text += f"\n\n📊 Total: {len(all_excel)} ficheiro(s) Excel"
