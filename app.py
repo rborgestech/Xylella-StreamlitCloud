@@ -220,20 +220,17 @@ elif st.session_state.stage == "processing":
     total_reqs = len(all_excel)
     # 🧪 cálculo exato do total de amostras (usa “processadas:” se existir, senão “amostras”)
 
-  total_amostras = 0
-  for l in summary_lines:
-      # Se existir "processadas:" na linha → prioridade
-      m_proc = re.search(r"processadas:\s*(\d+)", l)
-      if m_proc:
-          total_amostras += int(m_proc.group(1))
-          continue
-      # Caso contrário, procura "amostras" na linha principal
-      m_amos = re.search(r"(\d+)\s+amostra", l)
-      if m_amos:
-          total_amostras += int(m_amos.group(1))
-
-
-
+    total_amostras = 0
+    for l in summary_lines:
+        # Se existir "processadas:" na linha → prioridade
+        m_proc = re.search(r"processadas:\s*(\d+)", l)
+        if m_proc:
+            total_amostras += int(m_proc.group(1))
+            continue
+        # Caso contrário, procura "amostras" na linha principal
+        m_amos = re.search(r"(\d+)\s+amostra", l)
+        if m_amos:
+            total_amostras += int(m_amos.group(1))
 
     summary_text = "\n".join(summary_lines)
     summary_text += f"\n\n📊 Total: {len(all_excel)} ficheiro(s) Excel"
