@@ -8,15 +8,6 @@ from openpyxl import load_workbook
 from xylella_processor import process_pdf
 
 # ───────────────────────────────────────────────
-# RESET GLOBAL (executa antes de tudo)
-# ───────────────────────────────────────────────
-if "go_home" in st.session_state and st.session_state.go_home:
-    st.session_state.stage = "idle"
-    st.session_state.uploads = None
-    st.session_state.go_home = False
-    st.experimental_rerun()
-
-# ───────────────────────────────────────────────
 # Configuração base
 # ───────────────────────────────────────────────
 st.set_page_config(page_title="Xylella Processor", page_icon="🧪", layout="centered")
@@ -114,6 +105,29 @@ def build_zip_with_summary(excel_files: list[str], debug_files: list[str], summa
     return mem.read()
 
 # ───────────────────────────────────────────────
+# Função: renderiza ecrã inicial (upload)
+# ───────────────────────────────────────────────
+def render_home():
+    st.session_state.stage = "idle"
+    st.session_state.uploads = None
+    st.markdown("<h3>🧪 Xylella Processor</h3>", unsafe_allow_html=True)
+    st.caption("Carrega um ou vários PDFs para processar novamente.")
+    uploads = st.file_uploader(
+        "📂 Carrega um ou vários PDFs",
+        type=["pdf"],
+        accept_multiple_files=True,
+        key=f"file_uploader_{time.time()}"  # força widget novo
+    )
+    if uploads:
+        if st.button("📄 Processar ficheiros de Input", type="primary"):
+            st.session_state.uploads = uploads
+            st.session_state.stage = "processing"
+            st.experimental_rerun()
+    else:
+        st.info("💡 Carrega um ficheiro PDF para ativar o botão de processamento.")
+    return
+
+# ───────────────────────────────────────────────
 # Interface principal
 # ───────────────────────────────────────────────
 if st.session_state.stage == "idle":
@@ -195,6 +209,7 @@ elif st.session_state.stage == "processing":
 
     total_time = time.time() - start_time
 
+    # ──────────────── SECÇÃO FINAL ────────────────
     if all_excel:
         debug_files = collect_debug_files(outdirs)
         lisbon_tz = pytz.timezone("Europe/Lisbon")
@@ -234,5 +249,5 @@ elif st.session_state.stage == "processing":
             """, unsafe_allow_html=True)
         with col2:
             if st.button("🔁 Novo processamento", type="secondary", use_container_width=True):
-                st.session_state.go_home = True
+                render_home()  # regressa de imediato ao ecrã inicial
                 st.stop()
