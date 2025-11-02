@@ -245,9 +245,18 @@ elif st.session_state.stage == "processing":
             )
 
             placeholder.markdown(html, unsafe_allow_html=True)
-            summary_lines.append(
-                f"{up.name}: {req_count} requisições, {total_samples} amostras{discrep_str}"
-            )
+          
+            if discrepancies:
+                # inclui as discrepâncias detalhadas no summary.txt
+                summary_lines.append(
+                    f"{up.name}: {req_count} requisições, {total_samples} amostras ⚠️ {len(discrepancies)} discrepância(s)."
+                )
+                for d in discrepancies:
+                    summary_lines.append(f"   ↳ {d}")
+            else:
+                summary_lines.append(
+                    f"{up.name}: {req_count} requisições, {total_samples} amostras"
+                )
 
         progress.progress(i / total)
         time.sleep(0.2)
