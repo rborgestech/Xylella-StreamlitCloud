@@ -119,11 +119,11 @@ if start and uploads:
         with col2:
             if st.button("🔁 Novo processamento", type="secondary", use_container_width=True):
                 st.markdown("""
-                    <meta http-equiv="refresh" content="0">
+                <script>
+                window.location.replace(window.location.origin + window.location.pathname);
+                </script>
                 """, unsafe_allow_html=True)
                 st.stop()
-
-        st.session_state.done = True
     else:
         st.error("⚠️ Nenhum ficheiro Excel foi detetado.")
         st.session_state.processing = False
