@@ -20,16 +20,16 @@ st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 fich
 st.markdown("""
 <style>
 .stButton > button[kind="primary"] {
-  background-color: #CA4300 !important;
-  border: 1px solid #CA4300 !important;
+  background-color: #a13700 !important;
+  border: 1px solid #a13700 !important;
   color: #fff !important;
   font-weight: 600 !important;
   border-radius: 6px !important;
   transition: background-color 0.2s ease-in-out !important;
 }
 .stButton > button[kind="primary"]:hover {
-  background-color: #A13700 !important;
-  border-color: #A13700 !important;
+  background-color: #a13700 !important;
+  border-color: #a13700 !important;
 }
 [data-testid="stFileUploader"] > div:first-child {
   border: 2px dashed #CA4300 !important;
