@@ -158,7 +158,16 @@ elif st.session_state.stage == "processing":
         created = process_pdf(str(tmp_pdf))
 
         # Fade-out rápido da azul
-        placeholder.markdown(active_html.replace("file-box active", "file-box active fadeOut"), unsafe_allow_html=True)
+        placeholder.markdown(
+            active_html.replace("file-box active", "file-box active fadeOut"),
+            unsafe_allow_html=True,
+        )
+
+        # 👉 flush imediato para forçar o DOM a atualizar antes de seguir
+        st.experimental_update()
+
+        # substitui o delay longo por micro-pausa
+        time.sleep(0.02)
 
         # Substitui por resultado final (sem ecrã branco)
         if not created:
