@@ -15,7 +15,7 @@ st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 ficheiro Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# CSS — estilo azul + animação de transição
+# CSS — estilo azul + animações suaves
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -37,7 +37,7 @@ st.markdown("""
   padding: 1rem !important;
 }
 
-/* Caixa base */
+/* Caixas de resultado */
 .file-box {
   border-radius: 8px;
   padding: 0.6rem 1rem;
@@ -68,9 +68,22 @@ st.markdown("""
   border-left: 4px solid #2B6CB0;
 }
 
-/* Conteúdo */
+/* Texto */
 .file-title { font-size: 0.9rem; font-weight: 600; color: #1A365D; }
 .file-sub { font-size: 0.8rem; color: #2A4365; }
+
+/* Pontinhos animados */
+.dots::after {
+  content: '...';
+  display: inline-block;
+  animation: dots 1.5s steps(4, end) infinite;
+}
+@keyframes dots {
+  0%, 20% { color: rgba(42, 67, 101, 0); text-shadow: .25em 0 0 rgba(42, 67, 101, 0), .5em 0 0 rgba(42, 67, 101, 0); }
+  40% { color: #2A4365; text-shadow: .25em 0 0 rgba(42, 67, 101, 0), .5em 0 0 rgba(42, 67, 101, 0); }
+  60% { text-shadow: .25em 0 0 #2A4365, .5em 0 0 rgba(42, 67, 101, 0); }
+  80%, 100% { text-shadow: .25em 0 0 #2A4365, .5em 0 0 #2A4365; }
+}
 
 /* Botões */
 .clean-btn {
@@ -173,17 +186,15 @@ elif st.session_state.stage == "processing":
         placeholder = st.empty()
 
         # Mostra o ficheiro ativo (azul com animação de pontos)
-        for frame in [".", "..", "..."]:
-            placeholder.markdown(
-                f"""
-                <div class='file-box active'>
-                    <div class='file-title'>📄 {up.name}</div>
-                    <div class='file-sub'>Ficheiro <b>{i}</b> de <b>{total}</b> — <b>a processar{frame}</b></div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            time.sleep(0.3)
+        placeholder.markdown(
+            f"""
+            <div class='file-box active'>
+                <div class='file-title'>📄 {up.name}</div>
+                <div class='file-sub'>Ficheiro {i} de {total} — a processar<span class="dots"></span></div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
         tmpdir = Path(tempfile.mkdtemp(dir=session_dir))
         tmp_pdf = tmpdir / up.name
@@ -219,6 +230,7 @@ elif st.session_state.stage == "processing":
                             f"{Path(fp).name} (processadas: {proc} / declaradas: {exp})"
                         )
 
+            # Atualiza a caixa final (verde / amarela)
             if discrepancies:
                 warning_count += 1
                 box_class = "warning"
@@ -245,18 +257,24 @@ elif st.session_state.stage == "processing":
             )
 
             placeholder.markdown(html, unsafe_allow_html=True)
-          
+
+            # Adiciona ao resumo detalhado
             if discrepancies:
-                # inclui as discrepâncias detalhadas no summary.txt
                 summary_lines.append(
                     f"{up.name}: {req_count} requisições, {total_samples} amostras ⚠️ {len(discrepancies)} discrepância(s)."
                 )
-                for d in discrepancies:
-                    summary_lines.append(f"   ↳ {d}")
             else:
                 summary_lines.append(
                     f"{up.name}: {req_count} requisições, {total_samples} amostras"
                 )
+
+            for fp in created:
+                excel_name = Path(fp).name
+                exp, proc = read_e1_counts(str(fp))
+                if exp and proc and exp != proc:
+                    summary_lines.append(f"   ↳ ⚠️ {excel_name} (processadas: {proc} / declaradas: {exp})")
+                else:
+                    summary_lines.append(f"   ↳ {excel_name}")
 
         progress.progress(i / total)
         time.sleep(0.2)
