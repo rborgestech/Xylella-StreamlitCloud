@@ -15,80 +15,45 @@ st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 ficheiro Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# CSS — estilo azul + animações suaves
+# CSS — estilo azul + animações rápidas
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
-.stButton > button[kind="primary"] {
-  background-color: #CA4300 !important;
-  border: 1px solid #CA4300 !important;
-  color: #fff !important;
-  font-weight: 600 !important;
-  border-radius: 6px !important;
-  transition: background-color 0.2s ease-in-out !important;
+.stButton > button[kind="primary"]{
+  background:#CA4300!important;border:1px solid #CA4300!important;color:#fff!important;
+  font-weight:600!important;border-radius:6px!important;transition:background-color .2s ease-in-out!important;
 }
-.stButton > button[kind="primary"]:hover {
-  background-color: #A13700 !important;
-  border-color: #A13700 !important;
-}
-[data-testid="stFileUploader"] > div:first-child {
-  border: 2px dashed #CA4300 !important;
-  border-radius: 10px !important;
-  padding: 1rem !important;
-}
+.stButton > button[kind="primary"]:hover{background:#A13700!important;border-color:#A13700!important;}
+[data-testid="stFileUploader"]>div:first-child{border:2px dashed #CA4300!important;border-radius:10px!important;padding:1rem!important}
 
-/* Caixas de resultado */
-.file-box {
-  border-radius: 8px;
-  padding: 0.6rem 1rem;
-  margin-bottom: 0.5rem;
-  opacity: 0;
-  animation: fadeIn 0.6s ease forwards;
-}
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(-5px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-.fadeOut { animation: fadeOut 0.3s ease forwards; }
-@keyframes fadeOut {
-  from { opacity: 1; transform: translateY(0); }
-  to { opacity: 0; transform: translateY(-3px); }
-}
+/* Caixas */
+.file-box{border-radius:8px;padding:.6rem 1rem;margin-bottom:.5rem;opacity:0;animation:fadeIn .2s ease forwards}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+.fadeOut{animation:fadeOut .15s ease forwards}
+@keyframes fadeOut{from{opacity:1;transform:translateY(0)}to{opacity:0;transform:translateY(-2px)}}
 
-/* Cores de estado */
-.file-box.success { background-color: #e6f9ee; border-left: 4px solid #1a7f37; }
-.file-box.error { background-color: #fdeaea; border-left: 4px solid #cc0000; }
-.file-box.warning { background-color: #fff8e5; border-left: 4px solid #e6a100; }
-.file-box.active { background-color: #E8F1FB; border-left: 4px solid #2B6CB0; }
+/* Estados */
+.file-box.active{background:#E8F1FB;border-left:4px solid #2B6CB0}
+.file-box.success{background:#e6f9ee;border-left:4px solid #1a7f37}
+.file-box.warning{background:#fff8e5;border-left:4px solid #e6a100}
+.file-box.error{background:#fdeaea;border-left:4px solid #cc0000}
 
 /* Texto */
-.file-title { font-size: 0.9rem; font-weight: 600; color: #1A365D; }
-.file-sub { font-size: 0.8rem; color: #2A4365; }
+.file-title{font-size:.9rem;font-weight:600;color:#1A365D}
+.file-sub{font-size:.8rem;color:#2A4365}
 
 /* Pontinhos animados */
-.dots::after {
-  content: '...';
-  display: inline-block;
-  animation: dots 1.5s steps(4, end) infinite;
-}
-@keyframes dots {
-  0%, 20% { color: rgba(42, 67, 101, 0); text-shadow: .25em 0 0 rgba(42, 67, 101, 0), .5em 0 0 rgba(42, 67, 101, 0); }
-  40% { color: #2A4365; text-shadow: .25em 0 0 rgba(42, 67, 101, 0), .5em 0 0 rgba(42, 67, 101, 0); }
-  60% { text-shadow: .25em 0 0 #2A4365, .5em 0 0 rgba(42, 67, 101, 0); }
-  80%, 100% { text-shadow: .25em 0 0 #2A4365, .5em 0 0 #2A4365; }
+.dots::after{content:'...';display:inline-block;animation:dots 1.2s steps(4,end) infinite}
+@keyframes dots{
+  0%,20%{color:rgba(42,67,101,0);text-shadow:.25em 0 0 rgba(42,67,101,0),.5em 0 0 rgba(42,67,101,0)}
+  40%{color:#2A4365;text-shadow:.25em 0 0 rgba(42,67,101,0),.5em 0 0 rgba(42,67,101,0)}
+  60%{text-shadow:.25em 0 0 #2A4365,.5em 0 0 rgba(42,67,101,0)}
+  80%,100%{text-shadow:.25em 0 0 #2A4365,.5em 0 0 #2A4365}
 }
 
-/* Botões */
-.clean-btn {
-  background-color: #fff !important;
-  border: 1px solid #ccc !important;
-  color: #333 !important;
-  font-weight: 600 !important;
-  border-radius: 8px !important;
-  padding: 0.5rem 1.2rem !important;
-  transition: all 0.2s ease-in-out !important;
-}
-.clean-btn:hover { border-color: #999 !important; color: #000 !important; }
+/* Botão clean (branco) */
+.clean-btn{background:#fff!important;border:1px solid #ccc!important;color:#333!important;font-weight:600!important;border-radius:8px!important;padding:.5rem 1.2rem!important;transition:all .2s}
+.clean-btn:hover{border-color:#999!important;color:#000!important}
 </style>
 """, unsafe_allow_html=True)
 
@@ -105,16 +70,16 @@ def reset_app():
     st.session_state.uploads = None
 
 # ───────────────────────────────────────────────
-# Funções auxiliares
+# Auxiliares
 # ───────────────────────────────────────────────
 def read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
+    """Lê E1 'processadas/declaredas' do template."""
     try:
         wb = load_workbook(xlsx_path, data_only=True)
         ws = wb.worksheets[0]
         val = str(ws["E1"].value or "")
         m = re.search(r"(\d+)\s*/\s*(\d+)", val)
-        if m:
-            return int(m.group(1)), int(m.group(2))
+        if m: return int(m.group(1)), int(m.group(2))
     except Exception:
         pass
     return None, None
@@ -123,8 +88,7 @@ def collect_debug_files(output_dirs: list[Path]) -> list[str]:
     debug_files = []
     for pattern in ["*_ocr_debug.txt", "process_log.csv", "process_summary_*.txt"]:
         for d in output_dirs:
-            for f in d.glob(pattern):
-                debug_files.append(str(f))
+            debug_files += [str(f) for f in d.glob(pattern)]
     return debug_files
 
 def build_zip_with_summary(excel_files: list[str], debug_files: list[str], summary_text: str) -> bytes:
@@ -155,18 +119,24 @@ if st.session_state.stage == "idle":
 
 elif st.session_state.stage == "processing":
     st.info("⏳ A processar ficheiros... aguarde até o processo terminar.")
+
     uploads = st.session_state.uploads
     session_dir = tempfile.mkdtemp(prefix="xylella_session_")
     final_dir = Path.cwd() / "output_final"
     final_dir.mkdir(exist_ok=True)
-    start_time = time.time()
+    start_ts = time.time()
 
-    all_excel, outdirs, summary_lines = [], [], []
-    error_count = warning_count = 0
+    all_excel: list[str] = []
+    outdirs: list[Path] = []
+    summary_lines: list[str] = []
+    error_count = 0
+    warning_count = 0
+
     total = len(uploads)
-    progress = st.progress(0)
+    progress = st.progress(0.0)  # única barra
 
     for i, up in enumerate(uploads, start=1):
+        # Caixa azul (placeholder único por ficheiro)
         placeholder = st.empty()
         active_html = f"""
         <div class='file-box active'>
@@ -175,25 +145,38 @@ elif st.session_state.stage == "processing":
         </div>"""
         placeholder.markdown(active_html, unsafe_allow_html=True)
 
+        # Guardar PDF em pasta temporária desta sessão
         tmpdir = Path(tempfile.mkdtemp(dir=session_dir))
         tmp_pdf = tmpdir / up.name
         with open(tmp_pdf, "wb") as f:
             f.write(up.getbuffer())
+
         os.environ["OUTPUT_DIR"] = str(tmpdir)
         outdirs.append(tmpdir)
+
+        # Processa (UI mantém a caixa azul)
         created = process_pdf(str(tmp_pdf))
 
+        # Fade-out rápido da azul
         placeholder.markdown(active_html.replace("file-box active", "file-box active fadeOut"), unsafe_allow_html=True)
-        time.sleep(0.1)
 
+        # Substitui por resultado final (sem ecrã branco)
         if not created:
-            html = f"<div class='file-box error'><div class='file-title'>📄 {up.name}</div><div class='file-sub'>❌ Erro: nenhum ficheiro gerado.</div></div>"
+            error_count += 1
+            html = (
+                f"<div class='file-box error'>"
+                f"<div class='file-title'>📄 {up.name}</div>"
+                f"<div class='file-sub'>❌ Erro: nenhum ficheiro gerado.</div>"
+                f"</div>"
+            )
             placeholder.markdown(html, unsafe_allow_html=True)
             summary_lines.append(f"{up.name}: erro - nenhum ficheiro gerado.")
-            error_count += 1
         else:
             req_count = len(created)
-            total_samples, discrepancies = 0, []
+            total_samples = 0
+            discrepancies: list[str] = []
+
+            # Copia para output_final, lê E1 e deteta discrepâncias
             for fp in created:
                 dest = final_dir / Path(fp).name
                 shutil.copy(fp, dest)
@@ -205,8 +188,8 @@ elif st.session_state.stage == "processing":
                         discrepancies.append(f"⚠️ {Path(fp).name} (processadas: {proc} / declaradas: {exp})")
 
             box_class = "warning" if discrepancies else "success"
-            discrep_html = ""
             if discrepancies:
+                warning_count += 1
                 discrep_html = (
                     "<div class='file-sub'>⚠️ <b>"
                     + str(len(discrepancies))
@@ -214,48 +197,44 @@ elif st.session_state.stage == "processing":
                     + "<br>".join(discrepancies)
                     + "</div>"
                 )
-                warning_count += 1
+            else:
+                discrep_html = ""
 
-            summary_lines.append(f"{up.name}: {req_count} requisições, {total_samples} amostras" +
-                                 (f" ⚠️ {len(discrepancies)} discrepância(s)." if discrepancies else ""))
-            for d in discrepancies:
-                summary_lines.append(f"   ↳ {d}")
-            for fp in created:
-                if not any(Path(fp).name in d for d in discrepancies):
-                    summary_lines.append(f"   ↳ {Path(fp).name}")
-
+            # Caixa final
             result_html = (
                 f"<div class='file-box {box_class}'>"
                 f"<div class='file-title'>📄 {up.name}</div>"
-                f"<div class='file-sub'><b>{req_count}</b> requisição(ões), <b>{total_samples}</b> amostras.</div>"
+                f"<div class='file-sub'><b>{req_count}</b> requisição(ões), "
+                f"<b>{total_samples}</b> amostras.</div>"
                 f"{discrep_html}</div>"
             )
             placeholder.markdown(result_html, unsafe_allow_html=True)
 
+            # Summary.txt (sem repetições)
+            summary_lines.append(
+                f"{up.name}: {req_count} requisições, {total_samples} amostras"
+                + (f" ⚠️ {len(discrepancies)} discrepância(s)." if discrepancies else "")
+            )
+            # primeiro as discrepantes (já com ⚠️), depois as restantes
+            for d in discrepancies:
+                summary_lines.append(f"   ↳ {d}")
+            for fp in created:
+                name = Path(fp).name
+                if not any(name in d for d in discrepancies):
+                    summary_lines.append(f"   ↳ {name}")
+
+        # Atualiza progresso e dá 50 ms ao render
         progress.progress(i / total)
-        st.experimental_rerun = None  # garante que não há chamadas pendentes
-        time.sleep(0.1)  # 100ms é suficiente para refresh visual suave
+        time.sleep(0.05)
 
-    # 🔄 Refresh imediato no fim do processamento
-    refresh_placeholder = st.empty()
-    refresh_placeholder.markdown(
-        "<div style='text-align:center;color:#2B6CB0;font-weight:600;'>Finalizando processamento<span class='dots'></span></div>",
-        unsafe_allow_html=True,
-    )
-    st.progress(1.0)
-    st.session_state["flush_time"] = time.time()
-    time.sleep(0.5)
-    refresh_placeholder.empty()
-    st.write("")  # força flush do buffer de renderização
-
-    # ──────────────── RESUMO FINAL ────────────────
-    total_time = time.time() - start_time
+    # ──────────────── Resumo final ────────────────
+    total_time = time.time() - start_ts
     debug_files = collect_debug_files(outdirs)
     lisbon_tz = pytz.timezone("Europe/Lisbon")
     now_local = datetime.now(lisbon_tz)
-    total_reqs = len(all_excel)
 
-    # ✅ regex corrigida
+    total_reqs = len(all_excel)
+    # regex correta para somar "... X amostra(s)"
     total_amostras = sum(int(m.group(1)) for l in summary_lines if (m := re.search(r"(\d+)\s+amostra", l)))
 
     summary_text = "\n".join(summary_lines)
@@ -271,22 +250,26 @@ elif st.session_state.stage == "processing":
     zip_bytes = build_zip_with_summary(all_excel, debug_files, summary_text)
     zip_name = f"xylella_output_{now_local:%Y%m%d_%H%M%S}.zip"
 
+    # Cabeçalho final
     st.markdown(f"""
     <div style='text-align:center;margin-top:1.5rem;'>
-        <h3>🏁 Processamento concluído!</h3>
-        <p>Foram gerados <b>{total_reqs}</b> ficheiro(s) Excel,
-        com um total de <b>{total_amostras}</b> amostras processadas.<br>
-        Tempo total de execução: <b>{total_time:.1f} segundos</b>.<br>
-        Executado em: <b>{now_local:%d/%m/%Y às %H:%M:%S}</b>.</p>
+      <h3>🏁 Processamento concluído!</h3>
+      <p>Foram gerados <b>{total_reqs}</b> ficheiro(s) Excel,
+      com um total de <b>{total_amostras}</b> amostras processadas.<br>
+      Tempo total de execução: <b>{total_time:.1f} segundos</b>.<br>
+      Executado em: <b>{now_local:%d/%m/%Y às %H:%M:%S}</b>.</p>
     </div>
     """, unsafe_allow_html=True)
 
+    # Botões finais
     zip_b64 = base64.b64encode(zip_bytes).decode()
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown(f"""
-        <a href="data:application/zip;base64,{zip_b64}" download="{zip_name}">
-            <button class="clean-btn" style="width:100%;">⬇️ Descarregar resultados (ZIP)</button>
-        </a>""", unsafe_allow_html=True)
+        st.markdown(
+            f"<a href='data:application/zip;base64,{zip_b64}' download='{zip_name}'>"
+            f"<button class='clean-btn' style='width:100%;'>⬇️ Descarregar resultados (ZIP)</button>"
+            f"</a>",
+            unsafe_allow_html=True,
+        )
     with col2:
         st.button("🔁 Novo processamento", type="secondary", use_container_width=True, on_click=reset_app)
