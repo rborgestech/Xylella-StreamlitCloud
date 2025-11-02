@@ -49,6 +49,13 @@ st.markdown("""
   from { opacity: 0; transform: translateY(-5px); }
   to { opacity: 1; transform: translateY(0); }
 }
+.fadeOut {
+  animation: fadeOut 0.4s ease forwards;
+}
+@keyframes fadeOut {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-3px); }
+}
 
 /* Cores de estado */
 .file-box.success {
@@ -196,6 +203,11 @@ elif st.session_state.stage == "processing":
             unsafe_allow_html=True,
         )
 
+        # Fade-out antes da substituição
+        time.sleep(0.5)
+        placeholder.markdown("<div class='file-box active fadeOut'></div>", unsafe_allow_html=True)
+        time.sleep(0.4)
+
         tmpdir = Path(tempfile.mkdtemp(dir=session_dir))
         tmp_pdf = tmpdir / up.name
         with open(tmp_pdf, "wb") as f:
@@ -230,7 +242,6 @@ elif st.session_state.stage == "processing":
                             f"{Path(fp).name} (processadas: {proc} / declaradas: {exp})"
                         )
 
-            # Atualiza a caixa final (verde / amarela)
             if discrepancies:
                 warning_count += 1
                 box_class = "warning"
@@ -255,7 +266,6 @@ elif st.session_state.stage == "processing":
                 f"{discrep_html}"
                 f"</div>"
             )
-
             placeholder.markdown(html, unsafe_allow_html=True)
 
             # Adiciona ao resumo detalhado
