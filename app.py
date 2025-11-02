@@ -15,7 +15,7 @@ st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 ficheiro Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# CSS — estilo azul com cores de estado
+# CSS — estilo azul + animação de transição
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -36,11 +36,21 @@ st.markdown("""
   border-radius: 10px !important;
   padding: 1rem !important;
 }
+
+/* Caixa base */
 .file-box {
   border-radius: 8px;
   padding: 0.6rem 1rem;
   margin-bottom: 0.5rem;
+  opacity: 0;
+  animation: fadeIn 0.6s ease forwards;
 }
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Cores de estado */
 .file-box.success {
   background-color: #e6f9ee;
   border-left: 4px solid #1a7f37;
@@ -57,8 +67,12 @@ st.markdown("""
   background-color: #E8F1FB;
   border-left: 4px solid #2B6CB0;
 }
+
+/* Conteúdo */
 .file-title { font-size: 0.9rem; font-weight: 600; color: #1A365D; }
 .file-sub { font-size: 0.8rem; color: #2A4365; }
+
+/* Botões */
 .clean-btn {
   background-color: #fff !important;
   border: 1px solid #ccc !important;
@@ -158,7 +172,7 @@ elif st.session_state.stage == "processing":
     for i, up in enumerate(uploads, start=1):
         placeholder = st.empty()
 
-        # Mostra o ficheiro ativo (fundo azul + animação ...)
+        # Mostra o ficheiro ativo (azul com animação de pontos)
         for frame in [".", "..", "..."]:
             placeholder.markdown(
                 f"""
@@ -202,7 +216,7 @@ elif st.session_state.stage == "processing":
                     total_samples += proc
                     if exp != proc:
                         discrepancies.append(
-                            f"{Path(fp).name} (processadas: <b>{proc}</b> / declaradas: <b>{exp}</b>)"
+                            f"{Path(fp).name} (processadas: {proc} / declaradas: {exp})"
                         )
 
             if discrepancies:
@@ -215,9 +229,11 @@ elif st.session_state.stage == "processing":
                     + "<br>".join(discrepancies)
                     + "</div>"
                 )
+                discrep_str = f" ⚠️ {len(discrepancies)} discrepância(s)."
             else:
                 box_class = "success"
                 discrep_html = ""
+                discrep_str = ""
 
             html = (
                 f"<div class='file-box {box_class}'>"
@@ -229,9 +245,8 @@ elif st.session_state.stage == "processing":
             )
 
             placeholder.markdown(html, unsafe_allow_html=True)
-            discrep_str = f" ⚠️ {len(discrepancies)} discrepância(s)" if discrepancies else ""
             summary_lines.append(
-                f"{up.name}: {req_count} requisições, {total_samples} amostras{discrep_str}."
+                f"{up.name}: {req_count} requisições, {total_samples} amostras{discrep_str}"
             )
 
         progress.progress(i / total)
