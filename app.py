@@ -131,4 +131,4 @@ if start and uploads:
             st.download_button("⬇️ Descarregar resultados (ZIP)", data=zip_bytes,
                                file_name=zip_name, mime="application/zip")
         else:
-            st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no
+            st.error("⚠️ Nenhum ficheiro Excel foi detetado para incluir no")
