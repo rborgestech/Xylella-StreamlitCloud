@@ -385,11 +385,18 @@ def extract_context_from_text(full_text: str):
     else:
         ctx["data_envio"] = datetime.now().strftime("%d/%m/%Y")
 
+       # ───────────────────────────────────────────────
+    # Nº de amostras declaradas (debug + robusto a OCR e placeholders)
     # ───────────────────────────────────────────────
-    # Nº de amostras declaradas (robusto a OCR e placeholders)
-    # ───────────────────────────────────────────────
+    print("\n──────── OCR RAW EXCERPT ────────")
+    sample_zone = re.findall(r"(N.?amostras?.{0,40})", full_text, flags=re.I)
+    for s in sample_zone:
+        print("👉", s)
+    print("────────────────────────────────\n")
+
     flat = re.sub(r"[\u00A0_\s]+", " ", full_text)
     flat = flat.replace("–", "-").replace("—", "-")
+
 
     # tenta apanhar várias variantes da frase (OCR-friendly)
     patterns = [
@@ -865,6 +872,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
 
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
     return created_files
+
 
 
 
