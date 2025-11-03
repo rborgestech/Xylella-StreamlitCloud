@@ -104,9 +104,12 @@ def process_pdf(pdf_path: str) -> List[str]:
             expected_count=expected,
             source_pdf=pdf_path
         )
+
         if out_path and os.path.exists(out_path):
             print(f"✅ Requisição {req_idx}: {len(rows)} amostras → {os.path.basename(out_path)}")
             return out_path
+        else:
+            print(f"⚠️ Requisição {req_idx}: nenhum ficheiro gerado.")
         return None
 
     # Caso A) várias requisições — formato [{rows, declared}]
