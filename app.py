@@ -1,169 +1,120 @@
 # -*- coding: utf-8 -*-
-"""
-app.py — Interface Streamlit do Processador Xylella
-
-Executa o OCR, parsing e geração de Excel a partir de PDFs SGS/DGAV.
-Usa core_xylella.py e xylella_processor.py como backend.
-"""
-
 import streamlit as st
-import time
-import io
-import os
+import os, time, base64, zipfile, io
 from datetime import datetime
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
+from core_xylella import read_e1_counts
 import xylella_processor as processor
-from core_xylella import read_e1_counts  # caso precises de validar o E1
 
-# ───────────────────────────────────────────────
-# Configuração inicial
-# ───────────────────────────────────────────────
-st.set_page_config(page_title="Xylella Processor", layout="centered")
-st.title("🧪 Processador Xylella")
-st.markdown("Carrega um ou mais ficheiros PDF para processar:")
+# Configuração base
+st.set_page_config(page_title="Xylella Processor", page_icon="🧪", layout="centered")
+st.title("🧪 Xylella Processor")
+st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 ficheiro Excel por requisição.")
 
-uploaded_files = st.file_uploader("Seleciona ficheiros PDF", type=["pdf"], accept_multiple_files=True)
+if "processing" not in st.session_state:
+    st.session_state.processing = False
 
-# ───────────────────────────────────────────────
-# Funções auxiliares
-# ───────────────────────────────────────────────
-def process_single_pdf(uploaded_file):
-    """Guarda o PDF temporariamente e processa-o via xylella_processor."""
-    temp_dir = Path("/tmp/xylella_input")
-    temp_dir.mkdir(exist_ok=True, parents=True)
-    temp_path = temp_dir / uploaded_file.name
+# Upload
+uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True)
 
-    with open(temp_path, "wb") as f:
-        f.write(uploaded_file.read())
-
-    # Mostra box azul enquanto processa
-    with st.container():
-        st.info(f"📄 A processar: **{uploaded_file.name}** ...")
-        start_time = time.time()
-
-        try:
-            created_files = processor.process_pdf(str(temp_path))
-        except Exception as e:
-            st.error(f"❌ Erro ao processar {uploaded_file.name}: {e}")
-            return [], 0, 0, 0
-
-        elapsed = time.time() - start_time
-
-        # Análise dos ficheiros gerados
-        total_samples = 0
-        discrepancies = []
-        details = []
-
-        for p in created_files:
-            exp, proc = read_e1_counts(p)
-            total_samples += proc or 0
-            if exp is not None and proc is not None and exp != proc:
-                discrepancies.append((p, exp, proc))
-            details.append((p, exp, proc))
-
-        return created_files, total_samples, len(discrepancies), elapsed, details
-
-
-def build_summary(results, total_elapsed):
-    """Constrói texto do summary.txt no formato solicitado."""
+def build_summary(results, total_time):
     lines = []
     total_excels = 0
     total_samples = 0
-    total_discrep_files = 0
+    discrep_files = 0
 
-    for r in results:
-        pdf = r["name"]
-        nreq = len(r["files"])
-        nsamples = r["total_samples"]
-        ndisc = r["discrepancies"]
-        details = r["details"]
-
-        line = f"📄 {pdf}: {nreq} requisição(ões), {nsamples} amostras"
-        if ndisc > 0:
-            line += f" ⚠️ {ndisc} discrepância(s)"
-        lines.append(line)
-
-        for (p, exp, proc) in details:
-            base = os.path.basename(p)
-            if exp is not None and proc is not None and exp != proc:
-                lines.append(f"   ↳ ⚠️ {base} (processadas: {proc} / declaradas: {exp})")
+    for res in results:
+        pdf = res["name"]
+        reqs = res["reqs"]
+        samples = res["samples"]
+        discrep = res["discrepancies"]
+        lines.append(f"📄 {pdf}: {reqs} requisição(ões), {samples} amostras" + (f" ⚠️ {discrep} discrepância(s)" if discrep else ""))
+        for d in res["details"]:
+            base = os.path.basename(d["file"])
+            if d["disc"]:
+                lines.append(f"   ↳ ⚠️ {base} (processadas: {d['proc']} / declaradas: {d['exp']})")
             else:
                 lines.append(f"   ↳ {base}")
+        total_excels += len(res["details"])
+        total_samples += samples
+        if discrep:
+            discrep_files += 1
 
-        total_excels += len(details)
-        total_samples += nsamples
-        total_discrep_files += ndisc
-
+    lines.append("")
     lines.append(f"📊 Total: {total_excels} ficheiro(s) Excel")
     lines.append(f"🧪 Total de amostras: {total_samples}")
-    lines.append(f"⏱️ Tempo total: {total_elapsed:.1f} segundos")
+    lines.append(f"⏱️ Tempo total: {total_time:.1f} segundos")
     lines.append(f"📅 Executado em: {datetime.now().strftime('%d/%m/%Y às %H:%M:%S')}")
-    if total_discrep_files > 0:
-        lines.append(f"⚠️ {total_discrep_files} ficheiro(s) com discrepâncias")
+    if discrep_files:
+        lines.append(f"⚠️ {discrep_files} ficheiro(s) com discrepâncias")
     else:
         lines.append("✅ Nenhum ficheiro com discrepâncias")
-
     return "\n".join(lines)
 
 
-# ───────────────────────────────────────────────
-# Botão de execução
-# ───────────────────────────────────────────────
-if uploaded_files:
-    if st.button("🚀 Processar ficheiros de Input"):
-        st.write("⏳ A processar ficheiros... aguarde até o processo terminar.")
-        start_global = time.time()
-        results = []
+def process_pdf_file(file):
+    temp_path = Path("/tmp") / file.name
+    with open(temp_path, "wb") as f:
+        f.write(file.read())
+    created = processor.process_pdf(str(temp_path))
+    details = []
+    total_samples = 0
+    discrepancies = 0
 
-        for uploaded_file in uploaded_files:
-            files, total_samples, ndisc, elapsed, details = process_single_pdf(uploaded_file)
-            results.append({
-                "name": uploaded_file.name,
-                "files": files,
-                "total_samples": total_samples,
-                "discrepancies": ndisc,
-                "details": details
-            })
-            time.sleep(0.1)  # pausa curta para evitar sobreposição visual
+    for path in created:
+        exp, proc = read_e1_counts(path)
+        total_samples += proc or 0
+        is_disc = (exp is not None and proc is not None and exp != proc)
+        if is_disc:
+            discrepancies += 1
+        details.append({"file": path, "exp": exp, "proc": proc, "disc": is_disc})
+    return {
+        "name": file.name,
+        "reqs": len(created),
+        "samples": total_samples,
+        "discrepancies": discrepancies,
+        "details": details
+    }
 
-        total_elapsed = time.time() - start_global
-        summary_txt = build_summary(results, total_elapsed)
 
-        # Exibe resumo
-        st.markdown("### 📊 Resumo final")
-        st.text(summary_txt)
+if uploads and st.button("🚀 Processar ficheiros"):
+    st.session_state.processing = True
+    start = time.time()
+    results = []
+    placeholders = []
 
-        # Guarda o summary.txt
-        out_summary = Path("/tmp/summary.txt")
-        out_summary.write_text(summary_txt, encoding="utf-8")
+    for file in uploads:
+        ph = st.empty()
+        ph.info(f"📄 {file.name} — a processar...")
+        placeholders.append(ph)
 
-        # ZIP com os ficheiros Excel
-        all_excels = [f for r in results for f in r["files"] if os.path.exists(f)]
-        if all_excels:
-            import zipfile, io
-            zip_buffer = io.BytesIO()
-            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-                for p in all_excels:
-                    zf.write(p, arcname=os.path.basename(p))
-            st.download_button(
-                label="📦 Descarregar ZIP",
-                data=zip_buffer.getvalue(),
-                file_name="xylella_excels.zip",
-                mime="application/zip"
-            )
+    with ThreadPoolExecutor(max_workers=min(4, len(uploads))) as ex:
+        futures = {ex.submit(process_pdf_file, f): i for i, f in enumerate(uploads)}
+        for fut in as_completed(futures):
+            idx = futures[fut]
+            try:
+                res = fut.result()
+                results.append(res)
+                placeholders[idx].success(f"✅ {res['name']} — {res['reqs']} requisição(ões), {res['samples']} amostras.")
+            except Exception as e:
+                placeholders[idx].error(f"❌ {uploads[idx].name}: {e}")
 
-        st.download_button(
-            label="🧾 Descarregar summary.txt",
-            data=summary_txt.encode("utf-8"),
-            file_name="summary.txt",
-            mime="text/plain"
-        )
+    total_time = time.time() - start
+    summary = build_summary(results, total_time)
+    st.markdown("### 📊 Resumo final")
+    st.text(summary)
 
-        st.success("🏁 Processamento concluído!")
+    # ZIP
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for res in results:
+            for d in res["details"]:
+                if os.path.exists(d["file"]):
+                    zf.write(d["file"], arcname=os.path.basename(d["file"]))
+    zip_buffer.seek(0)
+    st.download_button("📦 Descarregar ZIP", data=zip_buffer, file_name="xylella_output.zip", mime="application/zip")
 
-        # botão novo processamento
-        if st.button("🔄 Novo processamento"):
-            st.session_state.clear()
-            st.experimental_rerun()
+    st.download_button("🧾 Descarregar summary.txt", data=summary.encode("utf-8"), file_name="summary.txt", mime="text/plain")
+
+    st.success("🏁 Processamento concluído!")
