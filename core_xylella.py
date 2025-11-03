@@ -12,23 +12,15 @@ Requer:
   - OUTPUT_DIR (env) — diretório onde guardar .xlsx e _ocr_debug.txt
 """
 
-import os
-import re
-import time
-import tempfile
-import importlib
-import requests
-import csv
+import os, re, time, tempfile, requests, csv
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, List, Optional
-
-# 🟢 Biblioteca Excel
+from typing import Dict, Any, List
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill, Font, Alignment
 
 # ───────────────────────────────────────────────
-# Diretórios
+# Diretórios e paths
 # ───────────────────────────────────────────────
 try:
     OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", tempfile.gettempdir()))
@@ -69,7 +61,6 @@ def azure_analyze_pdf(pdf_path: str) -> Dict[str, Any]:
     if not op:
         raise RuntimeError("Azure não devolveu Operation-Location.")
 
-    # Polling
     start = time.time()
     while True:
         r = requests.get(op, headers={"Ocp-Apim-Subscription-Key": AZURE_API_KEY}, timeout=60)
@@ -86,21 +77,7 @@ def azure_analyze_pdf(pdf_path: str) -> Dict[str, Any]:
 # ───────────────────────────────────────────────
 # Utilitários
 # ───────────────────────────────────────────────
-def clean_value(s: str) -> str:
-    if s is None:
-        return ""
-    if isinstance(s, (int, float)):
-        return str(s)
-    s = re.sub(r"[\u200b\t\r\f\v]+", " ", str(s))
-    s = (s.strip()
-           .replace("N/A", "")
-           .replace("%", "")
-           .replace("\n", " ")
-           .replace("  ", " "))
-    return s.strip()
-
 def extract_all_text(result_json: Dict[str, Any]) -> str:
-    """Concatena todo o texto OCR linha a linha."""
     lines = []
     for pg in result_json.get("analyzeResult", {}).get("pages", []):
         for ln in pg.get("lines", []):
@@ -133,7 +110,7 @@ def _to_datetime(value: str):
         return None
 
 # ───────────────────────────────────────────────
-# Extração de contexto e nº amostras
+# Extração de contexto (zona, DGAV, datas, nº amostras)
 # ───────────────────────────────────────────────
 def extract_context_from_text(full_text: str):
     ctx = {}
@@ -153,15 +130,17 @@ def extract_context_from_text(full_text: str):
     ctx["data_envio"] = normalize_date_str(m_envio.group(1)) if m_envio else ctx["default_colheita"]
 
     # ───────────────────────────────────────────────
-    # Nº de amostras declaradas (tolerante a OCR, sublinhados e ruído)
+    # Nº de amostras declaradas (robusto a OCR e placeholders)
     # ───────────────────────────────────────────────
-    flat = re.sub(r"[\u00A0_\s]+", " ", full_text)
+    flat = re.sub(r"[\u00A0_\s]+", " ", full_text)  # normaliza espaços e underscores
     flat = flat.replace("–", "-").replace("—", "-")
 
+    # aceita variações e ruído OCR
     patterns = [
         r"N[º°o]?\s*de\s*amostras(?:\s+neste\s+envio)?\s*[:\-]?\s*([0-9OoQIl]{1,4})\b",
         r"N\s*[º°o]?\s*amostras.*?([0-9OoQIl]{1,4})\b",
-        r"amostras\s*(?:neste\s+envio)?\s*[:\-]?\s*([0-9OoQIl]{1,4})\b"
+        r"amostras\s*(?:neste\s+envio)?\s*[:\-]?\s*([0-9OoQIl]{1,4})\b",
+        r"n\s*o\s*de\s*amostras.*?([0-9OoQIl]{1,4})\b"
     ]
     found = None
     for pat in patterns:
@@ -172,7 +151,9 @@ def extract_context_from_text(full_text: str):
 
     if found:
         raw = found.strip()
-        raw = raw.replace("O", "0").replace("o", "0").replace("Q", "0").replace("l", "1").replace("I", "1")
+        raw = (raw.replace("O", "0").replace("o", "0")
+                    .replace("Q", "0").replace("q", "0")
+                    .replace("I", "1").replace("l", "1"))
         try:
             ctx["declared_samples"] = int(raw)
         except ValueError:
@@ -183,7 +164,7 @@ def extract_context_from_text(full_text: str):
     return ctx
 
 # ───────────────────────────────────────────────
-# Parser principal de tabelas
+# Parser principal
 # ───────────────────────────────────────────────
 def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
@@ -197,7 +178,7 @@ def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, An
         nr = max(c.get("rowIndex", 0) for c in t.get("cells", [])) + 1
         grid = [[""] * nc for _ in range(nr)]
         for c in t.get("cells", []):
-            grid[c["rowIndex"]][c["columnIndex"]] = clean_value(c.get("content", ""))
+            grid[c["rowIndex"]][c["columnIndex"]] = (c.get("content") or "").strip()
 
         for row in grid:
             if not row or not any(row):
