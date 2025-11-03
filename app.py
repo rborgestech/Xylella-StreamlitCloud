@@ -78,28 +78,21 @@ def reset_app():
 def read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
     """
     Lê E1: 'Nº Amostras: {esperado} / {processado}'.
-    Devolve (esperado, processado).
+    Devolve (esperado, processado), mesmo que a célula esteja fundida.
     """
     try:
         wb = load_workbook(xlsx_path, data_only=True)
-        ws = wb.worksheets[0]
-        val = str(ws["E1"].value or "")
+        ws = wb.active  # garante folha certa
+        # tenta várias células candidatas
+        candidates = [ws["E1"].value, ws.cell(1, 5).value, ws.cell(1, 6).value]
+        val = next((v for v in candidates if isinstance(v, str) and "/" in v), "")
         m = re.search(r"(\d+)\s*/\s*(\d+)", val)
         if m:
             exp, proc = int(m.group(1)), int(m.group(2))
             return exp, proc
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[WARN] Falha ao ler E1 em {xlsx_path}: {e}")
     return None, None
-
-def collect_debug_files(output_dirs: List[Path]) -> List[str]:
-    debug_files = []
-    for pattern in ["*_ocr_debug.txt", "process_log.csv", "process_summary_*.txt"]:
-        for d in output_dirs:
-            for f in d.glob(pattern):
-                debug_files.append(str(f))
-    return debug_files
-
 def build_zip_with_summary(excel_files: List[str], debug_files: List[str], summary_text: str) -> bytes:
     mem = io.BytesIO()
     with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as z:
