@@ -389,40 +389,44 @@ def extract_context_from_text(full_text: str):
     # ───────────────────────────────────────────────
     # Nº de amostras declaradas (robusto a OCR e placeholders)
     # ───────────────────────────────────────────────
-    flat = re.sub(r"\s+", " ", full_text)
 
-    # Normalizações de OCR: NBSP e sublinhados usados como "campo em branco"
-    flat = flat.replace("\u00A0", " ").replace("_", " ")
+    flat = full_text
+    flat = flat.replace("\u00A0", " ")        # NBSP
+    flat = flat.replace("_", " ")             # underscores
+    flat = re.sub(r"[–—]+", "-", flat)        # travessões → hífen
+    flat = re.sub(r"\s+", " ", flat)          # múltiplos espaços → 1
+    flat = re.sub(r"N\s*[º°oO0]\s*", "Nº ", flat, flags=re.I)
 
-    # Aceita 'º', '°' ou 'o' depois do N; permite lixo opcional antes do número
-    m_decl = re.search(
-        r"N[º°o]?\s*de\s*amostras(?:\s+neste\s+envio)?\s*[:\-]?\s*[\s\-]*([0-9OoQ]{1,4})\b",
-        flat,
-        re.I,
-    )
+    # tentar várias formas possíveis de escrita OCR
+    patterns = [
+        r"N[º°oO0]?\s*(?:de|do)?\s*amostras(?:\s+neste\s+envio)?\s*[:\-]?\s*([0-9OoQIl]{1,4})\b",
+        r"N[º°oO0]?\s*(?:amostras|amostra)\s*[:\-]?\s*([0-9OoQIl]{1,4})\b",
+        r"amostras\s*(?:neste\s+envio)?\s*[:\-]?\s*([0-9OoQIl]{1,4})\b",
+        r"N\s*o\s*de\s*amostras.*?([0-9OoQIl]{1,4})\b",
+        r"N\s*[º°oO0]\s*(?:amostras|amostra)\s*[^\d]{0,5}([0-9OoQIl]{1,4})\b",
+        r"n[º°]?\s*amostras[^\d]{0,5}([0-9OoQIl]{1,4})\b",
+    ]
 
-    if m_decl:
-        raw = m_decl.group(1).strip()
-        # Corrige erros típicos de OCR
-        raw = raw.replace("O", "0").replace("o", "0").replace("Q", "0")
+    found = None
+    for pat in patterns:
+        m_decl = re.search(pat, flat, re.I)
+        if m_decl:
+            found = m_decl.group(1)
+            break
+
+    if found:
+        raw = found.strip()
+        raw = (raw
+               .replace("O", "0").replace("o", "0")
+               .replace("Q", "0").replace("q", "0")
+               .replace("I", "1").replace("l", "1"))
         try:
             ctx["declared_samples"] = int(raw)
         except ValueError:
             ctx["declared_samples"] = 0
     else:
-        # fallback por linha: apanha o nº na linha completa
-        line = None
-        m_line = re.search(r"(N[º°o]?\s*de\s*amostras(?:\s+neste\s+envio)?[^\n]*)", full_text, re.I)
-        if m_line:
-            line = m_line.group(1).replace("\u00A0", " ").replace("_", " ")
-            m_num = re.search(r"([0-9OoQ]{1,4})\b", line)
-            if m_num:
-                raw = m_num.group(1).replace("O", "0").replace("o", "0").replace("Q", "0")
-                ctx["declared_samples"] = int(raw) if raw.isdigit() else 0
-            else:
-                ctx["declared_samples"] = 0
-        else:
-            ctx["declared_samples"] = 0
+        ctx["declared_samples"] = 0
+
 
     # 🧠 Fallback inteligente: se 0 mas já há amostras detetadas, usa a contagem real
     if ctx["declared_samples"] == 0:
@@ -841,6 +845,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
 
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
     return created_files
+
 
 
 
