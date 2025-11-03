@@ -15,7 +15,7 @@ st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 ficheiro Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# CSS — estilo azul + animações suaves
+# CSS
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -74,7 +74,10 @@ def reset_app():
 # Funções auxiliares
 # ───────────────────────────────────────────────
 def read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
-    """Lê E1: 'Nº Amostras: {esperado} / {processado}' — tolera inversões e valores isolados."""
+    """
+    Lê E1: 'Nº Amostras: {esperado} / {processado}'.
+    Se falhar, estima nº processadas pelo nº de linhas preenchidas.
+    """
     try:
         wb = load_workbook(xlsx_path, data_only=True)
         ws = wb.active
@@ -83,16 +86,20 @@ def read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
         m = re.search(r"(\d+)\s*/\s*(\d+)", val)
         if m:
             n1, n2 = int(m.group(1)), int(m.group(2))
-            if n1 < n2:  # SGS às vezes inverte
+            if n1 < n2:
                 return n2, n1
             return n1, n2
         single = re.search(r"(\d+)", val)
         if single:
             n = int(single.group(1))
             return n, n
+        # fallback: conta linhas preenchidas
+        count_rows = sum(1 for r in range(4, 200) if ws.cell(r, 1).value)
+        if count_rows > 0:
+            return count_rows, count_rows
     except Exception as e:
         print(f"[WARN] Falha ao ler E1 em {xlsx_path}: {e}")
-    return None, None
+    return 0, 0
 
 def collect_debug_files(output_dirs: list[Path]) -> list[str]:
     debug_files = []
@@ -151,7 +158,6 @@ elif st.session_state.stage == "processing":
     progress = st.progress(0.0)
 
     for i, up in enumerate(uploads, start=1):
-        # 🟦 Só uma secção azul de cada vez
         st.empty()
         placeholder = st.empty()
         placeholder.markdown(f"""
@@ -167,9 +173,8 @@ elif st.session_state.stage == "processing":
         os.environ["OUTPUT_DIR"] = str(tmpdir)
         outdirs.append(tmpdir)
 
-        # ⚙️ Processamento
         created = process_pdf(str(tmp_pdf))
-        time.sleep(0.6)  # mantém azul 0.6s
+        time.sleep(0.6)
 
         if not created:
             error_count += 1
@@ -185,10 +190,9 @@ elif st.session_state.stage == "processing":
                 shutil.copy(fp, dest)
                 all_excel.append(str(dest))
                 exp, proc = read_e1_counts(str(dest))
-                if exp and proc:
-                    total_samples += proc
-                    if exp != proc:
-                        discrepancies.append(f"⚠️ {Path(fp).name} (processadas: {proc} / declaradas: {exp})")
+                total_samples += proc or 0
+                if exp and proc and exp != proc:
+                    discrepancies.append(f"⚠️ {Path(fp).name} (processadas: {proc} / declaradas: {exp})")
 
             box_class = "warning" if discrepancies else "success"
             discrep_html = ""
