@@ -788,59 +788,79 @@ def append_process_log(pdf_name, req_id, processed, expected, out_path=None, sta
 # ───────────────────────────────────────────────
 # API pública usada pela app Streamlit
 # ───────────────────────────────────────────────
-def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
+# -*- coding: utf-8 -*-
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Dict, Any
+import os
+from pathlib import Path
+from datetime import datetime
+
+def process_pdf_sync(pdf_path: str) -> List[List[Dict[str, Any]]]:
     """
-    Executa o OCR Azure direto ao PDF e o parser Colab integrado.
-    Devolve: lista de requisições, cada uma no formato:
-      {
-        "rows": [ {dados da amostra}, ... ],
-        "expected": nº_declarado
-      }
-    A escrita do Excel é feita a jusante (no xylella_processor.py),
-    1 ficheiro por requisição, com validação esperadas/processadas.
+    Executa o OCR Azure direto ao PDF e o parser Colab integrado, em paralelo por requisição.
+    Devolve: lista de requisições (cada item = lista de amostras dict).
+    A escrita do Excel é feita a jusante (no xylella_processor.py), 1 ficheiro por requisição.
     """
     base = os.path.basename(pdf_path)
     print(f"\n🧪 Início de processamento: {base}")
 
-    # 1️⃣ Executar OCR Azure
+    # Diretório de output e ficheiro de debug
+    OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "/tmp"))
+    txt_path = OUTPUT_DIR / f"{os.path.splitext(base)[0]}_ocr_debug.txt"
+
+    # 1️⃣ OCR Azure direto
     result_json = azure_analyze_pdf(pdf_path)
 
-    # 2️⃣ Guardar texto OCR global para debug
-    txt_path = OUTPUT_DIR / f"{os.path.splitext(base)[0]}_ocr_debug.txt"
+    # 2️⃣ Guardar texto OCR global (debug)
     txt_path.write_text(extract_all_text(result_json), encoding="utf-8")
     print(f"📝 Texto OCR bruto guardado em: {txt_path}")
 
-    # 3️⃣ Parser — dividir em requisições e extrair amostras
-    req_results = parse_all_requisitions(result_json, pdf_path, str(txt_path))
+    # 3️⃣ Dividir em requisições a processar
+    requisitions = parse_all_requisitions(result_json, pdf_path, str(txt_path))
+    total_reqs = len(requisitions)
+    print(f"🔍 {total_reqs} requisição(ões) detetada(s).")
 
-    # 4️⃣ Log e resumo de validação
-    total_amostras = sum(len(req["rows"]) for req in req_results)
-    print(f"✅ {base}: {len(req_results)} requisições, {total_amostras} amostras extraídas.")
+    # 4️⃣ Processamento paralelo de cada requisição
+    results = []
+    start_time = datetime.now()
+    with ThreadPoolExecutor(max_workers=min(4, total_reqs)) as executor:
+        futures = {executor.submit(_process_single_req, i, req, base, pdf_path): i for i, req in enumerate(requisitions, 1)}
+        for future in as_completed(futures):
+            try:
+                rows = future.result()
+                if rows:
+                    results.append(rows)
+            except Exception as e:
+                print(f"❌ Erro na requisição {futures[future]}: {e}")
 
-    # 5️⃣ Escrever ficheiros Excel diretamente (para compatibilidade cloud)
-    created_files = []
-    for i, req in enumerate(req_results, start=1):
+    # 5️⃣ Log de resumo
+    total_amostras = sum(len(r) for r in results)
+    elapsed = (datetime.now() - start_time).total_seconds()
+    print(f"✅ {base}: {len(results)} requisições processadas ({total_amostras} amostras) em {elapsed:.1f}s.")
+    return results
+
+
+def _process_single_req(i: int, req: Dict[str, Any], base: str, pdf_path: str) -> List[Dict[str, Any]]:
+    """
+    Processa uma única requisição (subfunção auxiliar paralela).
+    """
+    try:
         rows = req.get("rows", [])
         expected = req.get("expected", 0)
-
         if not rows:
             print(f"⚠️ Requisição {i}: sem amostras — ignorada.")
-            continue
-
-        base_name = os.path.splitext(base)[0]
-        out_name = f"{base_name}_req{i}.xlsx" if len(req_results) > 1 else f"{base_name}.xlsx"
-
-        out_path = write_to_template(rows, out_name, expected_count=expected, source_pdf=pdf_path)
-        created_files.append(out_path)
+            return []
 
         diff = len(rows) - (expected or 0)
         if expected and diff != 0:
-            print(f"⚠️ Requisição {i}: {len(rows)} amostras vs {expected} declaradas (diferença {diff:+d}).")
+            print(f"⚠️ Requisição {i}: {len(rows)} amostras vs {expected} declaradas ({diff:+d}).")
         else:
-            print(f"✅ Requisição {i}: {len(rows)} amostras gravadas → {out_path}")
+            print(f"✅ Requisição {i}: {len(rows)} amostras processadas com sucesso.")
 
-    print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
-    return created_files
+        return rows
+    except Exception as e:
+        print(f"❌ Erro interno na requisição {i}: {e}")
+        return []
 
 
 
