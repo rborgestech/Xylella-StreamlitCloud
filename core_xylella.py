@@ -390,6 +390,9 @@ def extract_context_from_text(full_text: str):
     # Nº de amostras declaradas (robusto a OCR e placeholders)
     # ───────────────────────────────────────────────
 
+        # ───────────────────────────────────────────────
+    # Nº de amostras declaradas (robusto a OCR e placeholders)
+    # ───────────────────────────────────────────────
     flat = full_text
     flat = flat.replace("\u00A0", " ")        # NBSP
     flat = flat.replace("_", " ")             # underscores
@@ -845,6 +848,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
 
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
     return created_files
+
 
 
 
