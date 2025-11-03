@@ -1,120 +1,234 @@
 # -*- coding: utf-8 -*-
 import streamlit as st
-import os, time, base64, zipfile, io
-from datetime import datetime
+import tempfile, os, shutil, time, io, zipfile, base64, pytz, re
 from pathlib import Path
+from datetime import datetime
+from typing import Tuple, List, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from core_xylella import read_e1_counts
-import xylella_processor as processor
+from xylella_processor import process_pdf
 
+# ───────────────────────────────────────────────
 # Configuração base
+# ───────────────────────────────────────────────
 st.set_page_config(page_title="Xylella Processor", page_icon="🧪", layout="centered")
 st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 ficheiro Excel por requisição.")
 
-if "processing" not in st.session_state:
-    st.session_state.processing = False
+# ───────────────────────────────────────────────
+# CSS — estilo e animações
+# ───────────────────────────────────────────────
+st.markdown("""
+<style>
+.stButton > button[kind="primary"]{
+  background:#CA4300!important;border:1px solid #CA4300!important;color:#fff!important;
+  font-weight:600!important;border-radius:6px!important;transition:background-color .2s ease-in-out!important;
+}
+.stButton > button[kind="primary"]:hover{background:#A13700!important;border-color:#A13700!important;}
+[data-testid="stFileUploader"]>div:first-child{border:2px dashed #CA4300!important;border-radius:10px!important;padding:1rem!important}
 
-# Upload
-uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True)
-
-def build_summary(results, total_time):
-    lines = []
-    total_excels = 0
-    total_samples = 0
-    discrep_files = 0
-
-    for res in results:
-        pdf = res["name"]
-        reqs = res["reqs"]
-        samples = res["samples"]
-        discrep = res["discrepancies"]
-        lines.append(f"📄 {pdf}: {reqs} requisição(ões), {samples} amostras" + (f" ⚠️ {discrep} discrepância(s)" if discrep else ""))
-        for d in res["details"]:
-            base = os.path.basename(d["file"])
-            if d["disc"]:
-                lines.append(f"   ↳ ⚠️ {base} (processadas: {d['proc']} / declaradas: {d['exp']})")
-            else:
-                lines.append(f"   ↳ {base}")
-        total_excels += len(res["details"])
-        total_samples += samples
-        if discrep:
-            discrep_files += 1
-
-    lines.append("")
-    lines.append(f"📊 Total: {total_excels} ficheiro(s) Excel")
-    lines.append(f"🧪 Total de amostras: {total_samples}")
-    lines.append(f"⏱️ Tempo total: {total_time:.1f} segundos")
-    lines.append(f"📅 Executado em: {datetime.now().strftime('%d/%m/%Y às %H:%M:%S')}")
-    if discrep_files:
-        lines.append(f"⚠️ {discrep_files} ficheiro(s) com discrepâncias")
-    else:
-        lines.append("✅ Nenhum ficheiro com discrepâncias")
-    return "\n".join(lines)
+/* Caixas */
+.file-box{border-radius:8px;padding:.6rem 1rem;margin-bottom:.5rem;opacity:0;animation:fadeIn .3s ease forwards}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+.file-box.active{background:#E8F1FB;border-left:4px solid #2B6CB0}
+.file-box.success{background:#e6f9ee;border-left:4px solid #1a7f37}
+.file-box.warning{background:#fff8e5;border-left:4px solid #e6a100}
+.file-box.error{background:#fdeaea;border-left:4px solid #cc0000}
+.file-title{font-size:.9rem;font-weight:600;color:#1A365D}
+.file-sub{font-size:.8rem;color:#2A4365}
+</style>
+""", unsafe_allow_html=True)
 
 
-def process_pdf_file(file):
-    temp_path = Path("/tmp") / file.name
-    with open(temp_path, "wb") as f:
-        f.write(file.read())
-    created = processor.process_pdf(str(temp_path))
-    details = []
-    total_samples = 0
-    discrepancies = 0
+# ───────────────────────────────────────────────
+# Estado e reset
+# ───────────────────────────────────────────────
+if "stage" not in st.session_state:
+    st.session_state.stage = "idle"
+if "upload_paths" not in st.session_state:
+    st.session_state.upload_paths = []
 
-    for path in created:
-        exp, proc = read_e1_counts(path)
-        total_samples += proc or 0
-        is_disc = (exp is not None and proc is not None and exp != proc)
-        if is_disc:
-            discrepancies += 1
-        details.append({"file": path, "exp": exp, "proc": proc, "disc": is_disc})
+def reset_app():
+    st.session_state.stage = "idle"
+    st.session_state.upload_paths = []
+
+
+# ───────────────────────────────────────────────
+# Auxiliares
+# ───────────────────────────────────────────────
+def build_zip_with_summary(excel_files: List[str], summary_text: str) -> bytes:
+    mem = io.BytesIO()
+    with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as z:
+        for p in excel_files:
+            if os.path.exists(p):
+                z.write(p, arcname=os.path.basename(p))
+        z.writestr("summary.txt", summary_text)
+    mem.seek(0)
+    return mem.read()
+
+def render_box(placeholder, kind: str, title: str, subtitle_html: str):
+    html = f"<div class='file-box {kind}'><div class='file-title'>{title}</div><div class='file-sub'>{subtitle_html}</div></div>"
+    placeholder.markdown(html, unsafe_allow_html=True)
+
+
+# ───────────────────────────────────────────────
+# Processa UM PDF
+# ───────────────────────────────────────────────
+def process_one_pdf(pdf_path: str, final_dir: Path) -> Dict:
+    created = process_pdf(pdf_path) or []
+    req_count = len(created)
+    samples_total = 0
+    discrepancies = []
+
+    for fp in created:
+        dest = final_dir / Path(fp).name
+        try:
+            shutil.copy(fp, dest)
+        except Exception:
+            pass
+        exp, proc = read_e1_counts(str(dest))
+        if proc:
+            samples_total += proc
+        if exp is not None and proc is not None and exp != proc:
+            discrepancies.append({"xlsx": dest.name, "proc": proc, "exp": exp})
+
     return {
-        "name": file.name,
-        "reqs": len(created),
-        "samples": total_samples,
+        "pdf_name": os.path.basename(pdf_path),
+        "created": [str(final_dir / Path(fp).name) for fp in created],
+        "req_count": req_count,
+        "samples_total": samples_total,
         "discrepancies": discrepancies,
-        "details": details
     }
 
 
-if uploads and st.button("🚀 Processar ficheiros"):
-    st.session_state.processing = True
-    start = time.time()
-    results = []
-    placeholders = []
+# ───────────────────────────────────────────────
+# Interface principal
+# ───────────────────────────────────────────────
+if st.session_state.stage == "idle":
+    uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True, key="file_uploader")
+    start = st.button("📄 Processar ficheiros de Input", type="primary", disabled=not uploads)
 
-    for file in uploads:
+    if start and uploads:
+        session_dir = Path(tempfile.mkdtemp(prefix="xylella_session_"))
+        saved = []
+        for up in uploads:
+            tmp_pdf = session_dir / up.name
+            with open(tmp_pdf, "wb") as f:
+                f.write(up.getbuffer())
+            saved.append({"name": up.name, "path": str(tmp_pdf)})
+        st.session_state.upload_paths = saved
+        st.session_state.stage = "processing"
+        st.rerun()
+    else:
+        if not uploads:
+            st.info("💡 Carrega um ficheiro PDF para ativar o botão de processamento.")
+
+
+elif st.session_state.stage == "processing":
+    st.info("⏳ A processar ficheiros... aguarde até o processo terminar.")
+    items = st.session_state.upload_paths or []
+    if not items:
+        st.warning("⚠️ Nenhum ficheiro encontrado.")
+        st.session_state.stage = "idle"
+        st.rerun()
+
+    final_dir = Path.cwd() / "output_final"
+    final_dir.mkdir(exist_ok=True)
+    placeholders = []
+    for i, it in enumerate(items, start=1):
         ph = st.empty()
-        ph.info(f"📄 {file.name} — a processar...")
+        render_box(ph, "active", f"📄 {it['name']}", f"Ficheiro {i} de {len(items)} — a processar...")
         placeholders.append(ph)
 
-    with ThreadPoolExecutor(max_workers=min(4, len(uploads))) as ex:
-        futures = {ex.submit(process_pdf_file, f): i for i, f in enumerate(uploads)}
+    progress = st.progress(0.0)
+    start_ts = time.time()
+    results: List[Dict] = []
+
+    with ThreadPoolExecutor(max_workers=min(4, len(items))) as ex:
+        futures = {ex.submit(process_one_pdf, it["path"], final_dir): idx for idx, it in enumerate(items)}
         for fut in as_completed(futures):
             idx = futures[fut]
             try:
                 res = fut.result()
-                results.append(res)
-                placeholders[idx].success(f"✅ {res['name']} — {res['reqs']} requisição(ões), {res['samples']} amostras.")
             except Exception as e:
-                placeholders[idx].error(f"❌ {uploads[idx].name}: {e}")
+                res = {"pdf_name": items[idx]["name"], "created": [], "req_count": 0, "samples_total": 0, "discrepancies": [], "error": str(e)}
 
-    total_time = time.time() - start
-    summary = build_summary(results, total_time)
-    st.markdown("### 📊 Resumo final")
-    st.text(summary)
+            results.append(res)
+            ph = placeholders[idx]
+            if res.get("error"):
+                render_box(ph, "error", f"📄 {res['pdf_name']}", f"❌ Erro: {res['error']}")
+            else:
+                warn = bool(res["discrepancies"])
+                box = "warning" if warn else "success"
+                sub = f"<b>{res['req_count']}</b> requisição(ões), <b>{res['samples_total']}</b> amostras."
+                if warn:
+                    sub += f"<br>⚠️ <b>{len(res['discrepancies'])}</b> discrepância(s)."
+                render_box(ph, box, f"📄 {res['pdf_name']}", sub)
+            progress.progress((idx + 1) / len(items))
 
-    # ZIP
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        for res in results:
-            for d in res["details"]:
-                if os.path.exists(d["file"]):
-                    zf.write(d["file"], arcname=os.path.basename(d["file"]))
-    zip_buffer.seek(0)
-    st.download_button("📦 Descarregar ZIP", data=zip_buffer, file_name="xylella_output.zip", mime="application/zip")
+    total_time = time.time() - start_ts
+    lisbon_tz = pytz.timezone("Europe/Lisbon")
+    now_local = datetime.now(lisbon_tz)
 
-    st.download_button("🧾 Descarregar summary.txt", data=summary.encode("utf-8"), file_name="summary.txt", mime="text/plain")
+    # ──────────────── Resumo final ────────────────
+    all_excel = []
+    summary_lines = []
+    total_samples_overall = 0
+    warning_count = 0
+    error_count = 0
 
-    st.success("🏁 Processamento concluído!")
+    for res in results:
+        pdf_name = res["pdf_name"]
+        req_count = res["req_count"]
+        samples_total = res["samples_total"]
+        total_samples_overall += samples_total
+        if res.get("error") or req_count == 0:
+            error_count += 1
+            summary_lines.append(f"📄 {pdf_name}: erro - nenhum ficheiro gerado.")
+            continue
+        if res["discrepancies"]:
+            warning_count += 1
+            summary_lines.append(f"📄 {pdf_name}: {req_count} requisição(ões), {samples_total} amostras ⚠️ {len(res['discrepancies'])} discrepância(s)")
+        else:
+            summary_lines.append(f"📄 {pdf_name}: {req_count} requisição(ões), {samples_total} amostras")
+
+        for disc in res["discrepancies"]:
+            summary_lines.append(f"   ↳ ⚠️ {disc['xlsx']} (processadas: {disc['proc']} / declaradas: {disc['exp']})")
+        for p in res["created"]:
+            all_excel.append(p)
+            if not any(d["xlsx"] == Path(p).name for d in res["discrepancies"]):
+                summary_lines.append(f"   ↳ {Path(p).name}")
+
+    summary_lines.append("")
+    summary_lines.append(f"📊 Total: {len(all_excel)} ficheiro(s) Excel")
+    summary_lines.append(f"🧪 Total de amostras: {total_samples_overall}")
+    summary_lines.append(f"⏱️ Tempo total: {total_time:.1f} segundos")
+    summary_lines.append(f"📅 Executado em: {now_local:%d/%m/%Y às %H:%M:%S}")
+    if warning_count:
+        summary_lines.append(f"⚠️ {warning_count} ficheiro(s) com discrepâncias")
+    if error_count:
+        summary_lines.append(f"❌ {error_count} ficheiro(s) com erro")
+
+    summary_text = "\n".join(summary_lines)
+    zip_bytes = build_zip_with_summary(all_excel, summary_text)
+    zip_name = f"xylella_output_{now_local:%Y%m%d_%H%M%S}.zip"
+
+    st.markdown(f"""
+    <div style='text-align:center;margin-top:1.2rem;'>
+      <h3>🏁 Processamento concluído!</h3>
+      <p>Foram gerados <b>{len(all_excel)}</b> ficheiro(s) Excel,
+      com um total de <b>{total_samples_overall}</b> amostras processadas.<br>
+      Tempo total de execução: <b>{total_time:.1f} segundos</b>.<br>
+      Executado em: <b>{now_local:%d/%m/%Y às %H:%M:%S}</b>.</p>
+    </div>""", unsafe_allow_html=True)
+
+    zip_b64 = base64.b64encode(zip_bytes).decode()
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown(
+            f"<a href='data:application/zip;base64,{zip_b64}' download='{zip_name}'>"
+            f"<button class='stButton primary' style='width:100%;'>⬇️ Descarregar resultados (ZIP)</button>"
+            f"</a>", unsafe_allow_html=True
+        )
+    with col2:
+        st.button("🔁 Novo processamento", type="secondary", use_container_width=True, on_click=reset_app)
