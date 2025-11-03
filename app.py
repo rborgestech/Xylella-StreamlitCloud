@@ -145,7 +145,6 @@ elif st.session_state.stage == "processing":
         os.environ["OUTPUT_DIR"] = str(tmpdir)
         outdirs.append(tmpdir)
 
-        # 🔹 processa o PDF normalmente (sem depender de dicionários)
         created = process_pdf(str(tmp_pdf))
         time.sleep(0.3)
 
@@ -159,27 +158,26 @@ elif st.session_state.stage == "processing":
             total_samples = 0
             discrepancies = []
 
-            # 🔹 restaura leitura direta do Excel
+            # 🔹 Hotfix — garante que fp é string válida
             for fp in created:
-            # Garante que fp é um caminho válido (string ou Path)
-            if isinstance(fp, (list, tuple)) and len(fp) > 0:
-                fp = fp[0]
-            if not isinstance(fp, (str, Path)):
-                print(f"[WARN] Valor inesperado em created: {fp}")
-                continue
-            if not os.path.exists(fp):
-                print(f"[WARN] Caminho não encontrado: {fp}")
-                continue
-        
-            dest = final_dir / Path(fp).name
-            shutil.copy(fp, dest)
-            all_excel.append(str(dest))
-        
-            exp, proc = read_e1_counts(str(dest))
-            total_samples += proc or 0
-        
-            if exp and proc and exp != proc:
-                discrepancies.append(f"⚠️ {Path(fp).name} (processadas: {proc} / declaradas: {exp})")
+                if isinstance(fp, (list, tuple)) and len(fp) > 0:
+                    fp = fp[0]
+                if not isinstance(fp, (str, Path)):
+                    print(f"[WARN] Valor inesperado em created: {fp}")
+                    continue
+                if not os.path.exists(fp):
+                    print(f"[WARN] Caminho não encontrado: {fp}")
+                    continue
+
+                dest = final_dir / Path(fp).name
+                shutil.copy(fp, dest)
+                all_excel.append(str(dest))
+
+                exp, proc = read_e1_counts(str(dest))
+                total_samples += proc or 0
+
+                if exp and proc and exp != proc:
+                    discrepancies.append(f"⚠️ {Path(fp).name} (processadas: {proc} / declaradas: {exp})")
 
             box_class = "warning" if discrepancies else "success"
             discrep_html = ""
@@ -213,6 +211,10 @@ elif st.session_state.stage == "processing":
     summary_text += f"\n🧪 Total de amostras: {total_amostras}"
     summary_text += f"\n⏱️ Tempo total: {total_time:.1f} segundos"
     summary_text += f"\n📅 Executado em: {now_local:%d/%m/%Y às %H:%M:%S}"
+    if warning_count:
+        summary_text += f"\n⚠️ {warning_count} ficheiro(s) com discrepâncias"
+    if error_count:
+        summary_text += f"\n❌ {error_count} ficheiro(s) com erro"
 
     zip_bytes = build_zip_with_summary(all_excel, debug_files, summary_text)
     zip_name = f"xylella_output_{now_local:%Y%m%d_%H%M%S}.zip"
