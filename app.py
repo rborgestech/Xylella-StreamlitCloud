@@ -59,22 +59,19 @@ def reset_app():
 # Funções auxiliares
 # ───────────────────────────────────────────────
 def read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
-    """Lê E1 ou conta linhas de amostras como fallback."""
+    """Lê E1: 'Nº Amostras: {esperado} / {processado}' e devolve (esperado, processado)."""
     try:
         wb = load_workbook(xlsx_path, data_only=True)
         ws = wb.active
         candidates = [ws["E1"].value, ws.cell(1, 5).value, ws.cell(1, 6).value]
-        val = next((v for v in candidates if isinstance(v, str) and any(ch.isdigit() for ch in v)), "")
+        val = next((v for v in candidates if isinstance(v, str) and "/" in v), "")
         m = re.search(r"(\d+)\s*/\s*(\d+)", val)
         if m:
-            n1, n2 = int(m.group(1)), int(m.group(2))
-            return n1, n2
-        # fallback: conta linhas preenchidas
-        count_rows = sum(1 for r in range(4, 200) if ws.cell(r, 1).value)
-        return count_rows, count_rows
+            return int(m.group(1)), int(m.group(2))
     except Exception as e:
         print(f"[WARN] Falha ao ler E1 em {xlsx_path}: {e}")
     return 0, 0
+
 
 def collect_debug_files(output_dirs: list[Path]) -> list[str]:
     debug_files = []
@@ -83,6 +80,7 @@ def collect_debug_files(output_dirs: list[Path]) -> list[str]:
             if os.path.exists(d):
                 debug_files += [str(f) for f in Path(d).glob(pattern)]
     return debug_files
+
 
 def build_zip_with_summary(excel_files: list[str], debug_files: list[str], summary_text: str) -> bytes:
     mem = io.BytesIO()
@@ -147,7 +145,8 @@ elif st.session_state.stage == "processing":
         os.environ["OUTPUT_DIR"] = str(tmpdir)
         outdirs.append(tmpdir)
 
-        created = process_pdf(str(tmp_pdf))  # devolve lista de dicionários
+        # 🔹 processa o PDF normalmente (sem depender de dicionários)
+        created = process_pdf(str(tmp_pdf))
         time.sleep(0.3)
 
         if not created:
@@ -160,16 +159,15 @@ elif st.session_state.stage == "processing":
             total_samples = 0
             discrepancies = []
 
-            for item in created:
-                fp = item["path"]
-                exp = item.get("expected", 0)
-                proc = item.get("processed", 0)
-
+            # 🔹 restaura leitura direta do Excel
+            for fp in created:
                 dest = final_dir / Path(fp).name
                 shutil.copy(fp, dest)
                 all_excel.append(str(dest))
 
-                total_samples += proc
+                exp, proc = read_e1_counts(str(dest))
+                total_samples += proc or 0
+
                 if exp and proc and exp != proc:
                     discrepancies.append(f"⚠️ {Path(fp).name} (processadas: {proc} / declaradas: {exp})")
 
