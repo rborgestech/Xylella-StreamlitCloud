@@ -80,31 +80,25 @@ def read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
     Lê E1: 'Nº Amostras: {esperado} / {processado}'.
     Devolve (esperado, processado), mesmo que a célula esteja fundida.
     """
-    try:
-        wb = load_workbook(xlsx_path, data_only=True)
-        ws = wb.active  # garante folha certa
-        # tenta várias células candidatas
-        candidates = [ws["E1"].value, ws.cell(1, 5).value, ws.cell(1, 6).value]
-        val = next((v for v in candidates if isinstance(v, str) and "/" in v), "")
-        m = re.search(r"(\d+)\s*/\s*(\d+)", val)
-        if m:
-            exp, proc = int(m.group(1)), int(m.group(2))
-            return exp, proc
-    except Exception as e:
-        print(f"[WARN] Falha ao ler E1 em {xlsx_path}: {e}")
+    import time
+    for attempt in range(3):  # tenta 3 vezes (em caso de ficheiro em escrita)
+        try:
+            wb = load_workbook(xlsx_path, data_only=True)
+            ws = wb.active
+            candidates = [ws["E1"].value, ws.cell(1, 5).value, ws.cell(1, 6).value]
+            val = next((v for v in candidates if isinstance(v, str) and "/" in v), "")
+            m = re.search(r"(\d+)\s*/\s*(\d+)", val)
+            if m:
+                exp, proc = int(m.group(1)), int(m.group(2))
+                return exp, proc
+            break
+        except PermissionError:
+            time.sleep(0.5)  # aguarda ficheiro terminar de gravar
+        except Exception as e:
+            print(f"[WARN] Falha ao ler E1 em {xlsx_path}: {e}")
+            break
     return None, None
-def build_zip_with_summary(excel_files: List[str], debug_files: List[str], summary_text: str) -> bytes:
-    mem = io.BytesIO()
-    with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as z:
-        for p in excel_files:
-            if os.path.exists(p):
-                z.write(p, arcname=os.path.basename(p))
-        for d in debug_files:
-            if os.path.exists(d):
-                z.write(d, arcname=f"debug/{os.path.basename(d)}")
-        z.writestr("summary.txt", summary_text)
-    mem.seek(0)
-    return mem.read()
+
 
 def copy_if_new(src: str, dest_dir: Path) -> str | None:
     """Evita duplicações: só copia se não existir com o mesmo tamanho."""
