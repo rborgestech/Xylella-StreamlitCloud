@@ -66,17 +66,12 @@ if "stage" not in st.session_state:
 if "uploads" not in st.session_state:
     st.session_state.uploads = None
 
-# ✅ Anti-duplicação
-if "processed_files" not in st.session_state:
-    st.session_state.processed_files = set()
-
 def reset_app():
     st.session_state.stage = "idle"
     st.session_state.uploads = None
-    st.session_state.processed_files = set()
 
 # ───────────────────────────────────────────────
-# Auxiliares
+# Funções auxiliares
 # ───────────────────────────────────────────────
 def read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
     try:
@@ -84,8 +79,7 @@ def read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
         ws = wb.worksheets[0]
         val = str(ws["E1"].value or "")
         m = re.search(r"(\d+)\s*/\s*(\d+)", val)
-        if m:
-            return int(m.group(1)), int(m.group(2))
+        if m: return int(m.group(1)), int(m.group(2))
     except Exception:
         pass
     return None, None
@@ -132,25 +126,17 @@ elif st.session_state.stage == "processing":
     start_ts = time.time()
 
     all_excel, outdirs, summary_lines = [], [], []
-    error_count = 0
-    warning_count = 0
+    error_count, warning_count = 0, 0
     total = len(uploads)
     progress = st.progress(0.0)
 
     for i, up in enumerate(uploads, start=1):
-        if up.name in st.session_state.processed_files:
-            progress.progress(i / total)
-            continue
-
         placeholder = st.empty()
-        placeholder.markdown(
-            f"""
-            <div class='file-box active'>
-              <div class='file-title'>📄 {up.name}</div>
-              <div class='file-sub'>Ficheiro {i} de {total} — a processar<span class="dots"></span></div>
-            </div>
-            """, unsafe_allow_html=True
-        )
+        placeholder.markdown(f"""
+        <div class='file-box active'>
+          <div class='file-title'>📄 {up.name}</div>
+          <div class='file-sub'>Ficheiro {i} de {total} — a processar<span class="dots"></span></div>
+        </div>""", unsafe_allow_html=True)
 
         tmpdir = Path(tempfile.mkdtemp(dir=session_dir))
         tmp_pdf = tmpdir / up.name
@@ -160,90 +146,65 @@ elif st.session_state.stage == "processing":
         outdirs.append(tmpdir)
 
         created = process_pdf(str(tmp_pdf))
-        st.session_state.processed_files.add(up.name)
+        time.sleep(0.15)  # breve pausa visual
 
         if not created:
             error_count += 1
-            html = f"<div class='file-box error'><div class='file-title'>📄 {up.name}</div><div class='file-sub'>❌ Erro: nenhum ficheiro gerado.</div></div>"
-            placeholder.markdown(html, unsafe_allow_html=True)
+            placeholder.markdown(
+                f"<div class='file-box error'><div class='file-title'>📄 {up.name}</div>"
+                f"<div class='file-sub'>❌ Erro: nenhum ficheiro gerado.</div></div>",
+                unsafe_allow_html=True)
             summary_lines.append(f"{up.name}: erro - nenhum ficheiro gerado.")
         else:
-            req_count = len(created)
-            sample_count_total = 0
-            discrepancies = []
-
+            req_count, total_samples, discrepancies = len(created), 0, []
             for fp in created:
                 dest = final_dir / Path(fp).name
                 shutil.copy(fp, dest)
                 all_excel.append(str(dest))
                 exp, proc = read_e1_counts(str(dest))
                 if exp and proc:
-                    sample_count_total += proc
+                    total_samples += proc
                     if exp != proc:
                         discrepancies.append(f"⚠️ {Path(fp).name} (processadas: {proc} / declaradas: {exp})")
 
             box_class = "warning" if discrepancies else "success"
+            discrep_html = ""
             if discrepancies:
                 warning_count += 1
-                discrep_html = "<div class='file-sub'>⚠️ <b>" + str(len(discrepancies)) + "</b> discrepância(s):<br>" + "<br>".join(discrepancies) + "</div>"
-            else:
-                discrep_html = ""
+                discrep_html = (
+                    f"<div class='file-sub'>⚠️ <b>{len(discrepancies)}</b> discrepância(s):<br>"
+                    + "<br>".join(discrepancies) + "</div>"
+                )
 
-            html = (
-                f"<div class='file-box {box_class}'>"
-                f"<div class='file-title'>📄 {up.name}</div>"
-                f"<div class='file-sub'><b>{req_count}</b> requisição(ões), <b>{sample_count_total}</b> amostras.</div>"
-                f"{discrep_html}</div>"
-            )
-            placeholder.markdown(html, unsafe_allow_html=True)
+            placeholder.markdown(
+                f"<div class='file-box {box_class}'><div class='file-title'>📄 {up.name}</div>"
+                f"<div class='file-sub'><b>{req_count}</b> requisição(ões), "
+                f"<b>{total_samples}</b> amostras.</div>{discrep_html}</div>",
+                unsafe_allow_html=True)
 
-            # 📋 Resumo multilinha
             summary_lines.append(
-                f"{up.name}: {req_count} requisições, {sample_count_total} amostras"
+                f"{up.name}: {req_count} requisições, {total_samples} amostras"
                 + (f" ⚠️ {len(discrepancies)} discrepância(s)." if discrepancies else "")
             )
+            for d in discrepancies:
+                summary_lines.append(f"   ↳ {d}")
             for fp in created:
                 name = Path(fp).name
-                exp, proc = read_e1_counts(str(fp))
-                if exp and proc and exp != proc:
-                    summary_lines.append(f"   ↳ ⚠️ {name} (processadas: {proc} / declaradas: {exp})")
-                else:
+                if not any(name in d for d in discrepancies):
                     summary_lines.append(f"   ↳ {name}")
 
         progress.progress(i / total)
-        time.sleep(0.5)
+        time.sleep(0.2)  # tempo visual curto
 
     total_time = time.time() - start_ts
     debug_files = collect_debug_files(outdirs)
     lisbon_tz = pytz.timezone("Europe/Lisbon")
     now_local = datetime.now(lisbon_tz)
+
     total_reqs = len(all_excel)
-    # 🧪 cálculo exato do total de amostras (usa “processadas:” se existir, senão “amostras”)
-
-    # 🧪 cálculo rigoroso — soma só 1 valor por PDF
-    total_amostras = 0
-    pdf_seen = set()
-    
-    for l in summary_lines:
-        # ignora sublinhas (↳ …)
-        if l.strip().startswith("↳"):
-            continue
-    
-        # nome do ficheiro PDF
-        pdf_name = l.split(":")[0].strip()
-        if pdf_name in pdf_seen:
-            continue
-        pdf_seen.add(pdf_name)
-    
-        # se existir "processadas" usa esse valor, senão usa "amostras"
-        m_proc = re.search(r"processadas:\s*(\d+)", l)
-        m_amos = re.search(r"(\d+)\s+amostra", l)
-    
-        if m_proc:
-            total_amostras += int(m_proc.group(1))
-        elif m_amos:
-            total_amostras += int(m_amos.group(1))
-
+    total_amostras = sum(
+        int(m.group(1)) for l in summary_lines if (m := re.search(r"(\d+)\s+amostra", l))
+    )
 
     summary_text = "\n".join(summary_lines)
     summary_text += f"\n\n📊 Total: {len(all_excel)} ficheiro(s) Excel"
