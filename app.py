@@ -73,21 +73,18 @@ def reset_app():
 def read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
     """
     Lê E1 (ou célula equivalente) com o formato 'Nº Amostras: X / Y'
-    e devolve (esperado, processado), com heurística automática.
+    e devolve (esperado=declaradas, processado=efetivas),
+    assumindo que o primeiro número é o declarado.
     """
     try:
         wb = load_workbook(xlsx_path, data_only=True)
         ws = wb.active
-        candidates = [ws["E1"].value, ws.cell(1,5).value, ws.cell(1,6).value]
+        candidates = [ws["E1"].value, ws.cell(1, 5).value, ws.cell(1, 6).value]
         val = next((v for v in candidates if isinstance(v, str) and "/" in v), "")
         m = re.search(r"(\d+)\s*/\s*(\d+)", val)
         if m:
-            n1, n2 = int(m.group(1)), int(m.group(2))
-            # Heurística: o maior número é o processado
-            if n1 >= n2:
-                return n2, n1  # esperado, processado
-            else:
-                return n1, n2
+            declared, processed = int(m.group(1)), int(m.group(2))
+            return declared, processed
     except Exception:
         pass
     return None, None
@@ -185,6 +182,12 @@ elif st.session_state.stage == "processing":
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         for idx, it in enumerate(items):
             os.environ["OUTPUT_DIR"] = str(Path(tempfile.mkdtemp(prefix="xylella_out_")))
+            render_box(
+                placeholders[idx],
+                "active",
+                f"📄 {it['name']}",
+                f"Ficheiro {idx+1} de {len(items)} — a processar<span class='dots'></span>"
+            )
             futures[ex.submit(process_one_pdf, it["path"], final_dir)] = idx
 
         done_count = 0
@@ -196,7 +199,6 @@ elif st.session_state.stage == "processing":
                 res = {"pdf_name": os.path.basename(items[idx]["path"]), "created": [], "req_count": 0, "samples_total": 0, "discrepancies": [], "error": str(e)}
             results.append(res)
 
-            # Mostrar uma box de cada vez
             ph = placeholders[idx]
             title = f"📄 {res['pdf_name']}"
             if res.get("error"):
@@ -211,7 +213,7 @@ elif st.session_state.stage == "processing":
 
             done_count += 1
             progress.progress(done_count / len(items))
-            time.sleep(0.3)  # atraso visual controlado
+            time.sleep(0.05)
 
     # ──────────────── SECÇÃO FINAL ────────────────
     total_time = time.time() - start_ts
