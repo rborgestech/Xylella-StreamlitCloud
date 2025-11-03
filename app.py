@@ -71,6 +71,10 @@ def reset_app():
 # Auxiliares
 # ───────────────────────────────────────────────
 def read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
+    """
+    Lê E1 (ou célula equivalente) com o formato 'Nº Amostras: X / Y'
+    e devolve (esperado, processado), com heurística automática.
+    """
     try:
         wb = load_workbook(xlsx_path, data_only=True)
         ws = wb.active
@@ -78,7 +82,12 @@ def read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
         val = next((v for v in candidates if isinstance(v, str) and "/" in v), "")
         m = re.search(r"(\d+)\s*/\s*(\d+)", val)
         if m:
-            return int(m.group(1)), int(m.group(2))
+            n1, n2 = int(m.group(1)), int(m.group(2))
+            # Heurística: o maior número é o processado
+            if n1 >= n2:
+                return n2, n1  # esperado, processado
+            else:
+                return n1, n2
     except Exception:
         pass
     return None, None
@@ -163,18 +172,10 @@ elif st.session_state.stage == "processing":
         st.session_state.stage = "idle"
         st.rerun()
 
-    upload_parent = Path(st.session_state.upload_paths[0]["path"]).parent if items else Path(tempfile.gettempdir())
     final_dir = Path.cwd() / "output_final"
     final_dir.mkdir(exist_ok=True)
 
-    placeholders = []
-    for i, it in enumerate(items, start=1):
-        ph = st.empty()
-        title = f"📄 {it['name']}"
-        sub = f"Ficheiro {i} de {len(items)} — a processar<span class='dots'></span>"
-        render_box(ph, "active", title, sub)
-        placeholders.append(ph)
-
+    placeholders = [st.empty() for _ in items]
     progress = st.progress(0.0)
     start_ts = time.time()
     results: List[Dict] = []
@@ -195,18 +196,22 @@ elif st.session_state.stage == "processing":
                 res = {"pdf_name": os.path.basename(items[idx]["path"]), "created": [], "req_count": 0, "samples_total": 0, "discrepancies": [], "error": str(e)}
             results.append(res)
 
+            # Mostrar uma box de cada vez
             ph = placeholders[idx]
+            title = f"📄 {res['pdf_name']}"
             if res.get("error"):
-                render_box(ph, "error", f"📄 {res['pdf_name']}", "❌ Erro: nenhum ficheiro gerado.")
+                render_box(ph, "error", title, "❌ Erro: nenhum ficheiro gerado.")
             else:
                 warn = bool(res["discrepancies"])
                 box = "warning" if warn else "success"
                 sub = f"<b>{res['req_count']}</b> requisição(ões), <b>{res['samples_total']}</b> amostras."
                 if warn:
                     sub += f"<br>⚠️ <b>{len(res['discrepancies'])}</b> discrepância(s)."
-                render_box(ph, box, f"📄 {res['pdf_name']}", sub)
+                render_box(ph, box, title, sub)
+
             done_count += 1
             progress.progress(done_count / len(items))
+            time.sleep(0.3)  # atraso visual controlado
 
     # ──────────────── SECÇÃO FINAL ────────────────
     total_time = time.time() - start_ts
@@ -241,14 +246,12 @@ elif st.session_state.stage == "processing":
             summary_lines.append(f"📄 {pdf_name}: erro - nenhum ficheiro gerado.")
             continue
 
-        # Cabeçalho
         line = f"📄 {pdf_name}: {req_count} requisição(ões), {samples_total} amostras"
         if res["discrepancies"]:
             line += f" ⚠️ {len(res['discrepancies'])} discrepância(s)"
             warning_count += 1
         summary_lines.append(line)
 
-        # ↳ Sub-linhas
         disc_map = {d["xlsx"]: (d["proc"], d["exp"]) for d in res["discrepancies"]}
         for p in res["created"]:
             all_excel.append(p)
@@ -269,7 +272,6 @@ elif st.session_state.stage == "processing":
         summary_lines.append(f"❌ {error_count} ficheiro(s) com erro (sem ficheiros Excel gerados)")
 
     summary_text = "\n".join(summary_lines)
-
     worker_dirs = [Path(os.environ.get("OUTPUT_DIR", tempfile.gettempdir()))]
     debug_files = collect_debug_files(worker_dirs)
     zip_bytes = build_zip_with_summary(all_excel, debug_files, summary_text)
