@@ -161,15 +161,25 @@ elif st.session_state.stage == "processing":
 
             # 🔹 restaura leitura direta do Excel
             for fp in created:
-                dest = final_dir / Path(fp).name
-                shutil.copy(fp, dest)
-                all_excel.append(str(dest))
-
-                exp, proc = read_e1_counts(str(dest))
-                total_samples += proc or 0
-
-                if exp and proc and exp != proc:
-                    discrepancies.append(f"⚠️ {Path(fp).name} (processadas: {proc} / declaradas: {exp})")
+            # Garante que fp é um caminho válido (string ou Path)
+            if isinstance(fp, (list, tuple)) and len(fp) > 0:
+                fp = fp[0]
+            if not isinstance(fp, (str, Path)):
+                print(f"[WARN] Valor inesperado em created: {fp}")
+                continue
+            if not os.path.exists(fp):
+                print(f"[WARN] Caminho não encontrado: {fp}")
+                continue
+        
+            dest = final_dir / Path(fp).name
+            shutil.copy(fp, dest)
+            all_excel.append(str(dest))
+        
+            exp, proc = read_e1_counts(str(dest))
+            total_samples += proc or 0
+        
+            if exp and proc and exp != proc:
+                discrepancies.append(f"⚠️ {Path(fp).name} (processadas: {proc} / declaradas: {exp})")
 
             box_class = "warning" if discrepancies else "success"
             discrep_html = ""
