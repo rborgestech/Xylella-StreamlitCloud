@@ -385,7 +385,7 @@ def extract_context_from_text(full_text: str):
     else:
         ctx["data_envio"] = datetime.now().strftime("%d/%m/%Y")
 
-       # ───────────────────────────────────────────────
+    # ───────────────────────────────────────────────
     # Nº de amostras declaradas (debug + robusto a OCR e placeholders)
     # ───────────────────────────────────────────────
     print("\n──────── OCR RAW EXCERPT ────────")
@@ -393,9 +393,7 @@ def extract_context_from_text(full_text: str):
     for s in sample_zone:
         print("👉", s)
     print("────────────────────────────────\n")
-    # ───────────────────────────────────────────────
-    # Nº de amostras declaradas (robusto a OCR e placeholders)
-    # ───────────────────────────────────────────────
+
     flat = re.sub(r"[\u00A0_\s]+", " ", full_text)  # normaliza espaços e underscores
     flat = flat.replace("–", "-").replace("—", "-")
 
@@ -408,6 +406,7 @@ def extract_context_from_text(full_text: str):
         r"N\s*amostras.*?([0-9OoQIl]{1,4})\b",
         r"N.*?amostras.*?([0-9OoQIl]{1,4})\b"
     ]
+
     found = None
     for pat in patterns:
         m_decl = re.search(pat, flat, re.I)
@@ -429,9 +428,6 @@ def extract_context_from_text(full_text: str):
         except ValueError:
             ctx["declared_samples"] = 0
     else:
-        ctx["declared_samples"] = 0
-
-    else:
         # fallback adicional: tenta linha completa com "Nº de amostras"
         m_line = re.search(r"(N[º°o]?\s*de\s*amostras[^\n]*)", full_text, re.I)
         if m_line:
@@ -442,7 +438,10 @@ def extract_context_from_text(full_text: str):
                 raw = (raw.replace("O", "0").replace("o", "0")
                              .replace("Q", "0").replace("q", "0")
                              .replace("I", "1").replace("l", "1"))
-                ctx["declared_samples"] = int(raw)
+                try:
+                    ctx["declared_samples"] = int(raw)
+                except ValueError:
+                    ctx["declared_samples"] = 0
             else:
                 ctx["declared_samples"] = 0
         else:
@@ -895,6 +894,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
     return created_files
+
 
 
 
