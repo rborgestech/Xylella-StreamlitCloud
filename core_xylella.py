@@ -93,3 +93,29 @@ def _process_single_req(i: int, req: Dict[str, Any], base: str, pdf_path: str) -
     except Exception as e:
         print(f"❌ Erro interno na requisição {i}: {e}")
         return {"rows": [], "declared": 0}
+
+def read_e1_counts(xlsx_path: str):
+    """
+    Lê o valor da célula E1/F1 para obter nº de amostras declaradas/processadas.
+    Retorna (expected, processed) — None se não for possível ler.
+    """
+    try:
+        wb = load_workbook(xlsx_path, data_only=True)
+        ws = wb.active
+        cell = ws["E1"].value
+        if not cell or not isinstance(cell, str):
+            return (None, None)
+        import re
+        m = re.search(r"(\d+)\s*/\s*(\d+)", cell)
+        if m:
+            expected, processed = int(m.group(1)), int(m.group(2))
+            return (expected, processed)
+        # fallback — pode estar separado em células E1 e F1
+        e_val = ws["E1"].value
+        f_val = ws["F1"].value
+        if isinstance(e_val, (int, float)) and isinstance(f_val, (int, float)):
+            return (int(e_val), int(f_val))
+    except Exception as e:
+        print(f"⚠️ Erro ao ler E1/F1 em {os.path.basename(xlsx_path)}: {e}")
+    return (None, None)
+
