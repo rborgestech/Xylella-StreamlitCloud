@@ -129,9 +129,14 @@ if st.session_state.stage == "idle":
         st.info("💡 Carrega um ficheiro PDF para ativar o botão de processamento.")
 
 elif st.session_state.stage == "processing":
+    uploads = st.session_state.get("uploads") or []
+    if not uploads:
+        st.warning("⚠️ Nenhum ficheiro encontrado. Volte atrás e carregue novamente os PDFs.")
+        st.session_state.stage = "idle"
+        st.rerun()
+
     st.info("⏳ A processar ficheiros... aguarde até o processo terminar.")
 
-    uploads = st.session_state.uploads
     session_dir = tempfile.mkdtemp(prefix="xylella_session_")
     final_dir = Path.cwd() / "output_final"
     final_dir.mkdir(exist_ok=True)
