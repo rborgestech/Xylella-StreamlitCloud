@@ -341,7 +341,6 @@ def extract_context_from_text(full_text: str):
                 responsavel = ln
                 break
         if responsavel:
-            # Remove emails e ruído
             responsavel = re.sub(r"\S+@dgav\.pt|\S+@\S+", "", responsavel, flags=re.I)
             responsavel = re.sub(r"PROGRAMA.*|Data.*|N[º°].*", "", responsavel, flags=re.I)
             responsavel = re.sub(r"[:;,.\-–—]+$", "", responsavel).strip()
@@ -380,7 +379,7 @@ def extract_context_from_text(full_text: str):
         re.I,
     )
     if m_envio:
-        ctx["data_envio"] = normalize_date_str(m_envio.group(1)) 
+        ctx["data_envio"] = normalize_date_str(m_envio.group(1))
     elif default_colheita:
         ctx["data_envio"] = default_colheita
     else:
@@ -389,14 +388,10 @@ def extract_context_from_text(full_text: str):
     # ───────────────────────────────────────────────
     # Nº de amostras declaradas (robusto a OCR e placeholders)
     # ───────────────────────────────────────────────
-
-        # ───────────────────────────────────────────────
-    # Nº de amostras declaradas (robusto a OCR e placeholders)
-    # ───────────────────────────────────────────────
     flat = re.sub(r"[\u00A0_\s]+", " ", full_text)
     flat = flat.replace("–", "-").replace("—", "-")
 
-    # procura por “Nº de amostras neste envio”, “n amostras”, etc.
+    # tenta apanhar várias variantes da frase (OCR-friendly)
     patterns = [
         r"N[º°oO0]?\s*(?:de|do)?\s*amostras?(?:\s+neste\s+envio)?\s*[:\-]?\s*([0-9OoQIl]{1,4})(?!\s*/)\b",
         r"amostras?(?:\s+neste\s+envio)?\s*[:\-]?\s*([0-9OoQIl]{1,4})(?!\s*/)\b",
@@ -420,7 +415,7 @@ def extract_context_from_text(full_text: str):
         except ValueError:
             ctx["declared_samples"] = 0
     else:
-        # fallback: tentar capturar linhas com “Nº de amostras” incompletas
+        # fallback adicional: tenta linha completa com "Nº de amostras"
         m_line = re.search(r"(N[º°o]?\s*de\s*amostras[^\n]*)", full_text, re.I)
         if m_line:
             line = re.sub(r"[_\s]+", " ", m_line.group(1))
@@ -436,15 +431,7 @@ def extract_context_from_text(full_text: str):
         else:
             ctx["declared_samples"] = 0
 
-
-    # 🧠 Fallback inteligente: se 0 mas já há amostras detetadas, usa a contagem real
-    if ctx["declared_samples"] == 0:
-        try:
-            if "samples" in locals() and samples:
-                ctx["declared_samples"] = len(samples)
-        except Exception:
-            pass
-
+    print(f"📊 Nº de amostras declaradas detetadas: {ctx['declared_samples']}")
     return ctx
 
 
@@ -878,6 +865,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
 
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
     return created_files
+
 
 
 
