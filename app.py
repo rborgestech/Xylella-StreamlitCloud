@@ -67,22 +67,34 @@ def reset_app():
 # ───────────────────────────────────────────────
 def read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
     """
-    Lê E1 (ou célula equivalente) com o formato 'Nº Amostras: X / Y'
-    e devolve (esperado=declaradas, processado=efetivas),
-    assumindo que o primeiro número é o declarado.
+    Lê o cabeçalho (linha 1) e procura o padrão 'Nº Amostras: X / Y'
+    em qualquer célula. Devolve (esperado, processado) = (primeiro, segundo).
     """
     try:
         wb = load_workbook(xlsx_path, data_only=True)
         ws = wb.active
-        candidates = [ws["E1"].value, ws.cell(1, 5).value, ws.cell(1, 6).value]
-        val = next((v for v in candidates if isinstance(v, str) and "/" in v), "")
-        m = re.search(r"(\d+)\s*/\s*(\d+)", val)
-        if m:
-            declared, processed = int(m.group(1)), int(m.group(2))
-            return declared, processed
-    except Exception:
-        pass
+
+        # Ver todas as células da primeira linha (E1, F1, G1, etc.)
+        for cell in ws[1]:
+            val = str(cell.value) if cell.value else ""
+            m = re.search(r"N[º°]\s*Amostras[:\-]?\s*(\d+)\s*/\s*(\d+)", val)
+            if m:
+                declared, processed = int(m.group(1)), int(m.group(2))
+                return declared, processed
+
+        # fallback: padrão simples sem "Nº"
+        for cell in ws[1]:
+            val = str(cell.value) if cell.value else ""
+            m = re.search(r"(\d+)\s*/\s*(\d+)", val)
+            if m:
+                declared, processed = int(m.group(1)), int(m.group(2))
+                return declared, processed
+
+    except Exception as e:
+        print(f"[read_e1_counts] Erro ao ler {xlsx_path}: {e}")
+
     return None, None
+
 
 def collect_debug_files(output_dirs: List[Path]) -> List[str]:
     debug_files = []
