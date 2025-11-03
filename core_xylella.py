@@ -871,7 +871,21 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
             print(f"✅ Requisição {i}: {len(rows)} amostras gravadas → {out_path}")
 
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
+    # Guardar excerto OCR para debug de "Nº de amostras"
+    try:
+        ocr_text_path = OUTPUT_DIR / f"{Path(pdf_path).stem}_ocr_debug_excerpt.txt"
+        with open(ocr_text_path, "w", encoding="utf-8") as dbg:
+            with open(OUTPUT_DIR / f"{Path(pdf_path).stem}_ocr_debug.txt", "r", encoding="utf-8") as full:
+                text = full.read()
+                # guarda apenas 400 caracteres à volta de "amostra" para ver o contexto real
+                match = re.search(r".{0,200}amostra.{0,200}", text, re.I)
+                dbg.write(match.group(0) if match else text[:400])
+        print(f"🪶 Excerto OCR guardado em: {ocr_text_path}")
+    except Exception as e:
+        print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
+
     return created_files
+
 
 
 
