@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-core_xylella.py — versão híbrida otimizada
-Mantém todas as funcionalidades originais (OCR Azure + Parser Colab + Excel Writer)
-e adiciona:
- - Cache local de OCR (reutiliza resultados)
- - Processamento paralelo de requisições
+core_xylella.py — versão estável com cache + paralelismo
+Mantém todas as funcionalidades originais (parser, Excel, OCR) e adiciona:
+ - Cache local do OCR Azure (por hash do ficheiro)
+ - Processamento paralelo das requisições
 """
 
 import os
@@ -22,16 +21,15 @@ from openpyxl import load_workbook
 from openpyxl.styles import PatternFill, Font, Alignment
 
 # ───────────────────────────────────────────────
-# Diretórios e configuração
+# Diretórios e variáveis
 # ───────────────────────────────────────────────
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "output_final"))
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-OCR_CACHE_DIR = OUTPUT_DIR / "ocr_cache"
-OCR_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-MAX_REQ_WORKERS = int(os.getenv("MAX_REQ_WORKERS", "4"))
+CACHE_DIR = OUTPUT_DIR / "ocr_cache"
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+MAX_REQ_WORKERS = 4
 
-BASE_DIR = Path(__file__).resolve().parent
-TEMPLATE_PATH = Path(os.environ.get("TEMPLATE_PATH", BASE_DIR / "TEMPLATE_PXf_SGSLABIP1056.xlsx"))
+TEMPLATE_PATH = Path(os.environ.get("TEMPLATE_PATH", Path(__file__).parent / "TEMPLATE_PXf_SGSLABIP1056.xlsx"))
 
 AZURE_API_KEY = os.getenv("AZURE_API_KEY", "")
 AZURE_ENDPOINT = os.getenv("AZURE_ENDPOINT", "")
@@ -40,33 +38,30 @@ MODEL_ID = os.getenv("AZURE_MODEL_ID", "prebuilt-document")
 # ───────────────────────────────────────────────
 # Cache OCR
 # ───────────────────────────────────────────────
-def _file_hash(path: str) -> str:
+def _hash_file(pdf_path: str) -> str:
     h = hashlib.sha1()
-    with open(path, "rb") as f:
+    with open(pdf_path, "rb") as f:
         while chunk := f.read(1024 * 1024):
             h.update(chunk)
     return h.hexdigest()
 
 def _cache_path(pdf_path: str) -> Path:
-    return OCR_CACHE_DIR / f"{os.path.basename(pdf_path)}.{_file_hash(pdf_path)}.json"
+    return CACHE_DIR / f"{os.path.basename(pdf_path)}.{_hash_file(pdf_path)}.json"
 
-def _load_cache(pdf_path: str):
+def load_cached_ocr(pdf_path: str) -> Dict[str, Any] | None:
     cp = _cache_path(pdf_path)
     if cp.exists():
         try:
-            with open(cp, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            print(f"♻️ OCR reutilizado ({cp.name})")
-            return data
+            print(f"♻️ OCR reutilizado: {cp.name}")
+            return json.loads(cp.read_text(encoding="utf-8"))
         except Exception:
             pass
     return None
 
-def _save_cache(pdf_path: str, data: Dict[str, Any]):
+def save_cached_ocr(pdf_path: str, data: Dict[str, Any]) -> None:
     cp = _cache_path(pdf_path)
     try:
-        with open(cp, "w", encoding="utf-8") as f:
-            json.dump(data, f)
+        cp.write_text(json.dumps(data), encoding="utf-8")
     except Exception:
         pass
 
@@ -102,7 +97,7 @@ def azure_analyze_pdf(pdf_path: str) -> Dict[str, Any]:
         time.sleep(1.2)
 
 # ───────────────────────────────────────────────
-# Helpers de texto e datas
+# Helpers
 # ───────────────────────────────────────────────
 def extract_all_text(result_json: Dict[str, Any]) -> str:
     lines = []
@@ -114,46 +109,43 @@ def extract_all_text(result_json: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 # ───────────────────────────────────────────────
-# Parser original completo
+# Importa parser e writer originais
 # ───────────────────────────────────────────────
-# ⚠️ AQUI entra o teu parser completo da versão anterior
-# (copiado integralmente)
-from core_xylella import (
+from core_xylella_parser import (
     detect_requisicoes,
     split_if_multiple_requisicoes,
     extract_context_from_text,
     parse_xylella_tables,
-    write_to_template,
+    write_to_template
 )
 
-def parse_all_requisitions(result_json, pdf_name, txt_path):
-    # Idêntico à tua versão original (usa as funções importadas)
+# ───────────────────────────────────────────────
+# Função de parsing completa
+# ───────────────────────────────────────────────
+def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path: str | None) -> List[Dict[str, Any]]:
     if txt_path and os.path.exists(txt_path):
         full_text = Path(txt_path).read_text(encoding="utf-8")
     else:
         full_text = extract_all_text(result_json)
 
     count, _ = detect_requisicoes(full_text)
-    all_tables = result_json.get("analyzeResult", {}).get("tables", []) or []
+    tables = result_json.get("analyzeResult", {}).get("tables", []) or []
 
     if count <= 1:
-        context = extract_context_from_text(full_text)
-        amostras = parse_xylella_tables(result_json, context, req_id=1)
-        expected = context.get("declared_samples", 0)
-        return [{"rows": amostras, "expected": expected}] if amostras else []
+        ctx = extract_context_from_text(full_text)
+        amostras = parse_xylella_tables(result_json, ctx, req_id=1)
+        return [{"rows": amostras, "expected": ctx.get("declared_samples", 0)}]
 
     blocos = split_if_multiple_requisicoes(full_text)
-    num_blocos = len(blocos)
     results = []
-    for bi, bloco in enumerate(blocos, start=1):
-        context = extract_context_from_text(bloco)
-        amostras = parse_xylella_tables({"analyzeResult": {"tables": all_tables}}, context, req_id=bi)
-        expected = context.get("declared_samples", 0)
-        results.append({"rows": amostras, "expected": expected})
+    for i, bloco in enumerate(blocos, start=1):
+        ctx = extract_context_from_text(bloco)
+        amostras = parse_xylella_tables({"analyzeResult": {"tables": tables}}, ctx, req_id=i)
+        results.append({"rows": amostras, "expected": ctx.get("declared_samples", 0)})
     return results
 
 # ───────────────────────────────────────────────
-# Função principal (com cache e paralelismo)
+# Função principal
 # ───────────────────────────────────────────────
 def process_pdf_sync(pdf_path: str) -> List[str]:
     base = os.path.basename(pdf_path)
@@ -161,22 +153,20 @@ def process_pdf_sync(pdf_path: str) -> List[str]:
     txt_path = OUTPUT_DIR / f"{os.path.splitext(base)[0]}_ocr_debug.txt"
 
     # 1️⃣ OCR com cache
-    result_json = _load_cache(pdf_path)
+    result_json = load_cached_ocr(pdf_path)
     if result_json is None:
         result_json = azure_analyze_pdf(pdf_path)
-        _save_cache(pdf_path, result_json)
+        save_cached_ocr(pdf_path, result_json)
 
     # 2️⃣ Guardar texto OCR
     txt_path.write_text(extract_all_text(result_json), encoding="utf-8")
-    print(f"📝 Texto OCR guardado em: {txt_path}")
 
-    # 3️⃣ Parsing
+    # 3️⃣ Parsing e escrita
     requisitions = parse_all_requisitions(result_json, pdf_path, str(txt_path))
     if not requisitions:
         print("⚠️ Nenhuma requisição encontrada.")
         return []
 
-    # 4️⃣ Paralelismo para escrita
     created_files = []
     with ThreadPoolExecutor(max_workers=min(MAX_REQ_WORKERS, len(requisitions))) as executor:
         futures = {
