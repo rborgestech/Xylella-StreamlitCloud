@@ -94,18 +94,49 @@ def parse_all_requisitions(result_json, pdf_name, txt_path):
 # ───────────────────────────────────────────────
 def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
     """
-    Escreve os dados num Excel (baseado em template real no ambiente de produção).
-    Nesta versão simplificada, cria apenas um ficheiro vazio com log de sucesso.
+    Escreve dados reais no template XLSX.
+    Cada elemento em ocr_rows é um dicionário com os campos extraídos do PDF.
     """
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = OUTPUT_DIR / out_name
-    with open(out_path, "w", encoding="utf-8") as f:
-        f.write("Simulação de ficheiro Excel gerado.\n")
-        f.write(f"Fonte: {source_pdf}\n")
-        f.write(f"Amostras esperadas: {expected_count}\n")
-        f.write(f"Linhas: {len(ocr_rows)}\n")
-    print(f"🟢 Gravado (simulado): {out_path}")
-    return str(out_path)
+    try:
+        TEMPLATE_PATH = os.getenv("TEMPLATE_PATH", "TEMPLATE_PXf_SGSLABIP1056.xlsx")
+        if not os.path.exists(TEMPLATE_PATH):
+            raise FileNotFoundError(f"Template não encontrado: {TEMPLATE_PATH}")
+
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        out_path = OUTPUT_DIR / out_name
+
+        # Abre o template original
+        wb = load_workbook(TEMPLATE_PATH)
+        ws = wb.active
+
+        # Linha inicial para escrita (ajusta conforme o teu template)
+        start_row = 6
+
+        # Mapeia nomes de colunas (linha 5)
+        col_map = {str(c.value).strip().lower(): i for i, c in enumerate(ws[5], start=1) if c.value}
+
+        # Preenche as linhas de amostras
+        for r_idx, sample in enumerate(ocr_rows, start=start_row):
+            for key, value in sample.items():
+                col_name = key.strip().lower()
+                if col_name in col_map:
+                    col = col_map[col_name]
+                    ws.cell(row=r_idx, column=col, value=value)
+
+        # Atualiza contagens e metadados
+        processed_count = len(ocr_rows)
+        ws["E1"] = f"Nº Amostras: {expected_count or processed_count} / {processed_count}"
+        ws["F1"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ws["G1"] = source_pdf or ""
+
+        # Guarda o ficheiro
+        wb.save(out_path)
+        print(f"🟢 Gravado (com template real): {out_path}")
+        return str(out_path)
+
+    except Exception as e:
+        print(f"❌ Erro ao escrever no template: {e}")
+        return None
 
 
 # ───────────────────────────────────────────────
@@ -216,3 +247,4 @@ def read_e1_counts(xlsx_path: str):
     except Exception as e:
         print(f"⚠️ Erro ao ler E1/F1 em {os.path.basename(xlsx_path)}: {e}")
     return (None, None)
+
