@@ -390,37 +390,35 @@ def extract_context_from_text(full_text: str):
     # Nº de amostras declaradas (robusto a OCR e placeholders)
     # ───────────────────────────────────────────────
 
-        # ───────────────────────────────────────────────
-    # Nº de amostras declaradas (robusto a OCR e placeholders)
-    # ───────────────────────────────────────────────
-        # ───────────────────────────────────────────────
-    # Nº de amostras declaradas (robusto a OCR e placeholders)
-    # ───────────────────────────────────────────────
-    flat = re.sub(r"[\u00A0_\s]+", " ", full_text)  # normaliza espaços e underscores
+    flat = re.sub(r"[\u00A0_\s]+", " ", full_text)  # normaliza espaços/NBSP/underscores
     flat = flat.replace("–", "-").replace("—", "-")
-
-    # aceita variações de "Nº de amostras neste envio"
+    
+    # variações da frase e maior tolerância a OCR; evita capturar se vier "/" a seguir
     patterns = [
-        r"N[º°o]?\s*de\s*amostras(?:\s+neste\s+envio)?\s*[:\-]?\s*([0-9OoQ]{1,4})\b",
-        r"N[º°o]?\s*amostras.*?([0-9OoQ]{1,4})\b",
-        r"amostras\s*(?:neste\s+envio)?\s*[:\-]?\s*([0-9OoQ]{1,4})\b"
+        r"N[º°oO0]?\s*(?:de|do)?\s*amostras(?:\s+neste\s+envio)?\s*[:\-]?\s*([0-9OoQIl]{1,4})(?!\s*/)\b",
+        r"N[º°oO0]?\s*amostras?\s*[:\-]?\s*([0-9OoQIl]{1,4})(?!\s*/)\b",
+        r"amostras?\s*(?:neste\s+envio)?\s*[:\-]?\s*([0-9OoQIl]{1,4})(?!\s*/)\b",
+        r"N\s*o\s*de\s*amostras?.*?([0-9OoQIl]{1,4})(?!\s*/)\b",
     ]
+    
     found = None
     for pat in patterns:
         m_decl = re.search(pat, flat, re.I)
         if m_decl:
             found = m_decl.group(1)
             break
-
+    
     if found:
-        raw = found.strip().replace("O", "0").replace("o", "0").replace("Q", "0")
+        raw = (found.strip()
+               .replace("O", "0").replace("o", "0")
+               .replace("Q", "0").replace("q", "0")
+               .replace("I", "1").replace("l", "1"))
         try:
             ctx["declared_samples"] = int(raw)
         except ValueError:
             ctx["declared_samples"] = 0
     else:
         ctx["declared_samples"] = 0
-
     # 🧠 Fallback inteligente: se 0 mas já há amostras detetadas, usa a contagem real
     if ctx["declared_samples"] == 0:
         try:
@@ -838,6 +836,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
 
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
     return created_files
+
 
 
 
