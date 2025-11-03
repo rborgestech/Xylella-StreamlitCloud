@@ -491,6 +491,30 @@ def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, An
                 "datarequerido": context["data_envio"],
                 "Score": ""
             })
+    # 🧩 Fallback — tentar extrair linhas da tabela via regex se Azure não devolveu cells válidas
+    if not out:
+        full_text = extract_all_text(result_json)
+        # procura padrões tipo "63020099" ou "01/LVT/DGAV-23/..." etc.
+        pattern = re.compile(r"(\d{5,8}|[0-9]{1,3}/[A-Z]{1,3}/DGAV[-/]?\d{0,4})", re.I)
+        matches = pattern.findall(full_text)
+        if matches:
+            for ref in matches:
+                out.append({
+                    "requisicao_id": req_id,
+                    "datarececao": context["data_envio"],
+                    "datacolheita": context.get("default_colheita", ""),
+                    "referencia": ref.strip(),
+                    "hospedeiro": "",
+                    "tipo": "",
+                    "zona": context["zona"],
+                    "responsavelamostra": context["dgav"],
+                    "responsavelcolheita": context["responsavel_colheita"],
+                    "observacoes": "",
+                    "procedure": "XYLELLA",
+                    "datarequerido": context["data_envio"],
+                    "Score": ""
+                })
+            print(f"🔍 Fallback regex: {len(matches)} amostras detetadas.")
 
     print(f"✅ {len(out)} amostras extraídas no total (req_id={req_id}).")
     return out
@@ -838,6 +862,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
 
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
     return created_files
+
 
 
 
