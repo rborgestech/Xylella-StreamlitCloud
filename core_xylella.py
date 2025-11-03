@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 from datetime import datetime
 
+
 def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
     """
     Executa o OCR Azure direto ao PDF e o parser Colab integrado, em paralelo por requisição.
@@ -22,7 +23,8 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
     print(f"\n🧪 Início de processamento: {base}")
 
     # Diretório de output e ficheiro de debug
-    OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "/tmp"))
+    OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "output_final"))
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     txt_path = OUTPUT_DIR / f"{os.path.splitext(base)[0]}_ocr_debug.txt"
 
     # 1️⃣ OCR Azure direto
@@ -36,6 +38,10 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
     requisitions = parse_all_requisitions(result_json, pdf_path, str(txt_path))
     total_reqs = len(requisitions)
     print(f"🔍 {total_reqs} requisição(ões) detetada(s).")
+
+    if total_reqs == 0:
+        print(f"⚠️ {base}: nenhum bloco de requisição encontrado.")
+        return []
 
     # 4️⃣ Processamento paralelo de cada requisição
     results: List[Dict[str, Any]] = []
@@ -69,7 +75,7 @@ def _process_single_req(i: int, req: Dict[str, Any], base: str, pdf_path: str) -
     """
     try:
         rows = req.get("rows", [])
-        expected = req.get("expected", 0) or 0
+        expected = req.get("expected") or req.get("declared") or 0
 
         if not rows:
             print(f"⚠️ Requisição {i}: sem amostras — ignorada.")
