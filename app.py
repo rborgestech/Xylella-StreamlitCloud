@@ -119,12 +119,10 @@ def copy_if_new(src: str, dest_dir: Path) -> str | None:
 if st.session_state.stage == "idle":
     uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True, key="file_uploader")
     if uploads:
-      if st.button("📄 Processar ficheiros de Input", type="primary"):
-          st.session_state.uploads = uploads
-          st.session_state.stage = "processing"
-          st.session_state.clear()
-          st.session_state.stage = "processing"
-          st.rerun()
+        if st.button("📄 Processar ficheiros de Input", type="primary"):
+            st.session_state.uploads = uploads
+            st.session_state.stage = "processing"
+            st.rerun()
     else:
         st.info("💡 Carrega um ficheiro PDF para ativar o botão de processamento.")
 
