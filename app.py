@@ -15,7 +15,7 @@ st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 ficheiro Excel por requisição.")
 
 # ───────────────────────────────────────────────
-# CSS
+# CSS e estilo
 # ───────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -26,32 +26,17 @@ st.markdown("""
 .stButton > button[kind="primary"]:hover{background:#A13700!important;border-color:#A13700!important;}
 [data-testid="stFileUploader"]>div:first-child{border:2px dashed #CA4300!important;border-radius:10px!important;padding:1rem!important}
 
-/* Caixas */
 .file-box{border-radius:8px;padding:.6rem 1rem;margin-bottom:.5rem;opacity:0;animation:fadeIn .4s ease forwards}
 @keyframes fadeIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
-.fadeOut{animation:fadeOut .4s ease forwards}
-@keyframes fadeOut{from{opacity:1;transform:translateY(0)}to{opacity:0;transform:translateY(-3px)}}
 
-/* Estados */
 .file-box.active{background:#E8F1FB;border-left:4px solid #2B6CB0}
 .file-box.success{background:#e6f9ee;border-left:4px solid #1a7f37}
 .file-box.warning{background:#fff8e5;border-left:4px solid #e6a100}
 .file-box.error{background:#fdeaea;border-left:4px solid #cc0000}
 
-/* Texto */
 .file-title{font-size:.9rem;font-weight:600;color:#1A365D}
 .file-sub{font-size:.8rem;color:#2A4365}
 
-/* Pontinhos animados */
-.dots::after{content:'...';display:inline-block;animation:dots 1.5s steps(4,end) infinite}
-@keyframes dots{
-  0%,20%{color:rgba(42,67,101,0);text-shadow:.25em 0 0 rgba(42,67,101,0),.5em 0 0 rgba(42,67,101,0)}
-  40%{color:#2A4365;text-shadow:.25em 0 0 rgba(42,67,101,0),.5em 0 0 rgba(42,67,101,0)}
-  60%{text-shadow:.25em 0 0 #2A4365,.5em 0 0 rgba(42,67,101,0)}
-  80%,100%{text-shadow:.25em 0 0 #2A4365,.5em 0 0 #2A4365}
-}
-
-/* Botão clean */
 .clean-btn{background:#fff!important;border:1px solid #ccc!important;color:#333!important;font-weight:600!important;
 border-radius:8px!important;padding:.5rem 1.2rem!important;transition:all .2s ease}
 .clean-btn:hover{border-color:#999!important;color:#000!important}
@@ -74,10 +59,7 @@ def reset_app():
 # Funções auxiliares
 # ───────────────────────────────────────────────
 def read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
-    """
-    Lê E1: 'Nº Amostras: {esperado} / {processado}'.
-    Se falhar, estima nº processadas pelo nº de linhas preenchidas.
-    """
+    """Lê E1 ou conta linhas de amostras como fallback."""
     try:
         wb = load_workbook(xlsx_path, data_only=True)
         ws = wb.active
@@ -86,17 +68,10 @@ def read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
         m = re.search(r"(\d+)\s*/\s*(\d+)", val)
         if m:
             n1, n2 = int(m.group(1)), int(m.group(2))
-            if n1 < n2:
-                return n2, n1
             return n1, n2
-        single = re.search(r"(\d+)", val)
-        if single:
-            n = int(single.group(1))
-            return n, n
         # fallback: conta linhas preenchidas
         count_rows = sum(1 for r in range(4, 200) if ws.cell(r, 1).value)
-        if count_rows > 0:
-            return count_rows, count_rows
+        return count_rows, count_rows
     except Exception as e:
         print(f"[WARN] Falha ao ler E1 em {xlsx_path}: {e}")
     return 0, 0
@@ -158,12 +133,11 @@ elif st.session_state.stage == "processing":
     progress = st.progress(0.0)
 
     for i, up in enumerate(uploads, start=1):
-        st.empty()
         placeholder = st.empty()
         placeholder.markdown(f"""
         <div class='file-box active'>
           <div class='file-title'>📄 {up.name}</div>
-          <div class='file-sub'>Ficheiro {i} de {total} — a processar<span class="dots"></span></div>
+          <div class='file-sub'>Ficheiro {i} de {total} — a processar...</div>
         </div>""", unsafe_allow_html=True)
 
         tmpdir = Path(tempfile.mkdtemp(dir=session_dir))
@@ -173,8 +147,8 @@ elif st.session_state.stage == "processing":
         os.environ["OUTPUT_DIR"] = str(tmpdir)
         outdirs.append(tmpdir)
 
-        created = process_pdf(str(tmp_pdf))
-        time.sleep(0.6)
+        created = process_pdf(str(tmp_pdf))  # devolve lista de dicionários
+        time.sleep(0.3)
 
         if not created:
             error_count += 1
@@ -185,12 +159,17 @@ elif st.session_state.stage == "processing":
             req_count = len(created)
             total_samples = 0
             discrepancies = []
-            for fp in created:
+
+            for item in created:
+                fp = item["path"]
+                exp = item.get("expected", 0)
+                proc = item.get("processed", 0)
+
                 dest = final_dir / Path(fp).name
                 shutil.copy(fp, dest)
                 all_excel.append(str(dest))
-                exp, proc = read_e1_counts(str(dest))
-                total_samples += proc or 0
+
+                total_samples += proc
                 if exp and proc and exp != proc:
                     discrepancies.append(f"⚠️ {Path(fp).name} (processadas: {proc} / declaradas: {exp})")
 
@@ -208,18 +187,16 @@ elif st.session_state.stage == "processing":
             </div>
             """
             placeholder.markdown(html, unsafe_allow_html=True)
-            summary_lines.append(
-                f"{up.name}: {req_count} requisições, {total_samples} amostras"
-                + (f" ⚠️ {len(discrepancies)} discrepância(s)." if discrepancies else "")
-            )
+            summary_lines.append(f"{up.name}: {req_count} requisições, {total_samples} amostras")
 
         progress.progress(i / total)
         time.sleep(0.5)
 
     total_time = time.time() - start_ts
-    debug_files = collect_debug_files([Path(d) for d in set(outdirs)] if 'outdirs' in locals() else [])
+    debug_files = collect_debug_files(outdirs)
     lisbon_tz = pytz.timezone("Europe/Lisbon")
     now_local = datetime.now(lisbon_tz)
+
     total_reqs = len(all_excel)
     total_amostras = sum(int(m.group(1)) for l in summary_lines if (m := re.search(r"(\d+)\s+amostra", l)))
 
@@ -228,8 +205,6 @@ elif st.session_state.stage == "processing":
     summary_text += f"\n🧪 Total de amostras: {total_amostras}"
     summary_text += f"\n⏱️ Tempo total: {total_time:.1f} segundos"
     summary_text += f"\n📅 Executado em: {now_local:%d/%m/%Y às %H:%M:%S}"
-    if warning_count: summary_text += f"\n⚠️ {warning_count} ficheiro(s) com discrepâncias"
-    if error_count: summary_text += f"\n❌ {error_count} ficheiro(s) com erro (sem ficheiros Excel gerados)"
 
     zip_bytes = build_zip_with_summary(all_excel, debug_files, summary_text)
     zip_name = f"xylella_output_{now_local:%Y%m%d_%H%M%S}.zip"
