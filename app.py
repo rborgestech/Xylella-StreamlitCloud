@@ -74,15 +74,22 @@ def reset_app():
 # Funções auxiliares
 # ───────────────────────────────────────────────
 def read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
-    """Lê E1: 'Nº Amostras: {esperado} / {processado}'"""
+    """Lê E1: 'Nº Amostras: {esperado} / {processado}' — tolera inversões e valores isolados."""
     try:
         wb = load_workbook(xlsx_path, data_only=True)
         ws = wb.active
         candidates = [ws["E1"].value, ws.cell(1, 5).value, ws.cell(1, 6).value]
-        val = next((v for v in candidates if isinstance(v, str) and "/" in v), "")
+        val = next((v for v in candidates if isinstance(v, str) and any(ch.isdigit() for ch in v)), "")
         m = re.search(r"(\d+)\s*/\s*(\d+)", val)
         if m:
-            return int(m.group(1)), int(m.group(2))
+            n1, n2 = int(m.group(1)), int(m.group(2))
+            if n1 < n2:  # SGS às vezes inverte
+                return n2, n1
+            return n1, n2
+        single = re.search(r"(\d+)", val)
+        if single:
+            n = int(single.group(1))
+            return n, n
     except Exception as e:
         print(f"[WARN] Falha ao ler E1 em {xlsx_path}: {e}")
     return None, None
@@ -144,6 +151,8 @@ elif st.session_state.stage == "processing":
     progress = st.progress(0.0)
 
     for i, up in enumerate(uploads, start=1):
+        # 🟦 Só uma secção azul de cada vez
+        st.empty()
         placeholder = st.empty()
         placeholder.markdown(f"""
         <div class='file-box active'>
@@ -160,11 +169,8 @@ elif st.session_state.stage == "processing":
 
         # ⚙️ Processamento
         created = process_pdf(str(tmp_pdf))
+        time.sleep(0.6)  # mantém azul 0.6s
 
-        # ⏳ mantém azul 0.6s antes de transitar para o resultado
-        time.sleep(0.6)
-
-        # Resultado visual
         if not created:
             error_count += 1
             html = f"<div class='file-box error'><div class='file-title'>📄 {up.name}</div><div class='file-sub'>❌ Erro: nenhum ficheiro gerado.</div></div>"
@@ -207,7 +213,7 @@ elif st.session_state.stage == "processing":
         time.sleep(0.5)
 
     total_time = time.time() - start_ts
-    debug_files = collect_debug_files([Path(d) for d in set(outdirs) if os.path.exists(d)])
+    debug_files = collect_debug_files([Path(d) for d in set(outdirs)] if 'outdirs' in locals() else [])
     lisbon_tz = pytz.timezone("Europe/Lisbon")
     now_local = datetime.now(lisbon_tz)
     total_reqs = len(all_excel)
