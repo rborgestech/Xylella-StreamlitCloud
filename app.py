@@ -31,17 +31,12 @@ st.markdown("""
 
 .file-box{border-radius:8px;padding:.6rem 1rem;margin-bottom:.5rem;opacity:0;animation:fadeIn .3s ease forwards}
 @keyframes fadeIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
-.fadeOut{animation:fadeOut .4s ease forwards}
-@keyframes fadeOut{from{opacity:1;transform:translateY(0)}to{opacity:0;transform:translateY(-3px)}}
-
 .file-box.active{background:#E8F1FB;border-left:4px solid #2B6CB0}
 .file-box.success{background:#e6f9ee;border-left:4px solid #1a7f37}
 .file-box.warning{background:#fff8e5;border-left:4px solid #e6a100}
 .file-box.error{background:#fdeaea;border-left:4px solid #cc0000}
-
 .file-title{font-size:.9rem;font-weight:600;color:#1A365D}
 .file-sub{font-size:.8rem;color:#2A4365}
-
 .dots::after{content:'...';display:inline-block;animation:dots 1.5s steps(4,end) infinite}
 @keyframes dots{
   0%,20%{color:rgba(42,67,101,0);text-shadow:.25em 0 0 rgba(42,67,101,0),.5em 0 0 rgba(42,67,101,0)}
