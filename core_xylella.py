@@ -115,7 +115,7 @@ def extract_all_text(result_json: Dict[str, Any]) -> str:
 # ───────────────────────────────────────────────
 # Parser (mantém o teu parser original)
 # ───────────────────────────────────────────────
-from core_xylella_base import parse_all_requisitions  # <-- mantém o teu parser real
+from core_xylella import parse_all_requisitions  # <-- mantém o teu parser real
 
 # ───────────────────────────────────────────────
 # Função principal — agora com cache e paralelismo
@@ -185,3 +185,4 @@ def _process_single_req(i: int, req: Dict[str, Any], base: str, pdf_path: str) -
     except Exception as e:
         print(f"❌ Erro interno na requisição {i}: {e}")
         return {"rows": [], "declared": 0}
+
