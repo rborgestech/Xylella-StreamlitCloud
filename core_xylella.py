@@ -153,7 +153,7 @@ NATUREZA_KEYWORDS = [
     "ramos","folhas","ramosefolhas","ramosc/folhas","material","materialherbalho",
     "materialherbário","materialherbalo","natureza","insetos","sementes","solo"
 ]
-TIPO_RE = re.compile(r"\b(Simples|Composta|Individual)\b", re.I)
+TIPO_RE = re.compile(r"\b(Simples|Composta|Composto|Individual)\b", re.I)
 
 def _looks_like_natureza(txt: str) -> bool:
     t = re.sub(r"\s+", "", (txt or "").lower())
@@ -481,10 +481,10 @@ def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, An
 
             tipo = ""
             joined = " ".join([x for x in row if isinstance(x, str)])
-            m_tipo = re.search(r"\b(Simples|Composta|Individual)\b", joined, re.I)
+            m_tipo = re.search(r"\b(Simples|Composta|Composto|Individual)\b", joined, re.I)
             if m_tipo:
                 tipo = m_tipo.group(1).capitalize()
-                obs = re.sub(r"\b(Simples|Composta|Individual)\b", "", obs, flags=re.I).strip()
+                obs = re.sub(r"\b(Simples|Composta|Composto|Individual)\b", "", obs, flags=re.I).strip()
 
             datacolheita = context.get("default_colheita", "")
             m_ast = re.search(r"\(\s*\*+\s*\)", joined)
@@ -492,7 +492,7 @@ def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, An
                 mark = re.sub(r"\s+", "", m_ast.group(0))
                 datacolheita = context.get("colheita_map", {}).get(mark, datacolheita)
 
-            if obs.strip().lower() in ("simples", "composta", "individual"):
+            if obs.strip().lower() in ("simples", "composta", "composto", "individual"):
                 obs = ""
 
             out.append({
@@ -894,6 +894,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
     return created_files
+
 
 
 
