@@ -484,6 +484,9 @@ def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, An
             m_tipo = re.search(r"\b(Simples|Composta|Composto|Individual)\b", joined, re.I)
             if m_tipo:
                 tipo = m_tipo.group(1).capitalize()
+                # 🔧 Correção do erro comum: "Composto" → "Composta"
+                if tipo.lower() == "composto":
+                    tipo = "Composta"
                 obs = re.sub(r"\b(Simples|Composta|Composto|Individual)\b", "", obs, flags=re.I).strip()
 
             datacolheita = context.get("default_colheita", "")
@@ -894,6 +897,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
     return created_files
+
 
 
 
