@@ -1,11 +1,12 @@
 # azure_ocr.py
-# Cliente leve para OCR com fallback inteligente (Azure ou Tesseract), com cache seguro em RAM
+# Cliente leve para OCR com fallback inteligente (Azure ou Tesseract), com cache seguro em RAM e OCR paralelo
 
 import os
 import io
 import requests
 import fitz  # PyMuPDF
 from PIL import Image
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Azure configs
 AZURE_KEY = os.environ.get("AZURE_KEY")
@@ -22,7 +23,7 @@ READ_URL = f"{AZURE_ENDPOINT}/computervision/imageanalysis:analyze?api-version=2
 ocr_cache = {}
 
 # ----------------------------------------------------------------------
-# Fun\u00e7\u00e3o 1: Verifica se o PDF tem texto embutido
+# Verifica se o PDF tem texto embutido
 # ----------------------------------------------------------------------
 def has_embedded_text(pdf_path):
     with fitz.open(pdf_path) as doc:
@@ -31,9 +32,8 @@ def has_embedded_text(pdf_path):
                 return True
     return False
 
-
 # ----------------------------------------------------------------------
-# Fun\u00e7\u00e3o 2: Converte PDF em imagens (PyMuPDF, eficiente)
+# Converte PDF em imagens (PyMuPDF, eficiente)
 # ----------------------------------------------------------------------
 def pdf_to_images(pdf_path):
     images = []
@@ -44,9 +44,8 @@ def pdf_to_images(pdf_path):
             images.append(img)
     return images
 
-
 # ----------------------------------------------------------------------
-# Fun\u00e7\u00e3o 3: Extrai texto usando bytes (Azure OCR)
+# Envia imagem para Azure OCR (com cache)
 # ----------------------------------------------------------------------
 def extract_text_from_image_azure_bytes(img_bytes: bytes, page_idx: int = 0):
     key = f"page_{page_idx}_{hash(img_bytes)}"
@@ -65,23 +64,45 @@ def extract_text_from_image_azure_bytes(img_bytes: bytes, page_idx: int = 0):
     ocr_cache[key] = result
     return result
 
-
 # ----------------------------------------------------------------------
-# Fun\u00e7\u00e3o 4: Normaliza JSON Azure
+# Normaliza JSON Azure
 # ----------------------------------------------------------------------
 def get_analysis_result_azure(result_json):
     if "analyzeResult" in result_json:
         return result_json
     return {"analyzeResult": result_json}
 
+# ----------------------------------------------------------------------
+# OCR paralelo Azure (ThreadPool)
+# ----------------------------------------------------------------------
+def ocr_parallel_azure(images):
+    text_total = ""
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = []
+        for idx, img in enumerate(images, start=1):
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG")
+            img_bytes = buf.getvalue()
+            futures.append(executor.submit(extract_text_from_image_azure_bytes, img_bytes, idx))
+
+        for i, future in enumerate(as_completed(futures), start=1):
+            try:
+                result = future.result()
+                data = get_analysis_result_azure(result)
+                for block in data.get("analyzeResult", {}).get("readResult", []):
+                    for line in block.get("lines", []):
+                        text_total += line.get("text", "") + "\n"
+            except Exception as e:
+                print(f"\u26a0\ufe0f Erro OCR p\u00e1gina {i}: {e}")
+    return text_total
 
 # ----------------------------------------------------------------------
-# Fun\u00e7\u00e3o 5: Extra\u00e7\u00e3o universal de texto (OCR ou direto)
+# Extra\u00e7\u00e3o universal de texto
 # ----------------------------------------------------------------------
 def extract_all_text(pdf_path):
     import pytesseract
 
-    # Verifica se o PDF j\u00e1 tem texto embutido
+    # Verifica se tem texto embutido
     if has_embedded_text(pdf_path):
         print("\ud83d\udcc4 PDF com texto embutido \u2014 extra\u00e7\u00e3o direta.")
         text_total = ""
@@ -90,26 +111,14 @@ def extract_all_text(pdf_path):
                 text_total += page.get_text() + "\n"
         return text_total
 
-    # Caso contr\u00e1rio: aplicar OCR (Azure se poss\u00edvel, sen\u00e3o Tesseract)
     print("\ud83d\udd0d PDF sem texto \u2014 a aplicar OCR.")
     images = pdf_to_images(pdf_path)
-    text_total = ""
 
     if AZURE_KEY and AZURE_ENDPOINT:
-        for idx, img in enumerate(images, start=1):
-            try:
-                buf = io.BytesIO()
-                img.save(buf, format="JPEG")
-                result = extract_text_from_image_azure_bytes(buf.getvalue(), page_idx=idx)
-                data = get_analysis_result_azure(result)
-                for block in data.get("analyzeResult", {}).get("readResult", []):
-                    for line in block.get("lines", []):
-                        text_total += line.get("text", "") + "\n"
-            except Exception as e:
-                print(f"\u26a0\ufe0f Erro OCR p\u00e1gina {idx}: {e}")
+        return ocr_parallel_azure(images)
     else:
         print("\u26a0\ufe0f OCR Azure indispon\u00edvel \u2014 a usar OCR local.")
+        text_total = ""
         for img in images:
             text_total += pytesseract.image_to_string(img, lang="por")
-
-    return text_total
+        return text_total
