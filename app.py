@@ -8,6 +8,37 @@ from openpyxl import load_workbook
 from xylella_processor import process_pdf
 
 # ───────────────────────────────────────────────
+# Limpa ficheiros temporários
+# ───────────────────────────────────────────────
+
+def clean_temp_folder(path: str | Path):
+    """Apaga a pasta temporária indicada, com debug opcional."""
+    import shutil
+
+    path = Path(path)
+    if not path.exists():
+        print(f"ℹ️ Pasta {path} já não existe.")
+        return
+
+    remaining = []
+    for root, dirs, files in os.walk(path):
+        for file in files:
+            remaining.append(os.path.join(root, file))
+
+    if remaining:
+        print("⚠️ Ficheiros temporários ainda presentes:")
+        for f in remaining:
+            print("   └──", f)
+    else:
+        print("✅ Pasta temporária vazia.")
+
+    try:
+        shutil.rmtree(path, ignore_errors=True)
+        print("🧹 Pasta temporária apagada com sucesso.")
+    except Exception as e:
+        print(f"❌ Erro ao apagar a pasta temporária: {e}")
+
+# ───────────────────────────────────────────────
 # Configuração base
 # ───────────────────────────────────────────────
 st.set_page_config(page_title="Xylella Processor", page_icon="🧪", layout="centered")
@@ -286,6 +317,10 @@ elif st.session_state.stage == "processing":
     </div>""", unsafe_allow_html=True)
 
     zip_b64 = base64.b64encode(zip_bytes).decode()
+  
+    # 🧹 Limpeza segura da pasta temporária usada na sessão
+    clean_temp_folder(session_dir)
+  
     col1, col2 = st.columns(2)
     with col1:
         st.markdown(f"<a href='data:application/zip;base64,{zip_b64}' download='{zip_name}'><button class='clean-btn' style='width:100%;'>⬇️ Descarregar resultados (ZIP)</button></a>", unsafe_allow_html=True)
