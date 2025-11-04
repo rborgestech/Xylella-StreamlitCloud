@@ -877,8 +877,11 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         created_files.append(out_path)
 
         diff = len(rows) - (expected or 0)
-        if expected and diff != 0:
-            print(f"⚠️ Requisição {i}: {len(rows)} amostras vs {expected} declaradas (diferença {diff:+d}).")
+        if len(rows) > 0 and diff != 0:
+            if expected == 0:
+                print(f"⚠️ Requisição {i}: {len(rows)} amostras vs ausente/0 declaradas (diferença {diff:+d}).")
+            else:
+                print(f"⚠️ Requisição {i}: {len(rows)} amostras vs {expected} declaradas (diferença {diff:+d}).")
         else:
             print(f"✅ Requisição {i}: {len(rows)} amostras gravadas → {out_path}")
 
@@ -897,6 +900,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
     return created_files
+
 
 
 
