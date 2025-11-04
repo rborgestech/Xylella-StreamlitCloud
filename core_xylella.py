@@ -399,7 +399,7 @@ def extract_context_from_text(full_text: str):
 
     # aceita variações e ruído OCR (env1o, II, ll, _, etc.)
     patterns = [
-        r"N[º°o]?\s*de\s*amostras(?:\s+neste\s+env[i1]o)?\s*[:\-]?\s*([0-9OoQIl]{1,4})\b",
+        r"N[º°o]?\s*de\s*amostras(?:\s+neste\s+env[i1]o)?[\s:.\-]*([0-9OoQIl]{1,4})\b",
         r"N[º°o]?\s*amostras.*?([0-9OoQIl]{1,4})\b",
         r"amostras\s*(?:neste\s+env[i1]o)?\s*[:\-]?\s*([0-9OoQIl]{1,4})\b",
         r"n\s*[º°o]?\s*de\s*amostras.*?([0-9OoQIl]{1,4})\b",
@@ -897,6 +897,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
     return created_files
+
 
 
 
