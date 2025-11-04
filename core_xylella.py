@@ -774,7 +774,7 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
     expected  = expected_count
     ws.merge_cells("E1:F1")
     cell = ws["E1"]
-    val_str = f"{expected or 0} / {processed}"
+    val_str = f"Dec:{expected or 0} / Proc:{processed}"
     cell.value = f"Nº Amostras: {val_str}"
     cell.font = bold_center
     cell.alignment = Alignment(horizontal="center", vertical="center")
@@ -897,6 +897,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
     return created_files
+
 
 
 
