@@ -295,15 +295,24 @@ elif st.session_state.stage == "processing":
         elif m_amos:
             total_amostras += int(m_amos.group(1))
 
-
     summary_text = "\n".join(summary_lines)
     summary_text += f"\n\n📊 Total: {len(all_excel)} ficheiro(s) Excel"
     summary_text += f"\n🧪 Total de amostras: {total_amostras}"
     summary_text += f"\n⏱️ Tempo total: {total_time:.1f} segundos"
     summary_text += f"\n📅 Executado em: {now_local:%d/%m/%Y às %H:%M:%S}"
-    summary_text += f"\n🧹 Pasta temporária apagada: {session_dir}"
-    if warning_count: summary_text += f"\n⚠️ {warning_count} ficheiro(s) com discrepâncias"
-    if error_count: summary_text += f"\n❌ {error_count} ficheiro(s) com erro (sem ficheiros Excel gerados)"
+    
+    # 🧹 Tentativa segura de limpeza da pasta temporária
+    try:
+        clean_temp_folder(session_dir)
+        summary_text += "\n🧹 Pasta temporária apagada com sucesso."
+    except Exception as e:
+        summary_text += f"\n⚠️ Falha ao apagar pasta temporária: {e}"
+    
+    # ⚠️ Adiciona contagem de avisos e erros
+    if warning_count:
+        summary_text += f"\n⚠️ {warning_count} ficheiro(s) com discrepâncias"
+    if error_count:
+        summary_text += f"\n❌ {error_count} ficheiro(s) com erro (sem ficheiros Excel gerados)"
 
     zip_bytes = build_zip_with_summary(all_excel, debug_files, summary_text)
     zip_name = f"xylella_output_{now_local:%Y%m%d_%H%M%S}.zip"
@@ -318,9 +327,6 @@ elif st.session_state.stage == "processing":
     </div>""", unsafe_allow_html=True)
 
     zip_b64 = base64.b64encode(zip_bytes).decode()
-  
-    # 🧹 Limpeza segura da pasta temporária usada na sessão
-    clean_temp_folder(session_dir)
   
     col1, col2 = st.columns(2)
     with col1:
