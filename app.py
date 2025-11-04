@@ -177,7 +177,13 @@ elif st.session_state.stage == "processing":
                 shutil.copy(fp, dest)
                 all_excel.append(str(dest))
                 exp, proc = read_e1_counts(str(dest))
-                if exp and proc:
+              
+                # Substitui None ou string vazia por 0
+                exp = int(exp) if exp not in (None, '', ' ') else 0
+                proc = int(proc) if proc not in (None, '', ' ') else 0
+                
+                # Agora podes usar a condição sem receio
+                if proc:
                     sample_count_total += proc
                     if exp != proc:
                         discrepancies.append(f"⚠️ {Path(fp).name} (processadas: {proc} / declaradas: {exp})")
