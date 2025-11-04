@@ -301,6 +301,7 @@ elif st.session_state.stage == "processing":
     summary_text += f"\n🧪 Total de amostras: {total_amostras}"
     summary_text += f"\n⏱️ Tempo total: {total_time:.1f} segundos"
     summary_text += f"\n📅 Executado em: {now_local:%d/%m/%Y às %H:%M:%S}"
+    summary_text += f"\n🧹 Pasta temporária apagada: {session_dir}"
     if warning_count: summary_text += f"\n⚠️ {warning_count} ficheiro(s) com discrepâncias"
     if error_count: summary_text += f"\n❌ {error_count} ficheiro(s) com erro (sem ficheiros Excel gerados)"
 
