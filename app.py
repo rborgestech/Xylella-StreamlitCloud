@@ -211,8 +211,22 @@ elif st.session_state.stage == "processing":
             for fp in created:
                 name = Path(fp).name
                 exp, proc = read_e1_counts(str(fp))
-                if exp and proc and exp != proc:
-                    summary_lines.append(f"   ↳ ⚠️ {name} (processadas: {proc} / declaradas: {exp})")
+            
+                # Normaliza valores
+                try:
+                    exp = int(exp) if exp not in (None, '', ' ') else 0
+                except Exception:
+                    exp = 0
+                try:
+                    proc = int(proc) if proc not in (None, '', ' ') else 0
+                except Exception:
+                    proc = 0
+            
+                if proc > 0 and exp != proc:
+                    if exp == 0:
+                        summary_lines.append(f"   ↳ ⚠️ {name} (processadas: {proc} / declaradas: ausente ou 0)")
+                    else:
+                        summary_lines.append(f"   ↳ ⚠️ {name} (processadas: {proc} / declaradas: {exp})")
                 else:
                     summary_lines.append(f"   ↳ {name}")
 
