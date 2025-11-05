@@ -886,6 +886,18 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
     ws["K1"].alignment = Alignment(horizontal="right", vertical="center")
     ws["K1"].fill = gray_fill
 
+    # ⚙️ Tentar detetar o ID da requisição com base nas linhas
+    req_id = None
+    for row in ocr_rows:
+        r = row.get("requisicao") or ""
+        m = re.search(r"X\d{2,3}", r, flags=re.IGNORECASE)
+        if m:
+            req_id = m.group(0).upper()
+            break
+    
+    if not req_id:
+        req_id = "X??"  # fallback
+
     # Código interno Lab (coluna J)
     for i in range(start_row, start_row + len(ocr_rows)):
         seq = i - start_row + 1
@@ -1006,6 +1018,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
     return created_files
+
 
 
 
