@@ -82,7 +82,35 @@ ITALIC= Font(italic=True, color="555555")
 # ───────────────────────────────────────────────
 
 from datetime import datetime, timedelta
+def integrate_logic_and_generate_name(source_pdf: str) -> tuple[str, str]:
+    """
+    Função utilitária que:
+    - Extrai a data (YYYYMMDD) do início do nome do ficheiro PDF
+    - Adiciona 1 dia útil (PT)
+    - Substitui esse prefixo de data pelo novo (YYYYMMDD) no nome final do ficheiro Excel
 
+    Retorna:
+        (data_ddmm, novo_nome_base)
+    """
+    base_name = os.path.splitext(os.path.basename(source_pdf))[0]
+
+    # 1. Extrair prefixo de data (YYYYMMDD)
+    m = re.match(r"(\d{8})_", base_name)
+    if not m:
+        return "0000", base_name
+
+    try:
+        data_envio = datetime.strptime(m.group(1), "%Y%m%d").date()
+        cal = Portugal()
+        data_util = cal.add_working_days(data_envio, 1)
+        data_ddmm = data_util.strftime("%d%m")
+        data_util_str = data_util.strftime("%Y%m%d")
+    except Exception:
+        return "0000", base_name
+
+    # 2. Substituir prefixo no nome do ficheiro
+    novo_nome = re.sub(r"^\d{8}_", f"{data_util_str}_", base_name)
+    return data_ddmm, novo_nome
 # Feriados fixos em Portugal
 FERIADOS_FIXOS = [
     "01-01", "25-04", "01-05", "10-06", "15-08",
@@ -718,111 +746,171 @@ def gerar_nome_excel_corrigido(source_pdf: str, data_envio: str) -> str:
     return nome_corrigido.replace(".pdf", ".xlsx")
 
 
-def write_to_template (ocr_rows, out_name, expected_count=None, source_pdf=None):
+def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
     """
-    Versão v2 do writer:
-    - Calcula data A4 + 1 dia útil com workalendar (formato DDMM)
-    - Substitui prefixo de data no nome do Excel gerado
-    - Gera fórmula dinâmica na coluna J: =TEXTO($A$4;"ddmm")&"Xnn."&TEXTO(LIN()-3;"000")
+    Escreve as linhas extraídas no template base (1 ficheiro).
+    Campo de observações (coluna I) é sempre vazio.
+    Inclui:
+      • Validação do nº de amostras (E1:F1)
+      • Origem real do PDF (G1:J1)
+      • Data/hora de processamento (K1:L1)
+      • Conversão automática de datas
+      • Validação de campos obrigatórios
+      • Fórmula Data requerido = Data receção + 30 dias
     """
-    import re
-    from datetime import datetime
-    from workalendar.europe import Portugal
-    from openpyxl import load_workbook
-    from openpyxl.styles import PatternFill, Font, Alignment
-    import os
+    if not ocr_rows:
+        print(f"⚠️ {out_name}: sem linhas para escrever.")
+        return None
 
-    # Abrir template
+    if not TEMPLATE_PATH.exists():
+        raise FileNotFoundError(f"Template não encontrado: {TEMPLATE_PATH}")
+
     wb = load_workbook(TEMPLATE_PATH)
-    ws = wb.active
+    ws = wb.worksheets[0]
     start_row = 4
 
-    # Estilos
-    red_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
-    gray_fill = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")
-    green_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+    # 🎨 Estilos
+    yellow_fill = PatternFill(start_color="FFFACD", end_color="FFFACD", fill_type="solid")
+    green_fill  = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+    red_fill    = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+    gray_fill   = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")
     bold_center = Font(bold=True, color="000000")
 
-    # Limpar linhas existentes
+    # 🧹 Limpar linhas anteriores (A→L)
     for row in range(start_row, 201):
         for col in range(1, 13):
-            ws.cell(row=row, column=col).value = None
+            cell = ws.cell(row=row, column=col)
+            cell.value = None
+            cell.fill = PatternFill(fill_type=None)
+        ws[f"I{row}"].value = None
 
-    # 1. Identificar data no início do nome do PDF
-    base_name = os.path.splitext(os.path.basename(source_pdf or out_name))[0]
-    m = re.match(r"(\d{8})_", base_name)
-    data_original = None
-    if m:
+    # 🔧 Funções auxiliares ---------------------------------------------
+    import re
+    from datetime import datetime, date
+
+    def normalize_date_str(val: str) -> str:
+        """Corrige datas OCR como 23110/2025 → 23/10/2025."""
+        if not val:
+            return ""
+        s = re.sub(r"\D", "", str(val))
+        if len(s) >= 8:
+            d, m, y = int(s[:2]), int(s[2:4]), int(s[4:8])
+            if 1 <= d <= 31 and 1 <= m <= 12:
+                return f"{d:02d}/{m:02d}/{y:04d}"
+        # já vem em dd/mm/yyyy?
+        m = re.match(r"^\s*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s*$", str(val))
+        if m:
+            d, m_, y = map(int, m.groups())
+            return f"{d:02d}/{m_:02d}/{y:04d}"
+        return str(val).strip()
+
+    def to_excel_date(val: str):
+        """Converte string normalizada em datetime.date para Excel."""
+        s = normalize_date_str(val)
         try:
-            data_original = datetime.strptime(m.group(1), "%Y%m%d").date()
-        except:
-            pass
+            return datetime.strptime(s, "%d/%m/%Y")
+        except Exception:
+            return None
 
-    # 2. Calcular data útil seguinte
-    data_util_ddmm = "0000"
-    if data_original:
-        cal = Portugal()
-        next_date = cal.add_working_days(data_original, 1)
-        data_util_ddmm = next_date.strftime("%d%m")
-        data_util_full = next_date.strftime("%Y%m%d")
-    else:
-        data_util_full = "00000000"
+    # ✍️ Escrever novas linhas ------------------------------------------
+    for idx, row in enumerate(ocr_rows, start=start_row):
+        rececao_val  = row.get("datarececao", "")
+        colheita_val = row.get("datacolheita", "")
 
-    # 3. Detetar ID da requisição no nome (X27, X19, etc.)
-    req_id = "X??"
-    req_match = re.search(r"(X[\w\d]+)", base_name)
-    if req_match:
-        req_id = req_match.group(1).upper()
+        cell_A = ws[f"A{idx}"]  # Data receção
+        cell_B = ws[f"B{idx}"]  # Data colheita
+        cell_L = ws[f"L{idx}"]  # Data requerido
 
-    # 4. Escrever amostras
-    for i, row in enumerate(ocr_rows):
-        excel_row = start_row + i
-        ws[f"A{excel_row}"] = row.get("datarececao", "")
-        ws[f"B{excel_row}"] = row.get("datacolheita", "")
-        ws[f"C{excel_row}"] = row.get("referencia", "")
-        ws[f"D{excel_row}"] = row.get("hospedeiro", "")
-        ws[f"E{excel_row}"] = row.get("tipo", "")
-        ws[f"F{excel_row}"] = row.get("zona", "")
-        ws[f"G{excel_row}"] = row.get("responsavelamostra", "")
-        ws[f"H{excel_row}"] = row.get("responsavelcolheita", "")
-        ws[f"I{excel_row}"] = ""
-        ws[f"K{excel_row}"] = row.get("procedure", "")
-        ws[f"L{excel_row}"] = f"=A{excel_row}+30"
+        # 🧭 Data de receção
+        dt_recepcao = _to_datetime(rececao_val)
+        if dt_recepcao:
+            cell_A.value = dt_recepcao
+            cell_A.number_format = "dd/mm/yyyy"
+            # fórmula automática apenas se A for válida
+            cell_L.value = f"=A{idx}+30"
+            cell_L.number_format = "dd/mm/yyyy"
+        else:
+            # tenta normalizar e mostrar valor original corrigido
+            norm = normalize_date_str(rececao_val)
+            if norm:
+                cell_A.value = norm
+            else:
+                cell_A.value = str(rececao_val).strip()
+            cell_A.fill = red_fill
+            cell_L.value = ""
+            cell_L.fill = red_fill
 
-        # 5. Fórmula na coluna J
-        ws[f"J{excel_row}"].value = f'=TEXTO($A$4;"ddmm")&"{req_id}."&TEXTO(LIN()-3;"000")'
+        # 🧭 Data de colheita
+        dt_colheita = _to_datetime(colheita_val)
+        if dt_colheita:
+            cell_B.value = dt_colheita
+            cell_B.number_format = "dd/mm/yyyy"
+        else:
+            norm = normalize_date_str(colheita_val)
+            if norm:
+                cell_B.value = norm
+            else:
+                cell_B.value = str(colheita_val).strip()
+            cell_B.fill = red_fill
 
-    # 6. Validar número de amostras (E1:F1)
+        # 🧩 Outras colunas
+        ws[f"C{idx}"] = row.get("referencia", "")
+        ws[f"D{idx}"] = row.get("hospedeiro", "")
+        ws[f"E{idx}"] = row.get("tipo", "")
+        ws[f"F{idx}"] = row.get("zona", "")
+        ws[f"G{idx}"] = row.get("responsavelamostra", "")
+        ws[f"H{idx}"] = row.get("responsavelcolheita", "")
+        ws[f"I{idx}"] = ""  # Observações
+        ws[f"J{idx}"] = f'=TEXT($A$4;"ddmm")&"{req_id}."&TEXT(ROW()-3;"000")'
+        ws[f"K{idx}"] = row.get("procedure", "")
+
+        # Campos obrigatórios (A→G)
+        for col in ("A", "B", "C", "D", "E", "F", "G"):
+            c = ws[f"{col}{idx}"]
+            if not c.value or str(c.value).strip() == "":
+                c.fill = red_fill
+
+        # Destaque amarelo (flags de validação)
+        if row.get("WasCorrected") or row.get("ValidationStatus") in ("review", "unknown", "no_list"):
+            ws[f"D{idx}"].fill = yellow_fill
+
+    # 📊 Validação E1:F1 -----------------------------------------------
+    processed = len(ocr_rows)
+    expected  = expected_count
     ws.merge_cells("E1:F1")
     cell = ws["E1"]
-    val_str = f"{expected_count or 0} / {len(ocr_rows)}"
+    val_str = f" {expected or 0} / {processed}"
     cell.value = f"Nº Amostras (Dec./Proc.): {val_str}"
     cell.font = bold_center
     cell.alignment = Alignment(horizontal="center", vertical="center")
-    cell.fill = green_fill if expected_count == len(ocr_rows) else red_fill
+    cell.fill = red_fill if (expected is not None and expected != processed) else green_fill
+    if expected is not None and expected != processed:
+        print(f"⚠️ Diferença de nº de amostras: esperado={expected}, processado={processed}")
 
-    # 7. Origem do PDF (G1:J1)
+    # 🗂️ Origem do PDF (G1:J1)
     ws.merge_cells("G1:J1")
-    ws["G1"].value = f"Origem: {os.path.basename(source_pdf or '')}"
+    pdf_orig_name = os.path.basename(source_pdf) if source_pdf else "(desconhecida)"
+    ws["G1"].value = f"Origem: {pdf_orig_name}"
     ws["G1"].font = Font(italic=True, color="555555")
     ws["G1"].alignment = Alignment(horizontal="left", vertical="center")
     ws["G1"].fill = gray_fill
 
-    # 8. Timestamp (K1:L1)
+    # 🕒 Data/hora de processamento (K1:L1)
     ws.merge_cells("K1:L1")
-    ws["K1"].value = f"Processado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+    timestamp = datetime.now().strftime("%d/%m/%Y %H:%M")
+    ws["K1"].value = f"Processado em: {timestamp}"
     ws["K1"].font = Font(italic=True, color="555555")
     ws["K1"].alignment = Alignment(horizontal="right", vertical="center")
     ws["K1"].fill = gray_fill
 
-    # 9. Nome final com data útil (substitui prefixo data original)
-    new_name = re.sub(r"^\d{8}_", f"{data_util_full}_", base_name)
-    final_name = f"{new_name}.xlsx"
-    out_path = os.path.join(OUTPUT_DIR, final_name)
+    # 💾 Guardar ficheiro ---------------------------------------------
+    data_ddmm, novo_nome = integrate_logic_and_generate_name(source_pdf or out_name)
+    out_path = os.path.join(OUTPUT_DIR, f"{novo_nome}.xlsx")
     wb.save(out_path)
-
-    print(f"🟢 Excel gravado: {out_path}")
+    print(f"🟢 Gravado (com validação E1/F1, origem G1:J1 e timestamp K1:L1): {out_path}")
     return out_path
+
+
 
 
 # ───────────────────────────────────────────────
@@ -919,6 +1007,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
     return created_files
+
 
 
 
