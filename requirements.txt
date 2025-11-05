@@ -19,6 +19,7 @@ requests==2.32.3
 openpyxl==3.1.5
 pandas==2.2.3
 numpy==1.26.4
+workalendar==17.0.0
 
 # ───────────────────────────────────────────────
 # UTILITÁRIOS

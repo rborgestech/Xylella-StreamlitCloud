@@ -121,7 +121,7 @@ def get_feriados(ano):
 
 def add_dias_uteis(data_str: str, dias: int = 1) -> str:
     """
-    Adiciona dias úteis a uma data no formato 'dd/mm/yyyy' usando o calendário de Portugal.
+    Adiciona dias úteis a uma data 'dd/mm/yyyy', ignorando fins de semana e feriados nacionais PT.
     """
     cal = Portugal()
     data = datetime.strptime(data_str, "%d/%m/%Y").date()
@@ -697,6 +697,19 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
 # ───────────────────────────────────────────────
 # Escrita no TEMPLATE — 1 ficheiro por requisição
 # ───────────────────────────────────────────────
+
+def get_next_business_day(date_str: str) -> str | None:
+    """Recebe uma data no formato dd/mm/yyyy e devolve a próxima data útil (formato ddmm)."""
+    try:
+        cal = Portugal()
+        dt = datetime.strptime(date_str.strip(), "%d/%m/%Y").date()
+        next_day = cal.add_working_days(dt, 1)
+        return next_day.strftime("%d%m")
+    except Exception as e:
+        print(f"⚠️ Erro ao calcular dia útil: {e}")
+        return None
+
+
 def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
     """
     Escreve as linhas extraídas no template base (1 ficheiro).
@@ -853,9 +866,27 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
     ws["K1"].alignment = Alignment(horizontal="right", vertical="center")
     ws["K1"].fill = gray_fill
 
+    # Código interno Lab (coluna J)
+    for i in range(start_row, start_row + len(ocr_rows)):
+        seq = i - start_row + 1
+        ws[f"J{i}"] = f"{data_ddmm}{req_id}.{seq:03d}"
+
     # 💾 Guardar ficheiro ---------------------------------------------
     base_name = os.path.splitext(os.path.basename(out_name))[0]
-    out_path = os.path.join(OUTPUT_DIR, f"{base_name}.xlsx")
+    # Lê a data da célula A4 (data de envio)
+    data_envio = ws["A4"].value
+    data_envio_str = data_envio.strftime("%d/%m/%Y") if isinstance(data_envio, datetime) else str(data_envio)
+    data_ddmm = get_next_business_day(data_envio_str) or "0000"
+
+    # Extrai identificador da requisição (ex: X03)
+    import re
+    req_match = re.search(r"(X[\w\d]+)", out_name)
+    req_id = req_match.group(1) if req_match else "X00"
+
+    # Nome final: {YYYYMMDD}_{nome_pdf_original}.xlsx
+    final_name = f"{data_ddmm}_{base_name}.xlsx"
+    out_path = os.path.join(OUTPUT_DIR, final_name)
+
     wb.save(out_path)
     print(f"🟢 Gravado (com validação E1/F1, origem G1:J1 e timestamp K1:L1): {out_path}")
     return out_path
