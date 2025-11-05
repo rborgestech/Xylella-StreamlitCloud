@@ -721,11 +721,77 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
       • Conversão automática de datas
       • Validação de campos obrigatórios
       • Fórmula Data requerido = Data receção + 30 dias
+      • Código interno Lab (coluna J)
+      • Nome final do ficheiro Excel ajustado à data de envio (+1 útil)
     """
 
+    # ───────────────────────────────
+    # Carregar template
+    # ───────────────────────────────
+    if not ocr_rows:
+        print(f"⚠️ {out_name}: sem linhas para escrever.")
+        return None
+
+    if not TEMPLATE_PATH.exists():
+        raise FileNotFoundError(f"Template não encontrado: {TEMPLATE_PATH}")
+
+    wb = load_workbook(TEMPLATE_PATH)
+    ws = wb.worksheets[0]
+    start_row = 4
+
+    # ───────────────────────────────
+    # Estilos
+    # ───────────────────────────────
+    yellow_fill = PatternFill(start_color="FFFACD", end_color="FFFACD", fill_type="solid")
+    green_fill  = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+    red_fill    = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+    gray_fill   = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")
+    bold_center = Font(bold=True, color="000000")
+
+    # ───────────────────────────────
+    # Limpar linhas anteriores (A→L)
+    # ───────────────────────────────
+    for row in range(start_row, 201):
+        for col in range(1, 13):
+            cell = ws.cell(row=row, column=col)
+            cell.value = None
+            cell.fill = PatternFill(fill_type=None)
+        ws[f"I{row}"].value = None
+
+    # ───────────────────────────────
+    # Funções auxiliares
+    # ───────────────────────────────
+    import re
+    from datetime import datetime, date, timedelta
+    from workalendar.europe import Portugal
+
+    def normalize_date_str(val: str) -> str:
+        """Corrige datas OCR como 23110/2025 → 23/10/2025."""
+        if not val:
+            return ""
+        s = re.sub(r"\D", "", str(val))
+        if len(s) >= 8:
+            d, m, y = int(s[:2]), int(s[2:4]), int(s[4:8])
+            if 1 <= d <= 31 and 1 <= m <= 12:
+                return f"{d:02d}/{m:02d}/{y:04d}"
+        m = re.match(r"^\s*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s*$", str(val))
+        if m:
+            d, m_, y = map(int, m.groups())
+            return f"{d:02d}/{m_:02d}/{y:04d}"
+        return str(val).strip()
+
+    def to_excel_date(val: str):
+        """Converte string normalizada em datetime.date para Excel."""
+        s = normalize_date_str(val)
+        try:
+            return datetime.strptime(s, "%d/%m/%Y")
+        except Exception:
+            return None
+
+    # ───────────────────────────────
+    # Calcular data_ddmm (A4 + 1 dia útil)
+    # ───────────────────────────────
     cal = Portugal()
-    
-    # Tenta ler A4 e aplicar +1 dia útil
     try:
         a4_val = ws["A4"].value
         a4_date = None
@@ -741,123 +807,84 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
     except Exception as e:
         print(f"⚠️ Erro ao calcular data_ddmm: {e}")
         data_ddmm = "0000"
-        
-    if not ocr_rows:
-        print(f"⚠️ {out_name}: sem linhas para escrever.")
-        return None
 
-    if not TEMPLATE_PATH.exists():
-        raise FileNotFoundError(f"Template não encontrado: {TEMPLATE_PATH}")
-
-    wb = load_workbook(TEMPLATE_PATH)
-    ws = wb.worksheets[0]
-    start_row = 4
-
-    # 🎨 Estilos
-    yellow_fill = PatternFill(start_color="FFFACD", end_color="FFFACD", fill_type="solid")
-    green_fill  = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-    red_fill    = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
-    gray_fill   = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")
-    bold_center = Font(bold=True, color="000000")
-
-    # 🧹 Limpar linhas anteriores (A→L)
-    for row in range(start_row, 201):
-        for col in range(1, 13):
-            cell = ws.cell(row=row, column=col)
-            cell.value = None
-            cell.fill = PatternFill(fill_type=None)
-        ws[f"I{row}"].value = None
-
-    # 🔧 Funções auxiliares ---------------------------------------------
-    import re
-    from datetime import datetime, date
-
-    def normalize_date_str(val: str) -> str:
-        """Corrige datas OCR como 23110/2025 → 23/10/2025."""
-        if not val:
-            return ""
-        s = re.sub(r"\D", "", str(val))
-        if len(s) >= 8:
-            d, m, y = int(s[:2]), int(s[2:4]), int(s[4:8])
-            if 1 <= d <= 31 and 1 <= m <= 12:
-                return f"{d:02d}/{m:02d}/{y:04d}"
-        # já vem em dd/mm/yyyy?
-        m = re.match(r"^\s*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s*$", str(val))
-        if m:
-            d, m_, y = map(int, m.groups())
-            return f"{d:02d}/{m_:02d}/{y:04d}"
-        return str(val).strip()
-
-    def to_excel_date(val: str):
-        """Converte string normalizada em datetime.date para Excel."""
-        s = normalize_date_str(val)
-        try:
-            return datetime.strptime(s, "%d/%m/%Y")
-        except Exception:
-            return None
-
-    # ✍️ Escrever novas linhas ------------------------------------------
+    # ───────────────────────────────
+    # Escrever novas linhas
+    # ───────────────────────────────
     for idx, row in enumerate(ocr_rows, start=start_row):
         rececao_val  = row.get("datarececao", "")
         colheita_val = row.get("datacolheita", "")
 
-        cell_A = ws[f"A{idx}"]  # Data receção
-        cell_B = ws[f"B{idx}"]  # Data colheita
-        cell_L = ws[f"L{idx}"]  # Data requerido
+        cell_A = ws[f"A{idx}"]
+        cell_B = ws[f"B{idx}"]
+        cell_L = ws[f"L{idx}"]
 
-        # 🧭 Data de receção
+        # Data receção
         dt_recepcao = _to_datetime(rececao_val)
         if dt_recepcao:
             cell_A.value = dt_recepcao
             cell_A.number_format = "dd/mm/yyyy"
-            # fórmula automática apenas se A for válida
             cell_L.value = f"=A{idx}+30"
             cell_L.number_format = "dd/mm/yyyy"
         else:
-            # tenta normalizar e mostrar valor original corrigido
             norm = normalize_date_str(rececao_val)
-            if norm:
-                cell_A.value = norm
-            else:
-                cell_A.value = str(rececao_val).strip()
+            cell_A.value = norm if norm else str(rececao_val).strip()
             cell_A.fill = red_fill
-            cell_L.value = ""
-            cell_L.fill = red_fill
 
-        # 🧭 Data de colheita
+        # Data colheita
         dt_colheita = _to_datetime(colheita_val)
         if dt_colheita:
             cell_B.value = dt_colheita
             cell_B.number_format = "dd/mm/yyyy"
         else:
             norm = normalize_date_str(colheita_val)
-            if norm:
-                cell_B.value = norm
-            else:
-                cell_B.value = str(colheita_val).strip()
+            cell_B.value = norm if norm else str(colheita_val).strip()
             cell_B.fill = red_fill
 
-        # 🧩 Outras colunas
+        # Outras colunas
         ws[f"C{idx}"] = row.get("referencia", "")
         ws[f"D{idx}"] = row.get("hospedeiro", "")
         ws[f"E{idx}"] = row.get("tipo", "")
         ws[f"F{idx}"] = row.get("zona", "")
         ws[f"G{idx}"] = row.get("responsavelamostra", "")
         ws[f"H{idx}"] = row.get("responsavelcolheita", "")
-        ws[f"I{idx}"] = ""  # Observações
+        ws[f"I{idx}"] = ""
         ws[f"K{idx}"] = row.get("procedure", "")
 
-        # Campos obrigatórios (A→G)
         for col in ("A", "B", "C", "D", "E", "F", "G"):
             c = ws[f"{col}{idx}"]
             if not c.value or str(c.value).strip() == "":
                 c.fill = red_fill
 
-        # Destaque amarelo (flags de validação)
-        if row.get("WasCorrected") or row.get("ValidationStatus") in ("review", "unknown", "no_list"):
-            ws[f"D{idx}"].fill = yellow_fill
+    # ───────────────────────────────
+    # Identificar ReqID (ex: X03)
+    # ───────────────────────────────
+    req_id = None
+    for row in ocr_rows:
+        r = row.get("requisicao") or ""
+        m = re.search(r"X\d{1,3}", r, flags=re.IGNORECASE)
+        if m:
+            req_id = m.group(0).upper()
+            break
 
-    # 📊 Validação E1:F1 -----------------------------------------------
+    if not req_id and source_pdf:
+        m = re.search(r"(X[\w\d]+)", os.path.basename(source_pdf), flags=re.IGNORECASE)
+        if m:
+            req_id = m.group(1).upper()
+
+    if not req_id:
+        req_id = "X??"
+
+    # ───────────────────────────────
+    # Código interno Lab (coluna J)
+    # ───────────────────────────────
+    for i in range(start_row, start_row + len(ocr_rows)):
+        seq = i - start_row + 1
+        ws[f"J{i}"] = f"{data_ddmm}{req_id}.{seq:03d}"
+
+    # ───────────────────────────────
+    # Validação E1:F1
+    # ───────────────────────────────
     processed = len(ocr_rows)
     expected  = expected_count
     ws.merge_cells("E1:F1")
@@ -866,11 +893,11 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
     cell.value = f"Nº Amostras (Dec./Proc.): {val_str}"
     cell.font = bold_center
     cell.alignment = Alignment(horizontal="center", vertical="center")
-    cell.fill = red_fill if (expected is not None and expected != processed) else green_fill
-    if expected is not None and expected != processed:
-        print(f"⚠️ Diferença de nº de amostras: esperado={expected}, processado={processed}")
+    cell.fill = red_fill if (expected and expected != processed) else green_fill
 
-    # 🗂️ Origem do PDF (G1:J1)
+    # ───────────────────────────────
+    # Cabeçalho: Origem e Timestamp
+    # ───────────────────────────────
     ws.merge_cells("G1:J1")
     pdf_orig_name = os.path.basename(source_pdf) if source_pdf else "(desconhecida)"
     ws["G1"].value = f"Origem: {pdf_orig_name}"
@@ -878,50 +905,23 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
     ws["G1"].alignment = Alignment(horizontal="left", vertical="center")
     ws["G1"].fill = gray_fill
 
-    # 🕒 Data/hora de processamento (K1:L1)
     ws.merge_cells("K1:L1")
-    timestamp = datetime.now().strftime("%d/%m/%Y %H:%M")
-    ws["K1"].value = f"Processado em: {timestamp}"
+    ws["K1"].value = f"Processado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
     ws["K1"].font = Font(italic=True, color="555555")
     ws["K1"].alignment = Alignment(horizontal="right", vertical="center")
     ws["K1"].fill = gray_fill
 
-    # ⚙️ Tentar detetar o ID da requisição com base nas linhas
-    req_id = None
-    for row in ocr_rows:
-        r = row.get("requisicao") or ""
-        m = re.search(r"X\d{2,3}", r, flags=re.IGNORECASE)
-        if m:
-            req_id = m.group(0).upper()
-            break
-    
-    if not req_id:
-        req_id = "X??"  # fallback
-
-    # Código interno Lab (coluna J)
-    for i in range(start_row, start_row + len(ocr_rows)):
-        seq = i - start_row + 1
-        ws[f"J{i}"] = f"{data_ddmm}{req_id}.{seq:03d}"
-
-    # 💾 Guardar ficheiro ---------------------------------------------
-    base_name = os.path.splitext(os.path.basename(out_name))[0]
-    # Lê a data da célula A4 (data de envio)
-    data_envio = ws["A4"].value
-    data_envio_str = data_envio.strftime("%d/%m/%Y") if isinstance(data_envio, datetime) else str(data_envio)
-    data_ddmm = get_next_business_day(data_envio_str) or "0000"
-
-    # Extrai identificador da requisição (ex: X03)
-    import re
-    req_match = re.search(r"(X[\w\d]+)", out_name)
-    req_id = req_match.group(1) if req_match else "X00"
-
-    # Nome final: {YYYYMMDD}_{nome_pdf_original}.xlsx
-    final_name = f"{data_ddmm}_{base_name}.xlsx"
+    # ───────────────────────────────
+    # Nome final do ficheiro Excel
+    # ───────────────────────────────
+    base_name = os.path.splitext(os.path.basename(source_pdf or out_name))[0]
+    final_name = f"{datetime.now().strftime('%Y%m%d')}_{base_name}.xlsx"
     out_path = os.path.join(OUTPUT_DIR, final_name)
 
     wb.save(out_path)
-    print(f"🟢 Gravado (com validação E1/F1, origem G1:J1 e timestamp K1:L1): {out_path}")
+    print(f"🟢 Gravado: {out_path}")
     return out_path
+
 
 
 # ───────────────────────────────────────────────
@@ -1018,6 +1018,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
     return created_files
+
 
 
 
