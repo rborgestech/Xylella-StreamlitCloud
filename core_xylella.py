@@ -27,6 +27,9 @@ from typing import Dict, Any, List, Optional
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 
+from datetime import datetime, timedelta
+from workalendar.europe import Portugal
+
 # ───────────────────────────────────────────────
 # Diretório de saída seguro
 # ───────────────────────────────────────────────
@@ -116,22 +119,17 @@ def get_feriados(ano):
     feriados += [d.strftime("%Y-%m-%d") for d in moveis]
     return set(feriados)
 
-def add_dias_uteis(data_str, dias=1):
+def add_dias_uteis(data_str: str, dias: int = 1) -> str:
     """
-    Adiciona dias úteis a uma data no formato 'dd/mm/yyyy'.
-    Considera fins de semana e feriados portugueses.
+    Adiciona dias úteis a uma data no formato 'dd/mm/yyyy' usando o calendário de Portugal.
     """
-    try:
-        data = datetime.strptime(data_str.strip(), "%d/%m/%Y")
-    except Exception:
-        return None
-
-    feriados = get_feriados(data.year)
-    contador = 0
-    while contador < dias:
+    cal = Portugal()
+    data = datetime.strptime(data_str, "%d/%m/%Y").date()
+    dias_adicionados = 0
+    while dias_adicionados < dias:
         data += timedelta(days=1)
-        if data.weekday() < 5 and data.strftime("%Y-%m-%d") not in feriados:
-            contador += 1
+        if cal.is_working_day(data):
+            dias_adicionados += 1
     return data.strftime("%d/%m/%Y")
 
 def _is_valid_date(v) -> bool:
@@ -957,6 +955,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
     return created_files
+
 
 
 
