@@ -914,8 +914,29 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
     # ───────────────────────────────
     # Nome final do ficheiro Excel
     # ───────────────────────────────
+    # Lê o nome original do ficheiro (sem extensão)
     base_name = os.path.splitext(os.path.basename(source_pdf or out_name))[0]
-    final_name = f"{datetime.now().strftime('%Y%m%d')}_{base_name}.xlsx"
+    
+    # Lê data da célula A4 (já com +1 dia útil aplicado)
+    data_envio = ws["A4"].value
+    if isinstance(data_envio, datetime):
+        data_envio_final = data_envio.strftime("%Y%m%d")
+    elif isinstance(data_envio, str):
+        try:
+            parsed = datetime.strptime(data_envio.strip(), "%d/%m/%Y")
+            data_envio_final = parsed.strftime("%Y%m%d")
+        except Exception:
+            data_envio_final = "00000000"
+    else:
+        data_envio_final = "00000000"
+    
+    # Remove data inicial (prefixo YYYYMMDD_) se existir e substitui pela nova
+    import re
+    prefix_match = re.match(r"^\d{8}_(.+)", base_name)
+    suffix = prefix_match.group(1) if prefix_match else base_name
+    final_name = f"{data_envio_final}_{suffix}.xlsx"
+    
+    # Caminho final
     out_path = os.path.join(OUTPUT_DIR, final_name)
 
     wb.save(out_path)
@@ -1018,6 +1039,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
     return created_files
+
 
 
 
