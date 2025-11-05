@@ -815,7 +815,7 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
             ws[f"D{idx}"].fill = yellow_fill
 
         # 📌 Código interno (coluna J)
-        ws[f"J{idx}"] = f'=TEXT($A$4;"ddmm")&"{req_id}."&TEXT(ROW()-3;"000")'
+        ws[f"J{idx}"].value = f'=TEXT($A$4;"ddmm")&"{req_id}."&TEXT(ROW()-3;"000")'
 
     # 📊 Validação E1:F1
     ws.merge_cells("E1:F1")
@@ -947,6 +947,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
     return created_files
+
 
 
 
