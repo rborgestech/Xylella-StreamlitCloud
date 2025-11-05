@@ -77,6 +77,63 @@ ITALIC= Font(italic=True, color="555555")
 # ───────────────────────────────────────────────
 # Utilitários genéricos
 # ───────────────────────────────────────────────
+
+from datetime import datetime, timedelta
+
+# Feriados fixos em Portugal
+FERIADOS_FIXOS = [
+    "01-01", "25-04", "01-05", "10-06", "15-08",
+    "05-10", "01-11", "01-12", "08-12", "25-12"
+]
+
+def pascoa(ano):
+    """Calcula a data da Páscoa (Calendário Gregoriano)."""
+    a = ano % 19
+    b = ano // 100
+    c = ano % 100
+    d = b // 4
+    e = b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4
+    k = c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    mes = (h + l - 7 * m + 114) // 31
+    dia = ((h + l - 7 * m + 114) % 31) + 1
+    return datetime(ano, mes, dia)
+
+def get_feriados(ano):
+    """Gera lista de feriados no formato 'YYYY-MM-DD' para o ano dado."""
+    feriados = [f"{ano}-{dia}" for dia in FERIADOS_FIXOS]
+    pascoa_base = pascoa(ano)
+    moveis = [
+        pascoa_base,                           # Páscoa
+        pascoa_base - timedelta(days=2),       # Sexta-feira Santa
+        pascoa_base + timedelta(days=60),      # Corpo de Deus
+    ]
+    feriados += [d.strftime("%Y-%m-%d") for d in moveis]
+    return set(feriados)
+
+def add_dias_uteis(data_str, dias=1):
+    """
+    Adiciona dias úteis a uma data no formato 'dd/mm/yyyy'.
+    Considera fins de semana e feriados portugueses.
+    """
+    try:
+        data = datetime.strptime(data_str.strip(), "%d/%m/%Y")
+    except Exception:
+        return None
+
+    feriados = get_feriados(data.year)
+    contador = 0
+    while contador < dias:
+        data += timedelta(days=1)
+        if data.weekday() < 5 and data.strftime("%Y-%m-%d") not in feriados:
+            contador += 1
+    return data.strftime("%d/%m/%Y")
+
 def _is_valid_date(v) -> bool:
     try:
         datetime.strptime(str(v).strip(), "%d/%m/%Y")
@@ -900,6 +957,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
     return created_files
+
 
 
 
