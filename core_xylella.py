@@ -722,6 +722,26 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
       • Validação de campos obrigatórios
       • Fórmula Data requerido = Data receção + 30 dias
     """
+
+    cal = Portugal()
+    
+    # Tenta ler A4 e aplicar +1 dia útil
+    try:
+        a4_val = ws["A4"].value
+        a4_date = None
+        if isinstance(a4_val, datetime):
+            a4_date = a4_val.date()
+        elif isinstance(a4_val, str):
+            a4_date = datetime.strptime(a4_val.strip(), "%d/%m/%Y").date()
+        if a4_date:
+            next_bd = cal.add_working_days(a4_date, 1)
+            data_ddmm = next_bd.strftime("%d%m")
+        else:
+            data_ddmm = "0000"
+    except Exception as e:
+        print(f"⚠️ Erro ao calcular data_ddmm: {e}")
+        data_ddmm = "0000"
+        
     if not ocr_rows:
         print(f"⚠️ {out_name}: sem linhas para escrever.")
         return None
@@ -986,6 +1006,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
     return created_files
+
 
 
 
