@@ -1018,22 +1018,23 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
 
     print(f"🧾 Summary criado: {summary_path}")
 
-    # 📦 Criar ZIP final em /tmp com nome baseado no primeiro PDF
+       # 📦 Criar ZIP final em /tmp com nome baseado no primeiro PDF
     first_pdf = pdf_files[0]
     base_name = Path(first_pdf).stem
     zip_name = f"{base_name}_output.zip"
     zip_path = Path("/tmp") / zip_name
 
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-        # adicionar Excels
+        # ➕ Adicionar ficheiros Excel
         for e in all_excels:
             if Path(e).exists():
                 zipf.write(e, Path(e).name)
 
-        # adicionar summary
-        zipf.write(summary_path, Path(summary_path).name)
+        # ➕ Adicionar summary
+        if Path(summary_path).exists():
+            zipf.write(summary_path, Path(summary_path).name)
 
-        # adicionar PDFs originais (fora do summary)
+        # ➕ Adicionar PDFs originais (sempre incluir)
         for pdf_path in pdf_files:
             if pdf_path.exists():
                 zipf.write(pdf_path, pdf_path.name)
@@ -1049,7 +1050,9 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     except Exception as e:
         print(f"[WARN] Erro ao limpar temporários: {e}")
 
+    # ✅ Devolve o caminho absoluto do ZIP final (inclui PDFs + Excels + summary)
     return str(zip_path)
+
 
 
 
