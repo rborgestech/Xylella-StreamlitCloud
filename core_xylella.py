@@ -22,6 +22,8 @@ import requests
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+import zipfile
+import shutil
 
 # 🟢 Biblioteca Excel
 from openpyxl import load_workbook
@@ -973,25 +975,39 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
     except Exception as e:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
-    # 6️⃣ Gerar ZIP com Excel(s), OCR e PDF original
-        # 6️⃣ Gerar ZIP com Excel(s) e PDF original
+    # 6️⃣ Gerar ZIP com Excel(s) e PDF original (compatível com Streamlit Cloud)
     try:
         zip_name = f"{Path(pdf_path).stem}_output.zip"
         zip_path = OUTPUT_DIR / zip_name
 
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-            # adicionar todos os Excels criados
-            for f in created_files:
-                if f and Path(f).exists():
-                    zipf.write(f, Path(f).name)
+        # Garantir que o PDF existe e copiá-lo para o OUTPUT_DIR
+        pdf_src = Path(pdf_path)
+        pdf_copy = OUTPUT_DIR / pdf_src.name
+        if not pdf_copy.exists():
+            try:
+                shutil.copy(pdf_src, pdf_copy)
+                print(f"📂 PDF copiado para OUTPUT_DIR: {pdf_copy}")
+            except Exception as e:
+                print(f"[WARN] Falha ao copiar PDF ({pdf_src}) → {e}")
 
-            # adicionar o PDF original
-            if pdf_path and Path(pdf_path).exists():
-                pdf_name = Path(pdf_path).name
-                zipf.write(pdf_path, pdf_name)
-                print(f"📄 PDF adicionado ao ZIP: {pdf_name}")
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+            # Adicionar Excels gerados
+            for f in created_files:
+                f_path = Path(f)
+                if f_path.exists():
+                    zipf.write(f_path, f_path.name)
+                else:
+                    print(f"[WARN] Excel não encontrado: {f_path}")
+
+            # Adicionar o PDF copiado (ou original se ainda existir)
+            if pdf_copy.exists():
+                zipf.write(pdf_copy, pdf_copy.name)
+                print(f"📄 PDF adicionado ao ZIP: {pdf_copy.name}")
+            elif pdf_src.exists():
+                zipf.write(pdf_src, pdf_src.name)
+                print(f"📄 PDF original adicionado ao ZIP: {pdf_src.name}")
             else:
-                print(f"[WARN] PDF não encontrado: {pdf_path}")
+                print(f"[WARN] Nenhuma versão do PDF encontrada para incluir no ZIP.")
 
         print(f"📦 ZIP final criado em: {zip_path}")
         created_files.append(str(zip_path))
@@ -1000,6 +1016,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Falha ao criar ZIP: {e}")
 
     return created_files
+
 
 
 
