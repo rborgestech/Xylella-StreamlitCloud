@@ -813,7 +813,7 @@ def write_to_template (ocr_rows, out_name, expected_count=None, source_pdf=None)
             cell_B.value = norm or str(colheita_val).strip()
             cell_B.fill = red_fill
             
-        formula_excel = f'=DIATRABALHO(DATA.VALOR("{base_date}");1;Z1:Z5)'
+        formula_excel = f'=DIATRABALHO(DATA.VALOR("{base_date}"),1,Z1:Z5)'
         ws[f"A{idx}"].value = formula_excel
 
         ws[f"C{idx}"] = row.get("referencia", "")
@@ -971,6 +971,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
     return created_files
+
 
 
 
