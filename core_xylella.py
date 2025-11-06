@@ -976,22 +976,23 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
     # 6️⃣ Gerar ZIP com Excel(s) e PDF original (compatível com Streamlit Cloud)
+        # 6️⃣ Gerar ZIP com Excel(s) e PDF original (compatível com Streamlit Cloud)
     try:
         zip_name = f"{Path(pdf_path).stem}_output.zip"
-        zip_path = OUTPUT_DIR / zip_name
+        zip_path = Path("/tmp") / zip_name  # o ZIP é criado no /tmp
 
-        # Garantir que o PDF existe e copiá-lo para o OUTPUT_DIR
+        # Garantir que o PDF existe e copiá-lo para /tmp (caso o original seja temporário)
         pdf_src = Path(pdf_path)
-        pdf_copy = OUTPUT_DIR / pdf_src.name
+        pdf_copy = Path("/tmp") / pdf_src.name
         if not pdf_copy.exists():
             try:
-                shutil.copy(pdf_src, pdf_copy)
-                print(f"📂 PDF copiado para OUTPUT_DIR: {pdf_copy}")
+                shutil.copy2(pdf_src, pdf_copy)
+                print(f"📂 PDF copiado para /tmp: {pdf_copy}")
             except Exception as e:
-                print(f"[WARN] Falha ao copiar PDF ({pdf_src}) → {e}")
+                print(f"[WARN] Falha ao copiar PDF para /tmp ({pdf_src}) → {e}")
 
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-            # Adicionar Excels gerados
+            # Adicionar todos os Excels criados
             for f in created_files:
                 f_path = Path(f)
                 if f_path.exists():
@@ -999,7 +1000,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
                 else:
                     print(f"[WARN] Excel não encontrado: {f_path}")
 
-            # Adicionar o PDF copiado (ou original se ainda existir)
+            # Adicionar o PDF copiado (ou original, se ainda existir)
             if pdf_copy.exists():
                 zipf.write(pdf_copy, pdf_copy.name)
                 print(f"📄 PDF adicionado ao ZIP: {pdf_copy.name}")
@@ -1016,6 +1017,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Falha ao criar ZIP: {e}")
 
     return created_files
+
 
 
 
