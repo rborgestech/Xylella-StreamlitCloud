@@ -957,34 +957,28 @@ def process_pdf_sync(pdf_path: str) -> list[str]:
 # API pública usada pela app Streamlit
 # ───────────────────────────────────────────────
 
-
-import os
-import time
-import zipfile
-from datetime import datetime
-from pathlib import Path
-
 def process_folder_async(input_dir: str = "/tmp") -> str:
     """
-    Processa todos os PDFs numa pasta temporária (/tmp) e gera:
+    Processa todos os PDFs em `input_dir` chamando `process_pdf_sync(pdf_path)`.
+    Cria:
       - ficheiros Excel (um por requisição)
       - summary.txt
-      - ZIP final único com PDFs originais + Excels + summary
+      - ZIP final apenas com XLSX + summary.txt
+    Retorna o caminho completo do ZIP criado.
     """
     start_time = time.time()
     input_path = Path(input_dir)
     pdf_files = sorted(input_path.glob("*.pdf"))
 
     if not pdf_files:
-        print("⚠️ Nenhum PDF encontrado na pasta /tmp.")
+        print("⚠️ Nenhum PDF encontrado na pasta.")
         return ""
 
     print(f"📂 Início do processamento: {input_path} ({len(pdf_files)} PDF(s))")
 
     all_excels = []
-    total_requisicoes = 0
 
-    # 🧪 Processar cada PDF
+    # Processar cada PDF → gerar Excels
     for pdf_path in pdf_files:
         base = pdf_path.name
         print(f"\n🔹 A processar: {base}")
@@ -992,14 +986,13 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
             created = process_pdf_sync(str(pdf_path))
             excels = [f for f in created if str(f).lower().endswith(".xlsx")]
             all_excels.extend(excels)
-            total_requisicoes += len(excels)
-            print(f"✅ {base}: {len(excels)} requisição(ões).")
+            print(f"✅ {base}: {len(excels)} ficheiro(s) Excel.")
         except Exception as e:
             print(f"❌ Erro ao processar {base}: {e}")
 
     elapsed_time = time.time() - start_time
 
-    # 📄 summary.txt na mesma pasta /tmp
+    # Criar summary.txt
     summary_path = input_path / "summary.txt"
     with open(summary_path, "w", encoding="utf-8") as f:
         for pdf_path in pdf_files:
@@ -1010,20 +1003,21 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
                 f.write(f"   ↳ {Path(e).name}\n")
             f.write("\n")
 
-        f.write(f"📊 Total: {len(all_excels)} ficheiro(s) Excel\n")
+        f.write("──────────────────────────────\n")
+        f.write(f"📊 Total de ficheiros Excel: {len(all_excels)}\n")
         f.write(f"⏱️ Tempo total: {elapsed_time:.1f} segundos\n")
         f.write(f"📅 Executado em: {datetime.now():%d/%m/%Y às %H:%M:%S}\n")
 
     print(f"🧾 Summary criado: {summary_path}")
 
-    # 📦 Criar ZIP único com tudo (PDFs + Excels + summary)
+    # Criar ZIP apenas com XLSX e summary.txt
     first_pdf = pdf_files[0]
     base_name = Path(first_pdf).stem
     zip_name = f"{base_name}_output.zip"
-    zip_path = Path("/tmp") / zip_name
+    zip_path = Path("/tmp") / zip_name  # usa o /tmp global (não apagado pela sessão)
 
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-        # Adiciona Excels gerados
+        # Adiciona todos os Excel
         for e in all_excels:
             e_path = Path(e)
             if e_path.exists():
@@ -1033,24 +1027,12 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
         if summary_path.exists():
             zipf.write(summary_path, summary_path.name)
 
-        # Adiciona PDFs originais
-        for pdf_path in pdf_files:
-            if pdf_path.exists():
-                zipf.write(pdf_path, pdf_path.name)
-
     print(f"📦 ZIP final criado: {zip_path}")
+    print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
-    # 🧹 Limpeza — remover ficheiros soltos (PDFs, Excels e summary)
-    try:
-        for f in pdf_files + all_excels + [summary_path]:
-            if Path(f).exists():
-                Path(f).unlink(missing_ok=True)
-        print("🧹 Ficheiros originais removidos (ficou apenas o ZIP final).")
-    except Exception as e:
-        print(f"[WARN] Erro ao limpar: {e}")
-
-    print(f"✅ Processamento completo em {elapsed_time:.1f} segundos.")
     return str(zip_path)
+
+
 
 
 
