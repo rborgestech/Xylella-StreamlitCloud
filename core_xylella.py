@@ -117,48 +117,7 @@ FERIADOS_FIXOS = [
     "05-10", "01-11", "01-12", "08-12", "25-12"
 ]
 
-def pascoa(ano):
-    """Calcula a data da Páscoa (Calendário Gregoriano)."""
-    a = ano % 19
-    b = ano // 100
-    c = ano % 100
-    d = b // 4
-    e = b % 4
-    f = (b + 8) // 25
-    g = (b - f + 1) // 3
-    h = (19 * a + b - d - g + 15) % 30
-    i = c // 4
-    k = c % 4
-    l = (32 + 2 * e + 2 * i - h - k) % 7
-    m = (a + 11 * h + 22 * l) // 451
-    mes = (h + l - 7 * m + 114) // 31
-    dia = ((h + l - 7 * m + 114) % 31) + 1
-    return datetime(ano, mes, dia)
 
-def get_feriados(ano):
-    """Gera lista de feriados no formato 'YYYY-MM-DD' para o ano dado."""
-    feriados = [f"{ano}-{dia}" for dia in FERIADOS_FIXOS]
-    pascoa_base = pascoa(ano)
-    moveis = [
-        pascoa_base,                           # Páscoa
-        pascoa_base - timedelta(days=2),       # Sexta-feira Santa
-        pascoa_base + timedelta(days=60),      # Corpo de Deus
-    ]
-    feriados += [d.strftime("%Y-%m-%d") for d in moveis]
-    return set(feriados)
-
-def add_dias_uteis(data_str: str, dias: int = 1) -> str:
-    """
-    Adiciona dias úteis a uma data 'dd/mm/yyyy', ignorando fins de semana e feriados nacionais PT.
-    """
-    cal = Portugal()
-    data = datetime.strptime(data_str, "%d/%m/%Y").date()
-    dias_adicionados = 0
-    while dias_adicionados < dias:
-        data += timedelta(days=1)
-        if cal.is_working_day(data):
-            dias_adicionados += 1
-    return data.strftime("%d/%m/%Y")
 
 def _is_valid_date(v) -> bool:
     try:
@@ -799,28 +758,47 @@ def write_to_template (ocr_rows, out_name, expected_count=None, source_pdf=None)
     base = Path(source_pdf or out_name).name
     m = re.search(r"(X\d{2,3})", base, flags=re.I)
     req_id = m.group(1).upper() if m else "X??"
-
+    
+    # 🗓️ Inserir feriados (para DIATRABALHO)
+    feriados = ["01/01/2025", "25/04/2025", "01/05/2025", "10/06/2025", "25/12/2025"]
+    for i, feriado in enumerate(feriados, start=1):
+        f_cell = ws[f"Z{i}"]
+        f_cell.value = feriado
+        f_cell.number_format = "dd/mm/yyyy"
+        
     # Processar linhas
     for idx, row in enumerate(ocr_rows, start=start_row):
         rececao_val  = row.get("datarececao", "")
         colheita_val = row.get("datacolheita", "")
-
+    
         cell_A = ws[f"A{idx}"]
         cell_B = ws[f"B{idx}"]
         cell_L = ws[f"L{idx}"]
-
-        dt_recepcao = to_excel_date(rececao_val)
-        if dt_recepcao:
-            cell_A.value = dt_recepcao
+    
+        # 🧭 Data de receção com DIATRABALHO se possível
+        base_date = normalize_date_str(rececao_val)
+        if re.match(r"\d{2}/\d{2}/\d{4}", base_date):  # valida formato DD/MM/YYYY
+            # fórmula: =DIATRABALHO("30/10/2025";1;Z1:Z5)
+            cell_A.value = f'=DIATRABALHO("{base_date}";1;Z1:Z5)'
             cell_A.number_format = "dd/mm/yyyy"
             cell_L.value = f"=A{idx}+30"
             cell_L.number_format = "dd/mm/yyyy"
         else:
-            norm = normalize_date_str(rececao_val)
-            cell_A.value = norm or str(rececao_val).strip()
+            cell_A.value = str(rececao_val).strip()
             cell_A.fill = red_fill
             cell_L.value = ""
             cell_L.fill = red_fill
+    
+        # 🧭 Data de colheita (mantém como estava)
+        dt_colheita = to_excel_date(colheita_val)
+        if dt_colheita:
+            cell_B.value = dt_colheita
+            cell_B.number_format = "dd/mm/yyyy"
+        else:
+            norm = normalize_date_str(colheita_val)
+            cell_B.value = norm or str(colheita_val).strip()
+            cell_B.fill = red_fill
+
 
         dt_colheita = to_excel_date(colheita_val)
         if dt_colheita:
@@ -986,6 +964,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
     return created_files
+
 
 
 
