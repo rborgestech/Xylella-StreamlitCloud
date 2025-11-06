@@ -776,12 +776,18 @@ def write_to_template (ocr_rows, out_name, expected_count=None, source_pdf=None)
                 next_bd = cal.add_working_days(dt, 1)
                 ws[f"A{idx}"].value = next_bd
                 ws[f"A{idx}"].number_format = "dd/mm/yyyy"
+                ws[f"L{idx}"].value = f"=A{idx}+30"
+                ws[f"L{idx}"].number_format = "dd/mm/yyyy"
             except Exception:
                 ws[f"A{idx}"].value = base_date
                 ws[f"A{idx}"].fill = red_fill
+                ws[f"L{idx}"].value = ""
+                ws[f"L{idx}"].fill = red_fill
         else:
             ws[f"A{idx}"].value = str(rececao_val or "").strip()
             ws[f"A{idx}"].fill = red_fill
+            ws[f"L{idx}"].value = ""
+            ws[f"L{idx}"].fill = red_fill
     
         # ───────────────────────────────────────────────
         # 🧭 Coluna B — Data de colheita (valor direto)
@@ -1030,6 +1036,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
