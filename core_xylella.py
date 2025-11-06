@@ -907,123 +907,38 @@ def append_process_log(pdf_name, req_id, processed, expected, out_path=None, sta
 # ───────────────────────────────────────────────
 # API pública usada pela app Streamlit
 # ───────────────────────────────────────────────
-def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
-    """
-    Executa o OCR Azure direto ao PDF e o parser Colab integrado.
-    Devolve: lista de requisições, cada uma no formato:
-      {
-        "rows": [ {dados da amostra}, ... ],
-        "expected": nº_declarado
-      }
-    A escrita do Excel é feita a jusante (no xylella_processor.py),
-    1 ficheiro por requisição, com validação esperadas/processadas.
-    """
-    base = os.path.basename(pdf_path)
-    print(f"\n🧪 Início de processamento: {base}")
+# ───────────────────────────────────────────────────────────────
+# 7) Processar TODOS os PDFs da pasta local Input/ (assíncrono)
+# ───────────────────────────────────────────────────────────────
+async def process_folder_async(input_dir: str = INPUT_DIR):
+    pdfs = [os.path.join(input_dir, f) for f in os.listdir(input_dir) if f.lower().endswith(".pdf")]
+    if not pdfs:
+        print("ℹ️ Não há PDFs na pasta de entrada.")
+        return
 
-    # 1️⃣ Executar OCR Azure
-    result_json = azure_analyze_pdf(pdf_path)
+    start_time = asyncio.get_event_loop().time()
+    total_rows = 0
 
-    # 2️⃣ Guardar texto OCR global para debug
-    txt_path = OUTPUT_DIR / f"{os.path.splitext(base)[0]}_ocr_debug.txt"
-    txt_path.write_text(extract_all_text(result_json), encoding="utf-8")
-    print(f"📝 Texto OCR bruto guardado em: {txt_path}")
+    async with aiohttp.ClientSession() as session:
+        tasks = [process_pdf_async(pdf, session) for pdf in pdfs]
+        results = await asyncio.gather(*tasks)
 
-    # 3️⃣ Parser — dividir em requisições e extrair amostras
-    req_results = parse_all_requisitions(result_json, pdf_path, str(txt_path))
-
-    # 4️⃣ Log e resumo de validação
-    total_amostras = sum(len(req["rows"]) for req in req_results)
-    print(f"✅ {base}: {len(req_results)} requisições, {total_amostras} amostras extraídas.")
-
-    # 5️⃣ Escrever ficheiros Excel diretamente (para compatibilidade cloud)
-    created_files = []
-    for i, req in enumerate(req_results, start=1):
-        rows = req.get("rows", [])
-        expected = req.get("expected", 0)
-
-        if not rows:
-            print(f"⚠️ Requisição {i}: sem amostras — ignorada.")
+    for pdf, res in zip(pdfs, results):
+        if not res:
             continue
+        total_rows += len(res)
 
-        base_name = os.path.splitext(base)[0]
-        out_name = f"{base_name}_req{i}.xlsx" if len(req_results) > 1 else f"{base_name}.xlsx"
+    total_time = asyncio.get_event_loop().time() - start_time
+    avg_time = total_time / len(pdfs) if pdfs else 0
 
-        out_path = write_to_template(rows, out_name, expected_count=expected, source_pdf=pdf_path)
-        created_files.append(out_path)
-
-        diff = len(rows) - (expected or 0)
-        if len(rows) > 0 and diff != 0:
-            if expected == 0:
-                print(f"⚠️ Requisição {i}: {len(rows)} amostras vs ausente/0 declaradas (diferença {diff:+d}).")
-            else:
-                print(f"⚠️ Requisição {i}: {len(rows)} amostras vs {expected} declaradas (diferença {diff:+d}).")
-        else:
-            print(f"✅ Requisição {i}: {len(rows)} amostras gravadas → {out_path}")
-
-    print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
-    # Guardar excerto OCR para debug de "Nº de amostras"
-    try:
-        ocr_text_path = OUTPUT_DIR / f"{Path(pdf_path).stem}_ocr_debug_excerpt.txt"
-        with open(ocr_text_path, "w", encoding="utf-8") as dbg:
-            with open(OUTPUT_DIR / f"{Path(pdf_path).stem}_ocr_debug.txt", "r", encoding="utf-8") as full:
-                text = full.read()
-                # guarda apenas 400 caracteres à volta de "amostra" para ver o contexto real
-                match = re.search(r".{0,200}amostra.{0,200}", text, re.I)
-                dbg.write(match.group(0) if match else text[:400])
-        print(f"🪶 Excerto OCR guardado em: {ocr_text_path}")
-    except Exception as e:
-        print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
-
-    # 6️⃣ Garantir que o PDF existe e copiá-lo para /tmp (compatível com Streamlit Cloud)
-    try:
-        pdf_src = Path(pdf_path)
-        pdf_copy = Path("/tmp") / pdf_src.name
-        if not pdf_copy.exists():
-            shutil.copy2(pdf_src, pdf_copy)
-            print(f"📂 PDF copiado para /tmp: {pdf_copy}")
-    except Exception as e:
-        print(f"[WARN] Falha ao copiar PDF para /tmp ({pdf_src}) → {e}")
-
-    # Incluir o PDF (cópia ou original) na lista final
-    pdf_final = pdf_copy if pdf_copy.exists() else pdf_src
-    if pdf_final.exists():
-        created_files.append(str(pdf_final))
-        print(f"📄 PDF incluído na lista final: {pdf_final}")
-    else:
-        print(f"[WARN] PDF não encontrado: {pdf_final}")
-
-    # 7️⃣ Gerar summary.txt formatado
-    try:
-        # Obter prefixo de data do primeiro Excel
-        first_excel = next((f for f in created_files if f.endswith(".xlsx")), None)
-        data_prefix = ""
-        if first_excel:
-            match = re.match(r"^(\d{8})_", Path(first_excel).stem)
-            if match:
-                data_prefix = match.group(1)
-
-        # Definir nome do summary
-        summary_name = f"{data_prefix}_summary.txt" if data_prefix else "summary.txt"
-        summary_path = Path("/tmp") / summary_name
-
-        # Escrever conteúdo
-        with open(summary_path, "w", encoding="utf-8") as s:
-            s.write(f"Resumo de processamento — {datetime.now():%d/%m/%Y %H:%M}\n")
-            s.write(f"Ficheiro original: {base}\n")
-            s.write(f"Total de requisições válidas: {len(valid_reqs)}\n")
-            s.write(f"Total de amostras: {total_amostras}\n\n")
-            s.write("Ficheiros incluídos:\n")
-            for f in created_files:
-                s.write(f"  - {Path(f).name}\n")
-
-        created_files.append(str(summary_path))
-        print(f"🪶 Summary criado: {summary_path}")
-
-    except Exception as e:
-        print(f"[WARN] Falha ao gerar summary.txt: {e}")
-    print(f"🏁 {base}: {len(created_files)} ficheiro(s) no total (incluindo PDF e summary).")
-    return created_files
+    print("\n📊 Resumo Final")
+    print("──────────────────────────────")
+    print(f"📄 PDFs processados: {len(pdfs)}")
+    print(f"🧾 Total de amostras extraídas: {total_rows}")
+    print(f"⏱️ Tempo total: {timedelta(seconds=round(total_time))}")
+    print(f"⚙️ Tempo médio por PDF: {timedelta(seconds=round(avg_time))}")
+    print(f"📂 Saída: {OUTPUT_DIR}")
+    print("──────────────────────────────\n")
 
 
 
