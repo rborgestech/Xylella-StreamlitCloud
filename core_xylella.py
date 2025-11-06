@@ -846,35 +846,35 @@ def write_to_template (ocr_rows, out_name, expected_count=None, source_pdf=None)
     ws["K1"].alignment = Alignment(horizontal="right", vertical="center")
     ws["K1"].fill = gray_fill
 
-# ───────────────────────────────────────────────
-# 💾 Nome final baseado na data_envio (data_rececao + 1 dia útil)
-# ───────────────────────────────────────────────
-try:
-    # Tenta usar a última data calculada (coluna A)
-    data_envio = next_bd
-except NameError:
-    # Fallback se a variável não existir
-    data_envio = datetime.now().date()
-
-# Converter para datetime se necessário
-if not isinstance(data_envio, datetime):
-    data_envio = datetime.combine(data_envio, datetime.min.time())
-
-# Extrair data como YYYYMMDD
-data_util = data_envio.strftime("%Y%m%d")
-
-# Nome base sem prefixo de data anterior
-base_name = Path(out_name).stem
-base_name = re.sub(r"^\d{8}_", "", base_name)
-
-# Novo nome → YYYYMMDD_restante.xlsx
-new_name = f"{data_util}_{base_name}.xlsx"
-
-out_path = Path(OUTPUT_DIR) / new_name
-wb.save(out_path)
-
-print(f"📁 Ficheiro gravado: {out_path}")
-return str(out_path)
+    # ───────────────────────────────────────────────
+    # 💾 Nome final baseado na data_envio (data_rececao + 1 dia útil)
+    # ───────────────────────────────────────────────
+    try:
+        # Tenta usar a última data calculada (coluna A)
+        data_envio = next_bd
+    except NameError:
+        # Fallback se a variável não existir
+        data_envio = datetime.now().date()
+    
+    # Converter para datetime se necessário
+    if not isinstance(data_envio, datetime):
+        data_envio = datetime.combine(data_envio, datetime.min.time())
+    
+    # Extrair data como YYYYMMDD
+    data_util = data_envio.strftime("%Y%m%d")
+    
+    # Nome base sem prefixo de data anterior
+    base_name = Path(out_name).stem
+    base_name = re.sub(r"^\d{8}_", "", base_name)
+    
+    # Novo nome → YYYYMMDD_restante.xlsx
+    new_name = f"{data_util}_{base_name}.xlsx"
+    
+    out_path = Path(OUTPUT_DIR) / new_name
+    wb.save(out_path)
+    
+    print(f"📁 Ficheiro gravado: {out_path}")
+    return str(out_path)
 
 
 
@@ -974,6 +974,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
     return created_files
+
 
 
 
