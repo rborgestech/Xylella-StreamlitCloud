@@ -779,9 +779,8 @@ def write_to_template (ocr_rows, out_name, expected_count=None, source_pdf=None)
         # 🧭 Data de receção com DIATRABALHO se possível
         base_date = normalize_date_str(rececao_val)
         if re.match(r"\d{2}/\d{2}/\d{4}", base_date):  # valida formato DD/MM/YYYY
-            # fórmula: =DIATRABALHO("30/10/2025";1;Z1:Z5)
-            formula = f'--DIATRABALHO("{base_date}",1,Z1:Z5)'
-            cell_A.value = f'={formula}'
+            formula = f'--DIATRABALHO("{base_date}";1;Z1:Z5)'  # usa ; e não ,
+            cell_A.value = formula  # sem igual extra!
             cell_A.number_format = "dd/mm/yyyy"
             cell_L.value = f"=A{idx}+30"
             cell_L.number_format = "dd/mm/yyyy"
@@ -966,6 +965,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
     return created_files
+
 
 
 
