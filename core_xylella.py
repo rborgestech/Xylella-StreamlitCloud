@@ -958,116 +958,100 @@ def process_pdf_sync(pdf_path: str) -> list[str]:
 # ───────────────────────────────────────────────
 
 
+import os
+import time
+import zipfile
+from datetime import datetime
+from pathlib import Path
+
 def process_folder_async(input_dir: str = "/tmp") -> str:
     """
     Processa todos os PDFs numa pasta temporária (/tmp) e gera:
       - ficheiros Excel (um por requisição)
-      - summary.txt detalhado
-      - ZIP final com PDFs originais + Excels + summary
-    Compatível com execução em Streamlit Cloud.
+      - summary.txt
+      - ZIP final único com PDFs originais + Excels + summary
     """
     start_time = time.time()
     input_path = Path(input_dir)
     pdf_files = sorted(input_path.glob("*.pdf"))
-    total_pdfs = len(pdf_files)
 
     if not pdf_files:
         print("⚠️ Nenhum PDF encontrado na pasta /tmp.")
         return ""
 
-    print(f"📂 Início do processamento: {input_path} ({total_pdfs} PDF(s))")
+    print(f"📂 Início do processamento: {input_path} ({len(pdf_files)} PDF(s))")
 
     all_excels = []
-    total_amostras = 0
     total_requisicoes = 0
 
-    # 🧪 Processar cada PDF individualmente
+    # 🧪 Processar cada PDF
     for pdf_path in pdf_files:
         base = pdf_path.name
         print(f"\n🔹 A processar: {base}")
         try:
             created = process_pdf_sync(str(pdf_path))
-
-            # filtrar apenas ficheiros Excel (não incluir PDF nem txt)
             excels = [f for f in created if str(f).lower().endswith(".xlsx")]
             all_excels.extend(excels)
-
-            req_count = len(excels)
-            total_requisicoes += req_count
-            print(f"✅ {base}: {req_count} requisição(ões) processada(s).")
-
+            total_requisicoes += len(excels)
+            print(f"✅ {base}: {len(excels)} requisição(ões).")
         except Exception as e:
             print(f"❌ Erro ao processar {base}: {e}")
 
     elapsed_time = time.time() - start_time
 
-    # 📝 Criar summary.txt global
-    summary_path = Path(input_dir) / "summary.txt"
+    # 📄 summary.txt na mesma pasta /tmp
+    summary_path = input_path / "summary.txt"
     with open(summary_path, "w", encoding="utf-8") as f:
-        f.write("📄 RESULTADO DO PROCESSAMENTO\n")
-        f.write("───────────────────────────────\n\n")
-
         for pdf_path in pdf_files:
             base = pdf_path.name
             related_excels = [e for e in all_excels if Path(base).stem in Path(e).stem]
-
-            f.write(f"📄 {base}\n")
-            f.write(f"   → {len(related_excels)} requisição(ões)\n")
+            f.write(f"{base}: {len(related_excels)} requisição(ões)\n")
             for e in related_excels:
-                f.write(f"      ↳ {Path(e).name}\n")
+                f.write(f"   ↳ {Path(e).name}\n")
             f.write("\n")
 
-        f.write("───────────────────────────────\n")
-        f.write(f"📊 Total de PDFs: {len(pdf_files)}\n")
-        f.write(f"📦 Total de Excels: {len(all_excels)}\n")
-        f.write(f"⏱️ Tempo total de execução: {elapsed_time:.1f} segundos\n")
+        f.write(f"📊 Total: {len(all_excels)} ficheiro(s) Excel\n")
+        f.write(f"⏱️ Tempo total: {elapsed_time:.1f} segundos\n")
         f.write(f"📅 Executado em: {datetime.now():%d/%m/%Y às %H:%M:%S}\n")
 
     print(f"🧾 Summary criado: {summary_path}")
 
-    # 📦 Criar ZIP final em /tmp com nome baseado no primeiro PDF
+    # 📦 Criar ZIP único com tudo (PDFs + Excels + summary)
     first_pdf = pdf_files[0]
     base_name = Path(first_pdf).stem
     zip_name = f"{base_name}_output.zip"
-    zip_tmp_path = Path("/tmp") / zip_name
+    zip_path = input_path / zip_name
 
-    with zipfile.ZipFile(zip_tmp_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-        # adicionar Excels
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+        # Adiciona Excels gerados
         for e in all_excels:
-            if Path(e).exists():
-                zipf.write(e, Path(e).name)
+            e_path = Path(e)
+            if e_path.exists():
+                zipf.write(e_path, e_path.name)
 
-        # adicionar summary
+        # Adiciona summary.txt
         if summary_path.exists():
             zipf.write(summary_path, summary_path.name)
 
-        # adicionar PDFs originais
+        # Adiciona PDFs originais
         for pdf_path in pdf_files:
             if pdf_path.exists():
                 zipf.write(pdf_path, pdf_path.name)
 
-    print(f"📦 ZIP final criado em /tmp: {zip_tmp_path}")
+    print(f"📦 ZIP final criado: {zip_path}")
 
-    # 📤 Copiar ZIP para o mesmo diretório dos Excels (caso exista)
-    if all_excels:
-        output_dir = Path(all_excels[0]).parent
-        final_zip_path = output_dir / zip_name
-        shutil.copy(zip_tmp_path, final_zip_path)
-        print(f"📦 ZIP copiado para {final_zip_path}")
-        zip_final = final_zip_path
-    else:
-        zip_final = zip_tmp_path
-
-    # 🔁 Limpeza de ficheiros OCR temporários
+    # 🧹 Limpeza — remover ficheiros soltos (PDFs, Excels e summary)
     try:
-        for f in Path("/tmp").glob("*_ocr_debug*.txt"):
-            f.unlink(missing_ok=True)
-        print("🧹 Ficheiros temporários de OCR removidos.")
+        for f in pdf_files + all_excels + [summary_path]:
+            if Path(f).exists():
+                Path(f).unlink(missing_ok=True)
+        print("🧹 Ficheiros originais removidos (ficou apenas o ZIP final).")
     except Exception as e:
-        print(f"[WARN] Erro ao limpar temporários: {e}")
+        print(f"[WARN] Erro ao limpar: {e}")
 
     print(f"✅ Processamento completo em {elapsed_time:.1f} segundos.")
-    return str(zip_final)
+    return str(zip_path)
+
 
 
 
