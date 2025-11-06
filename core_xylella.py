@@ -1022,6 +1022,9 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
 
     except Exception as e:
         print(f"[WARN] Falha ao gerar summary.txt: {e}")
+    print(f"🏁 {base}: {len(created_files)} ficheiro(s) no total (incluindo PDF e summary).")
+    return created_files
+
 
 
 
