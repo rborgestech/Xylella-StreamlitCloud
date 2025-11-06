@@ -762,6 +762,9 @@ def write_to_template (ocr_rows, out_name, expected_count=None, source_pdf=None)
     # Processar linhas
     for idx, row in enumerate(ocr_rows, start=start_row):
         rececao_val = row.get("datarececao", "")
+        colheita_val = row.get("datacolheita", "")
+    
+        # 🧭 Coluna A = Data de receção + 1 dia útil
         base_date = normalize_date_str(rececao_val)
         if base_date and re.match(r"\d{2}/\d{2}/\d{4}", str(base_date)):
             try:
@@ -952,6 +955,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
     return created_files
+
 
 
 
