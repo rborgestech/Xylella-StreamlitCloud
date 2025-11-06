@@ -957,22 +957,14 @@ def process_pdf_sync(pdf_path: str) -> list[str]:
 # API pública usada pela app Streamlit
 # ───────────────────────────────────────────────
 
-import os
-import re
-import time
-import zipfile
-import shutil
-from pathlib import Path
-from datetime import datetime
-
 
 def process_folder_async(input_dir: str = "/tmp") -> str:
     """
     Processa todos os PDFs numa pasta temporária (/tmp) e gera:
       - ficheiros Excel (um por requisição)
-      - summary.txt
-      - ZIP final com PDF original + Excels + summary
-    Compatível com Streamlit Cloud.
+      - summary.txt detalhado
+      - ZIP final com PDFs originais + Excels + summary
+    Compatível com execução em Streamlit Cloud.
     """
     start_time = time.time()
     input_path = Path(input_dir)
@@ -994,10 +986,9 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
         base = pdf_path.name
         print(f"\n🔹 A processar: {base}")
         try:
-            # Chamada direta (estamos no mesmo módulo)
             created = process_pdf_sync(str(pdf_path))
 
-            # filtrar apenas ficheiros Excel (não incluir PDF)
+            # filtrar apenas ficheiros Excel (não incluir PDF nem txt)
             excels = [f for f in created if str(f).lower().endswith(".xlsx")]
             all_excels.extend(excels)
 
@@ -1011,23 +1002,26 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     elapsed_time = time.time() - start_time
 
     # 📝 Criar summary.txt global
-    summary_name = f"summary_{datetime.now():%Y%m%d_%H%M%S}.txt"
-    summary_path = Path("/tmp") / summary_name
-
+    summary_path = Path(input_dir) / "summary.txt"
     with open(summary_path, "w", encoding="utf-8") as f:
+        f.write("📄 RESULTADO DO PROCESSAMENTO\n")
+        f.write("───────────────────────────────\n\n")
+
         for pdf_path in pdf_files:
             base = pdf_path.name
             related_excels = [e for e in all_excels if Path(base).stem in Path(e).stem]
 
-            f.write(f"{base}: {len(related_excels)} requisição(ões)\n")
+            f.write(f"📄 {base}\n")
+            f.write(f"   → {len(related_excels)} requisição(ões)\n")
             for e in related_excels:
-                f.write(f"   ↳ {Path(e).name}\n")
+                f.write(f"      ↳ {Path(e).name}\n")
             f.write("\n")
 
-        f.write(f"📊 Total: {len(all_excels)} ficheiro(s) Excel\n")
-        f.write(f"⏱️ Tempo total: {elapsed_time:.1f} segundos\n")
+        f.write("───────────────────────────────\n")
+        f.write(f"📊 Total de PDFs: {len(pdf_files)}\n")
+        f.write(f"📦 Total de Excels: {len(all_excels)}\n")
+        f.write(f"⏱️ Tempo total de execução: {elapsed_time:.1f} segundos\n")
         f.write(f"📅 Executado em: {datetime.now():%d/%m/%Y às %H:%M:%S}\n")
-        f.write("🧹 Pasta temporária apagada com sucesso.\n")
 
     print(f"🧾 Summary criado: {summary_path}")
 
@@ -1035,26 +1029,36 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     first_pdf = pdf_files[0]
     base_name = Path(first_pdf).stem
     zip_name = f"{base_name}_output.zip"
-    zip_path = Path("/tmp") / zip_name
+    zip_tmp_path = Path("/tmp") / zip_name
 
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+    with zipfile.ZipFile(zip_tmp_path, "w", zipfile.ZIP_DEFLATED) as zipf:
         # adicionar Excels
         for e in all_excels:
             if Path(e).exists():
                 zipf.write(e, Path(e).name)
 
         # adicionar summary
-        zipf.write(summary_path, Path(summary_path).name)
+        if summary_path.exists():
+            zipf.write(summary_path, summary_path.name)
 
-        # adicionar PDFs originais (fora do summary)
+        # adicionar PDFs originais
         for pdf_path in pdf_files:
             if pdf_path.exists():
                 zipf.write(pdf_path, pdf_path.name)
 
-    print(f"📦 ZIP final criado: {zip_path}")
-    print(f"✅ Processamento completo em {elapsed_time:.1f} segundos.")
+    print(f"📦 ZIP final criado em /tmp: {zip_tmp_path}")
 
-    # 🔁 Limpeza opcional da pasta temporária (OCR debug)
+    # 📤 Copiar ZIP para o mesmo diretório dos Excels (caso exista)
+    if all_excels:
+        output_dir = Path(all_excels[0]).parent
+        final_zip_path = output_dir / zip_name
+        shutil.copy(zip_tmp_path, final_zip_path)
+        print(f"📦 ZIP copiado para {final_zip_path}")
+        zip_final = final_zip_path
+    else:
+        zip_final = zip_tmp_path
+
+    # 🔁 Limpeza de ficheiros OCR temporários
     try:
         for f in Path("/tmp").glob("*_ocr_debug*.txt"):
             f.unlink(missing_ok=True)
@@ -1062,7 +1066,9 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     except Exception as e:
         print(f"[WARN] Erro ao limpar temporários: {e}")
 
-    return str(zip_path)
+    print(f"✅ Processamento completo em {elapsed_time:.1f} segundos.")
+    return str(zip_final)
+
 
 
 
