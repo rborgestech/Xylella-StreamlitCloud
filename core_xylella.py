@@ -757,6 +757,9 @@ def write_to_template (ocr_rows, out_name, expected_count=None, source_pdf=None)
     
         
     # Processar linhas
+       # ───────────────────────────────────────────────
+    # 🔁 Processar linhas OCR
+    # ───────────────────────────────────────────────
     for idx, row in enumerate(ocr_rows, start=start_row):
         # Extrair valores da linha OCR
         rececao_val = row.get("datarececao", "")
@@ -773,12 +776,21 @@ def write_to_template (ocr_rows, out_name, expected_count=None, source_pdf=None)
                 next_bd = cal.add_working_days(dt, 1)
                 ws[f"A{idx}"].value = next_bd
                 ws[f"A{idx}"].number_format = "dd/mm/yyyy"
+
+                # 📅 Coluna L — Data requerido (+30 dias após receção)
+                ws[f"L{idx}"].value = f"=A{idx}+30"
+                ws[f"L{idx}"].number_format = "dd/mm/yyyy"
+
             except Exception:
                 ws[f"A{idx}"].value = base_date
                 ws[f"A{idx}"].fill = red_fill
+                ws[f"L{idx}"].value = ""
+                ws[f"L{idx}"].fill = red_fill
         else:
             ws[f"A{idx}"].value = str(rececao_val or "").strip()
             ws[f"A{idx}"].fill = red_fill
+            ws[f"L{idx}"].value = ""
+            ws[f"L{idx}"].fill = red_fill
     
         # ───────────────────────────────────────────────
         # 🧭 Coluna B — Data de colheita (valor direto)
@@ -809,10 +821,6 @@ def write_to_template (ocr_rows, out_name, expected_count=None, source_pdf=None)
     
         # Coluna K — Procedimento
         ws[f"K{idx}"] = row.get("procedure", "")
-
-         # 📅 Coluna L — Data requerido (+30 dias após receção)
-        ws[f"L{idx}"].value = f"=A{idx}+30"
-        ws[f"L{idx}"].number_format = "dd/mm/yyyy"
         
         # ───────────────────────────────────────────────
         # 🚨 Validação visual
@@ -825,33 +833,6 @@ def write_to_template (ocr_rows, out_name, expected_count=None, source_pdf=None)
         if row.get("WasCorrected") or row.get("ValidationStatus") in ("review", "unknown", "no_list"):
             ws[f"D{idx}"].fill = yellow_fill
 
-
-    # Validação E1:F1
-    processed = len(ocr_rows)
-    expected = expected_count
-    ws.merge_cells("E1:F1")
-    cell = ws["E1"]
-    val_str = f" {expected or 0} / {processed}"
-    cell.value = f"Nº Amostras (Dec./Proc.): {val_str}"
-    cell.font = bold_center
-    cell.alignment = Alignment(horizontal="center", vertical="center")
-    cell.fill = red_fill if (expected is not None and expected != processed) else green_fill
-
-    # Origem do PDF
-    ws.merge_cells("G1:J1")
-    pdf_orig_name = Path(source_pdf).name if source_pdf else "(desconhecida)"
-    ws["G1"].value = f"Origem: {pdf_orig_name}"
-    ws["G1"].font = Font(italic=True, color="555555")
-    ws["G1"].alignment = Alignment(horizontal="left", vertical="center")
-    ws["G1"].fill = gray_fill
-
-    # Timestamp
-    ws.merge_cells("K1:L1")
-    timestamp = datetime.now().strftime("%d/%m/%Y %H:%M")
-    ws["K1"].value = f"Processado em: {timestamp}"
-    ws["K1"].font = Font(italic=True, color="555555")
-    ws["K1"].alignment = Alignment(horizontal="right", vertical="center")
-    ws["K1"].fill = gray_fill
 
     # ───────────────────────────────────────────────
     # 💾 Nome final baseado na data_envio (data_rececao + 1 dia útil)
@@ -1035,6 +1016,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
