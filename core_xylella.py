@@ -995,32 +995,10 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"📄 PDF incluído na lista final: {pdf_final}")
     else:
         print(f"[WARN] PDF não encontrado: {pdf_final}")
-
-    # 7️⃣ Gerar summary.txt com nome alinhado à data calculada
-    try:
-        # Localizar o primeiro Excel gerado (para extrair a data prefixada)
-        first_excel = next((f for f in created_files if f.endswith(".xlsx")), None)
-        data_prefix = ""
-        if first_excel:
-            match = re.match(r"^(\d{8})_", Path(first_excel).stem)
-            if match:
-                data_prefix = match.group(1)
-
-        summary_name = f"{data_prefix}_summary.txt" if data_prefix else "summary.txt"
-        summary_path = Path("/tmp") / summary_name
-
-        with open(summary_path, "w", encoding="utf-8") as s:
-            s.write(f"Resumo de processamento do ficheiro: {base}\n")
-            s.write(f"Data: {datetime.now():%d/%m/%Y %H:%M}\n\n")
-            s.write(f"Ficheiros gerados:\n")
-            for f in created_files:
-                s.write(f"- {Path(f).name}\n")
-
-        print(f"🪶 Summary criado em: {summary_path}")
-        created_files.append(str(summary_path))
     except Exception as e:
         print(f"[WARN] Falha ao gerar summary.txt: {e}")
 
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) gerado(s) no total (incluindo PDF e summary).")
     return created_files
+
 
