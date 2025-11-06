@@ -1020,7 +1020,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     first_pdf = pdf_files[0]
     base_name = Path(first_pdf).stem
     zip_name = f"{base_name}_output.zip"
-    zip_path = input_path / zip_name
+    zip_path = Path("/tmp") / zip_name
 
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
         # Adiciona Excels gerados
@@ -1051,6 +1051,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
 
     print(f"✅ Processamento completo em {elapsed_time:.1f} segundos.")
     return str(zip_path)
+
 
 
 
