@@ -809,7 +809,11 @@ def write_to_template (ocr_rows, out_name, expected_count=None, source_pdf=None)
     
         # Coluna K — Procedimento
         ws[f"K{idx}"] = row.get("procedure", "")
-    
+
+         # 📅 Coluna L — Data requerido (+30 dias após receção)
+        ws[f"L{idx}"].value = f"=A{idx}+30"
+        ws[f"L{idx}"].number_format = "dd/mm/yyyy"
+        
         # ───────────────────────────────────────────────
         # 🚨 Validação visual
         # ───────────────────────────────────────────────
@@ -1031,6 +1035,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
