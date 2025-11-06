@@ -838,7 +838,8 @@ def write_to_template (ocr_rows, out_name, expected_count=None, source_pdf=None)
         ws[f"G{idx}"] = row.get("responsavelamostra", "")
         ws[f"H{idx}"] = row.get("responsavelcolheita", "")
         ws[f"I{idx}"] = ""
-        ws[f"J{idx}"].value = f'=TEXTO($A$4;"ddmm")&"{req_id}."&TEXTO(LIN()-3;"000")'
+        ws[f"J{idx}"] = f'=TEXT($A$4,"ddmm")&"{req_id}."&TEXT(ROW()-3,"000")'
+  
         ws[f"K{idx}"] = row.get("procedure", "")
 
         for col in ("A", "B", "C", "D", "E", "F", "G"):
@@ -985,6 +986,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
     return created_files
+
 
 
 
