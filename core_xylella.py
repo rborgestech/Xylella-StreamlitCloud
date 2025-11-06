@@ -752,19 +752,16 @@ def write_to_template (ocr_rows, out_name, expected_count=None, source_pdf=None)
     m = re.search(r"(X\d{2,3})", base, flags=re.I)
     req_id = m.group(1).upper() if m else "X??"
     
-    # 🗓️ Inserir feriados (para DIATRABALHO)
-    feriados = ["01/01/2025", "25/04/2025", "01/05/2025", "10/06/2025", "25/12/2025"]
-    for i, feriado in enumerate(feriados, start=1):
-        f_cell = ws[f"Z{i}"]
-        f_cell.value = feriado
-        f_cell.number_format = "dd/mm/yyyy"
         
     # Processar linhas
     for idx, row in enumerate(ocr_rows, start=start_row):
+        # Extrair valores da linha OCR
         rececao_val = row.get("datarececao", "")
         colheita_val = row.get("datacolheita", "")
-    
-        # 🧭 Coluna A = Data de receção + 1 dia útil
+        
+        # ───────────────────────────────────────────────
+        # 🧭 Coluna A — Data de receção + 1 dia útil
+        # ───────────────────────────────────────────────
         base_date = normalize_date_str(rececao_val)
         if base_date and re.match(r"\d{2}/\d{2}/\d{4}", str(base_date)):
             try:
@@ -773,14 +770,17 @@ def write_to_template (ocr_rows, out_name, expected_count=None, source_pdf=None)
                 next_bd = cal.add_working_days(dt, 1)
                 ws[f"A{idx}"].value = next_bd
                 ws[f"A{idx}"].number_format = "dd/mm/yyyy"
-            except Exception as e:
+            except Exception:
                 ws[f"A{idx}"].value = base_date
                 ws[f"A{idx}"].fill = red_fill
         else:
             ws[f"A{idx}"].value = str(rececao_val or "").strip()
             ws[f"A{idx}"].fill = red_fill
     
-        # 🧭 Data de colheita (mantém como estava)
+        # ───────────────────────────────────────────────
+        # 🧭 Coluna B — Data de colheita (valor direto)
+        # ───────────────────────────────────────────────
+        cell_B = ws[f"B{idx}"]
         dt_colheita = to_excel_date(colheita_val)
         if dt_colheita:
             cell_B.value = dt_colheita
@@ -789,17 +789,10 @@ def write_to_template (ocr_rows, out_name, expected_count=None, source_pdf=None)
             norm = normalize_date_str(colheita_val)
             cell_B.value = norm or str(colheita_val).strip()
             cell_B.fill = red_fill
-
-
-        dt_colheita = to_excel_date(colheita_val)
-        if dt_colheita:
-            cell_B.value = dt_colheita
-            cell_B.number_format = "dd/mm/yyyy"
-        else:
-            norm = normalize_date_str(colheita_val)
-            cell_B.value = norm or str(colheita_val).strip()
-            cell_B.fill = red_fill
-
+    
+        # ───────────────────────────────────────────────
+        # 📄 Restantes colunas
+        # ───────────────────────────────────────────────
         ws[f"C{idx}"] = row.get("referencia", "")
         ws[f"D{idx}"] = row.get("hospedeiro", "")
         ws[f"E{idx}"] = row.get("tipo", "")
@@ -807,17 +800,24 @@ def write_to_template (ocr_rows, out_name, expected_count=None, source_pdf=None)
         ws[f"G{idx}"] = row.get("responsavelamostra", "")
         ws[f"H{idx}"] = row.get("responsavelcolheita", "")
         ws[f"I{idx}"] = ""
+    
+        # 🧩 Coluna J — Código interno Lab (sem @)
         ws[f"J{idx}"] = f'=TEXT(A{idx},"ddmm")&"{req_id}."&TEXT(ROW()-3,"000")'
-  
+    
+        # Coluna K — Procedimento
         ws[f"K{idx}"] = row.get("procedure", "")
-
+    
+        # ───────────────────────────────────────────────
+        # 🚨 Validação visual
+        # ───────────────────────────────────────────────
         for col in ("A", "B", "C", "D", "E", "F", "G"):
             c = ws[f"{col}{idx}"]
             if not c.value or str(c.value).strip() == "":
                 c.fill = red_fill
-
+    
         if row.get("WasCorrected") or row.get("ValidationStatus") in ("review", "unknown", "no_list"):
             ws[f"D{idx}"].fill = yellow_fill
+
 
     # Validação E1:F1
     processed = len(ocr_rows)
@@ -955,6 +955,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
     return created_files
+
 
 
 
