@@ -936,8 +936,8 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
         base = pdf_path.name
         print(f"\n🔹 A processar: {base}")
         try:
-            created = core.process_pdf_sync(str(pdf_path))
-            # filtrar apenas ficheiros Excel
+            created = process_pdf_sync(str(pdf_path))
+            # apenas ficheiros Excel (não inclui PDF)
             excels = [f for f in created if str(f).lower().endswith(".xlsx")]
             all_excels.extend(excels)
 
@@ -972,7 +972,9 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"🧾 Summary criado: {summary_path}")
 
     # 📦 Criar ZIP final em /tmp
-    zip_name = f"Xylella_Output_{datetime.now():%Y%m%d_%H%M%S}.zip"
+    first_pdf = pdf_files[0]
+    base_name = Path(first_pdf).stem
+    zip_name = f"{base_name}_output.zip"
     zip_path = Path("/tmp") / zip_name
 
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
@@ -984,7 +986,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
         # adicionar summary
         zipf.write(summary_path, Path(summary_path).name)
 
-        # adicionar PDFs originais (mas não listados no summary)
+        # adicionar PDFs originais (não listados no summary)
         for pdf_path in pdf_files:
             if pdf_path.exists():
                 zipf.write(pdf_path, pdf_path.name)
@@ -992,7 +994,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"📦 ZIP final criado: {zip_path}")
     print(f"✅ Processamento completo em {elapsed_time:.1f} segundos.")
 
-    # 🔁 Limpeza opcional da pasta temporária (apenas ficheiros OCR)
+    # 🔁 Limpeza opcional de OCR temporários
     try:
         for f in Path("/tmp").glob("*_ocr_debug*.txt"):
             f.unlink(missing_ok=True)
