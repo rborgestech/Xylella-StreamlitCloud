@@ -686,14 +686,6 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
 # Escrita no TEMPLATE — 1 ficheiro por requisição
 # ───────────────────────────────────────────────
 
-def get_next_business_day(date_str: str) -> str:
-    """
-    Recebe uma data no formato DD/MM/YYYY e devolve a data do próximo dia útil no formato YYYYMMDD.
-    """
-    cal = Portugal()
-    dt = datetime.strptime(date_str, "%d/%m/%Y").date()
-    next_bd = cal.add_working_days(dt, 1)
-    return next_bd.strftime("%Y%m%d")
 
 def gerar_nome_excel_corrigido(source_pdf: str, data_envio: str) -> str:
     """
@@ -769,6 +761,7 @@ def write_to_template (ocr_rows, out_name, expected_count=None, source_pdf=None)
         
     # Processar linhas
     for idx, row in enumerate(ocr_rows, start=start_row):
+        rececao_val = row.get("datarececao", "")
         base_date = normalize_date_str(rececao_val)
         if base_date and re.match(r"\d{2}/\d{2}/\d{4}", str(base_date)):
             try:
@@ -959,6 +952,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
     return created_files
+
 
 
 
