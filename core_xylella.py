@@ -29,6 +29,7 @@ from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 
 from datetime import datetime, timedelta
 from workalendar.europe import Portugal
+from openpyxl.formula.translate import Translator
 
 # ───────────────────────────────────────────────
 # Diretório de saída seguro
@@ -965,6 +966,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
     return created_files
+
 
 
 
