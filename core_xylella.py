@@ -781,7 +781,7 @@ def write_to_template (ocr_rows, out_name, expected_count=None, source_pdf=None)
         if re.match(r"\d{2}/\d{2}/\d{4}", base_date):  # valida formato DD/MM/YYYY
             # converte "30/10/2025" → "2025-10-30"
             iso_date = "-".join(reversed(base_date.split("/")))
-            cell_A.value = f'=--DIATRABALHO(DATEVALUE("{iso_date}");1;Z1:Z5)'
+            cell_A.value = f'=--DIATRABALHO(DATEVALUE("{iso_date}"),1,Z1:Z5)'
             cell_A.number_format = "dd/mm/yyyy"
         
             # Exemplo: L = A + 30 dias
@@ -968,6 +968,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
     return created_files
+
 
 
 
