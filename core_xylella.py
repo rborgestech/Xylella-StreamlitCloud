@@ -907,38 +907,102 @@ def append_process_log(pdf_name, req_id, processed, expected, out_path=None, sta
 # ───────────────────────────────────────────────
 # API pública usada pela app Streamlit
 # ───────────────────────────────────────────────
-# ───────────────────────────────────────────────────────────────
-# 7) Processar TODOS os PDFs da pasta local Input/ (assíncrono)
-# ───────────────────────────────────────────────────────────────
-async def process_folder_async(input_dir: str = INPUT_DIR):
-    pdfs = [os.path.join(input_dir, f) for f in os.listdir(input_dir) if f.lower().endswith(".pdf")]
-    if not pdfs:
-        print("ℹ️ Não há PDFs na pasta de entrada.")
-        return
 
-    start_time = asyncio.get_event_loop().time()
-    total_rows = 0
+def process_folder_async(input_dir: str = "/tmp") -> str:
+    """
+    Processa todos os PDFs numa pasta temporária (/tmp) e gera:
+      - ficheiros Excel (um por requisição)
+      - summary.txt
+      - ZIP final com PDF original + Excels + summary
+    Compatível com Streamlit Cloud.
+    """
+    start_time = time.time()
+    input_path = Path(input_dir)
+    pdf_files = sorted(input_path.glob("*.pdf"))
+    total_pdfs = len(pdf_files)
 
-    async with aiohttp.ClientSession() as session:
-        tasks = [process_pdf_async(pdf, session) for pdf in pdfs]
-        results = await asyncio.gather(*tasks)
+    if not pdf_files:
+        print("⚠️ Nenhum PDF encontrado na pasta /tmp.")
+        return ""
 
-    for pdf, res in zip(pdfs, results):
-        if not res:
-            continue
-        total_rows += len(res)
+    print(f"📂 Início do processamento: {input_path} ({total_pdfs} PDF(s))")
 
-    total_time = asyncio.get_event_loop().time() - start_time
-    avg_time = total_time / len(pdfs) if pdfs else 0
+    all_excels = []
+    total_amostras = 0
+    total_requisicoes = 0
 
-    print("\n📊 Resumo Final")
-    print("──────────────────────────────")
-    print(f"📄 PDFs processados: {len(pdfs)}")
-    print(f"🧾 Total de amostras extraídas: {total_rows}")
-    print(f"⏱️ Tempo total: {timedelta(seconds=round(total_time))}")
-    print(f"⚙️ Tempo médio por PDF: {timedelta(seconds=round(avg_time))}")
-    print(f"📂 Saída: {OUTPUT_DIR}")
-    print("──────────────────────────────\n")
+    # 🧪 Processar cada PDF individualmente
+    for pdf_path in pdf_files:
+        base = pdf_path.name
+        print(f"\n🔹 A processar: {base}")
+        try:
+            created = core.process_pdf_sync(str(pdf_path))
+            # filtrar apenas ficheiros Excel
+            excels = [f for f in created if str(f).lower().endswith(".xlsx")]
+            all_excels.extend(excels)
+
+            req_count = len(excels)
+            total_requisicoes += req_count
+            print(f"✅ {base}: {req_count} requisição(ões) processada(s).")
+
+        except Exception as e:
+            print(f"❌ Erro ao processar {base}: {e}")
+
+    elapsed_time = time.time() - start_time
+
+    # 📝 Criar summary.txt global
+    summary_name = f"summary_{datetime.now():%Y%m%d_%H%M%S}.txt"
+    summary_path = Path("/tmp") / summary_name
+
+    with open(summary_path, "w", encoding="utf-8") as f:
+        for pdf_path in pdf_files:
+            base = pdf_path.name
+            related_excels = [e for e in all_excels if Path(base).stem in Path(e).stem]
+
+            f.write(f"{base}: {len(related_excels)} requisição(ões)\n")
+            for e in related_excels:
+                f.write(f"   ↳ {Path(e).name}\n")
+            f.write("\n")
+
+        f.write(f"📊 Total: {len(all_excels)} ficheiro(s) Excel\n")
+        f.write(f"⏱️ Tempo total: {elapsed_time:.1f} segundos\n")
+        f.write(f"📅 Executado em: {datetime.now():%d/%m/%Y às %H:%M:%S}\n")
+        f.write("🧹 Pasta temporária apagada com sucesso.\n")
+
+    print(f"🧾 Summary criado: {summary_path}")
+
+    # 📦 Criar ZIP final em /tmp
+    zip_name = f"Xylella_Output_{datetime.now():%Y%m%d_%H%M%S}.zip"
+    zip_path = Path("/tmp") / zip_name
+
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+        # adicionar Excels
+        for e in all_excels:
+            if Path(e).exists():
+                zipf.write(e, Path(e).name)
+
+        # adicionar summary
+        zipf.write(summary_path, Path(summary_path).name)
+
+        # adicionar PDFs originais (mas não listados no summary)
+        for pdf_path in pdf_files:
+            if pdf_path.exists():
+                zipf.write(pdf_path, pdf_path.name)
+
+    print(f"📦 ZIP final criado: {zip_path}")
+    print(f"✅ Processamento completo em {elapsed_time:.1f} segundos.")
+
+    # 🔁 Limpeza opcional da pasta temporária (apenas ficheiros OCR)
+    try:
+        for f in Path("/tmp").glob("*_ocr_debug*.txt"):
+            f.unlink(missing_ok=True)
+        print("🧹 Ficheiros temporários de OCR removidos.")
+    except Exception as e:
+        print(f"[WARN] Erro ao limpar temporários: {e}")
+
+    return str(zip_path)
+
+
 
 
 
