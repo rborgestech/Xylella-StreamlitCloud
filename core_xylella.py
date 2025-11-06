@@ -769,7 +769,8 @@ def write_to_template (ocr_rows, out_name, expected_count=None, source_pdf=None)
         
     # Processar linhas
     for idx, row in enumerate(ocr_rows, start=start_row):
-        if re.match(r"\d{2}/\d{2}/\d{4}", base_date):
+        base_date = normalize_date_str(rececao_val)
+        if base_date and re.match(r"\d{2}/\d{2}/\d{4}", str(base_date)):
             try:
                 cal = Portugal()
                 dt = datetime.strptime(base_date, "%d/%m/%Y").date()
@@ -780,7 +781,7 @@ def write_to_template (ocr_rows, out_name, expected_count=None, source_pdf=None)
                 ws[f"A{idx}"].value = base_date
                 ws[f"A{idx}"].fill = red_fill
         else:
-            ws[f"A{idx}"].value = str(rececao_val).strip()
+            ws[f"A{idx}"].value = str(rececao_val or "").strip()
             ws[f"A{idx}"].fill = red_fill
     
         # 🧭 Data de colheita (mantém como estava)
@@ -802,9 +803,6 @@ def write_to_template (ocr_rows, out_name, expected_count=None, source_pdf=None)
             norm = normalize_date_str(colheita_val)
             cell_B.value = norm or str(colheita_val).strip()
             cell_B.fill = red_fill
-            
-        formula_excel = f'=DIATRABALHO(DATA.VALOR("{base_date}"),1,Z1:Z5)'
-        ws[f"A{idx}"].value = formula_excel
 
         ws[f"C{idx}"] = row.get("referencia", "")
         ws[f"D{idx}"] = row.get("hospedeiro", "")
@@ -961,6 +959,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
     return created_files
+
 
 
 
