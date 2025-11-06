@@ -976,11 +976,8 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
     # 6️⃣ Gerar ZIP com Excel(s) e PDF original (compatível com Streamlit Cloud)
-        # 6️⃣ Gerar ZIP com Excel(s) e PDF original (compatível com Streamlit Cloud)
     try:
-        zip_name = f"{Path(pdf_path).stem}_output.zip"
-        zip_path = Path("/tmp") / zip_name  # o ZIP é criado no /tmp
-
+    
         # Garantir que o PDF existe e copiá-lo para /tmp (caso o original seja temporário)
         pdf_src = Path(pdf_path)
         pdf_copy = Path("/tmp") / pdf_src.name
@@ -991,130 +988,12 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
             except Exception as e:
                 print(f"[WARN] Falha ao copiar PDF para /tmp ({pdf_src}) → {e}")
 
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-            # Adicionar todos os Excels criados
-            for f in created_files:
-                f_path = Path(f)
-                if f_path.exists():
-                    zipf.write(f_path, f_path.name)
-                else:
-                    print(f"[WARN] Excel não encontrado: {f_path}")
+    pdf_src = Path(pdf_path)
+    if pdf_src.exists():
+        created_files.append(str(pdf_src))
+        print(f"📄 PDF incluído na lista final: {pdf_src}")
+    else:
+        print(f"[WARN] PDF não encontrado: {pdf_src}")
 
-            # Adicionar o PDF copiado (ou original, se ainda existir)
-            if pdf_copy.exists():
-                zipf.write(pdf_copy, pdf_copy.name)
-                print(f"📄 PDF adicionado ao ZIP: {pdf_copy.name}")
-            elif pdf_src.exists():
-                zipf.write(pdf_src, pdf_src.name)
-                print(f"📄 PDF original adicionado ao ZIP: {pdf_src.name}")
-            else:
-                print(f"[WARN] Nenhuma versão do PDF encontrada para incluir no ZIP.")
-
-        print(f"📦 ZIP final criado em: {zip_path}")
-        created_files.append(str(zip_path))
-
-    except Exception as e:
-        print(f"[WARN] Falha ao criar ZIP: {e}")
-
+    print(f"🏁 {base}: {len(created_files)} ficheiro(s) gerado(s) no total (incluindo PDF).")
     return created_files
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
