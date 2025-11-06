@@ -769,29 +769,19 @@ def write_to_template (ocr_rows, out_name, expected_count=None, source_pdf=None)
         
     # Processar linhas
     for idx, row in enumerate(ocr_rows, start=start_row):
-        rececao_val  = row.get("datarececao", "")
-        colheita_val = row.get("datacolheita", "")
-    
-        cell_A = ws[f"A{idx}"]
-        cell_B = ws[f"B{idx}"]
-        cell_L = ws[f"L{idx}"]
-    
-        # 🧭 Data de receção com DIATRABALHO se possível
-        base_date = normalize_date_str(rececao_val)
-        if re.match(r"\d{2}/\d{2}/\d{4}", base_date):  # valida formato DD/MM/YYYY
-            # converte "30/10/2025" → "2025-10-30"
-  
-           
-            cell_A.number_format = "dd/mm/yyyy"
-        
-            # Exemplo: L = A + 30 dias
-            cell_L.value = f"=A{idx}+30"
-            cell_L.number_format = "dd/mm/yyyy"
+        if re.match(r"\d{2}/\d{2}/\d{4}", base_date):
+            try:
+                cal = Portugal()
+                dt = datetime.strptime(base_date, "%d/%m/%Y").date()
+                next_bd = cal.add_working_days(dt, 1)
+                ws[f"A{idx}"].value = next_bd
+                ws[f"A{idx}"].number_format = "dd/mm/yyyy"
+            except Exception as e:
+                ws[f"A{idx}"].value = base_date
+                ws[f"A{idx}"].fill = red_fill
         else:
-            cell_A.value = str(rececao_val).strip()
-            cell_A.fill = red_fill
-            cell_L.value = ""
-            cell_L.fill = red_fill
+            ws[f"A{idx}"].value = str(rececao_val).strip()
+            ws[f"A{idx}"].fill = red_fill
     
         # 🧭 Data de colheita (mantém como estava)
         dt_colheita = to_excel_date(colheita_val)
@@ -971,6 +961,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
     return created_files
+
 
 
 
