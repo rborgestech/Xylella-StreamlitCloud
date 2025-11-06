@@ -908,6 +908,50 @@ def append_process_log(pdf_name, req_id, processed, expected, out_path=None, sta
 # ───────────────────────────────────────────────
 # API pública usada pela app Streamlit
 # ───────────────────────────────────────────────
+def process_pdf_sync(pdf_path: str) -> list[str]:
+    """
+    Processa um único PDF:
+      - executa OCR Azure,
+      - extrai requisições e amostras,
+      - gera 1 ficheiro Excel por requisição.
+    Retorna: lista de caminhos absolutos dos ficheiros Excel criados.
+    """
+    base = os.path.basename(pdf_path)
+    print(f"\n🧪 Início de processamento: {base}")
+
+    # 1️⃣ Executar OCR Azure
+    result_json = azure_analyze_pdf(pdf_path)
+
+    # 2️⃣ Guardar texto OCR para debug
+    txt_path = OUTPUT_DIR / f"{Path(base).stem}_ocr_debug.txt"
+    txt_path.write_text(extract_all_text(result_json), encoding="utf-8")
+    print(f"📝 Texto OCR bruto guardado em: {txt_path}")
+
+    # 3️⃣ Parser — dividir em requisições e extrair amostras
+    req_results = parse_all_requisitions(result_json, pdf_path, str(txt_path))
+
+    valid_reqs = [req for req in req_results if req.get("rows")]
+    total_amostras = sum(len(req["rows"]) for req in valid_reqs)
+    print(f"✅ {base}: {len(valid_reqs)} requisição(ões) válidas, {total_amostras} amostras extraídas.")
+
+    created_files = []
+    for i, req in enumerate(valid_reqs, start=1):
+        rows = req.get("rows", [])
+        expected = req.get("expected", 0)
+
+        if not rows:
+            continue
+
+        # Nome base para o Excel (mantém a data original)
+        base_name = Path(pdf_path).stem
+        out_name = f"{base_name}_req{i}.xlsx" if len(valid_reqs) > 1 else f"{base_name}.xlsx"
+
+        out_path = write_to_template(rows, out_name, expected_count=expected, source_pdf=pdf_path)
+        created_files.append(out_path)
+        print(f"💾 Excel criado: {out_path}")
+
+    print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
+    return [str(f) for f in created_files if Path(f).exists()]
 
 def process_folder_async(input_dir: str = "/tmp") -> str:
     """
@@ -1006,6 +1050,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
         print(f"[WARN] Erro ao limpar temporários: {e}")
 
     return str(zip_path)
+
 
 
 
