@@ -975,18 +975,15 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
     except Exception as e:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
-    # 6️⃣ Gerar ZIP com Excel(s) e PDF original (compatível com Streamlit Cloud)
+    # 6️⃣ Garantir que o PDF existe e copiá-lo para /tmp (compatível com Streamlit Cloud)
     try:
         pdf_src = Path(pdf_path)
         pdf_copy = Path("/tmp") / pdf_src.name
         if not pdf_copy.exists():
-            try:
-                shutil.copy2(pdf_src, pdf_copy)
-                print(f"📂 PDF copiado para /tmp: {pdf_copy}")
-            except Exception as e:
-                print(f"[WARN] Falha ao copiar PDF para /tmp ({pdf_src}) → {e}")
+            shutil.copy2(pdf_src, pdf_copy)
+            print(f"📂 PDF copiado para /tmp: {pdf_copy}")
     except Exception as e:
-        print(f"[WARN] Erro ao preparar cópia do PDF: {e}")
+        print(f"[WARN] Falha ao copiar PDF para /tmp ({pdf_src}) → {e}")
 
     # Incluir o PDF (cópia ou original) na lista final
     pdf_final = pdf_copy if pdf_copy.exists() else pdf_src
@@ -995,10 +992,36 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"📄 PDF incluído na lista final: {pdf_final}")
     else:
         print(f"[WARN] PDF não encontrado: {pdf_final}")
+
+    # 7️⃣ Gerar summary.txt formatado
+    try:
+        # Obter prefixo de data do primeiro Excel
+        first_excel = next((f for f in created_files if f.endswith(".xlsx")), None)
+        data_prefix = ""
+        if first_excel:
+            match = re.match(r"^(\d{8})_", Path(first_excel).stem)
+            if match:
+                data_prefix = match.group(1)
+
+        # Definir nome do summary
+        summary_name = f"{data_prefix}_summary.txt" if data_prefix else "summary.txt"
+        summary_path = Path("/tmp") / summary_name
+
+        # Escrever conteúdo
+        with open(summary_path, "w", encoding="utf-8") as s:
+            s.write(f"Resumo de processamento — {datetime.now():%d/%m/%Y %H:%M}\n")
+            s.write(f"Ficheiro original: {base}\n")
+            s.write(f"Total de requisições válidas: {len(valid_reqs)}\n")
+            s.write(f"Total de amostras: {total_amostras}\n\n")
+            s.write("Ficheiros incluídos:\n")
+            for f in created_files:
+                s.write(f"  - {Path(f).name}\n")
+
+        created_files.append(str(summary_path))
+        print(f"🪶 Summary criado: {summary_path}")
+
     except Exception as e:
         print(f"[WARN] Falha ao gerar summary.txt: {e}")
 
-    print(f"🏁 {base}: {len(created_files)} ficheiro(s) gerado(s) no total (incluindo PDF e summary).")
-    return created_files
 
 
