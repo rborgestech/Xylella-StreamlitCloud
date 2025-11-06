@@ -846,17 +846,38 @@ def write_to_template (ocr_rows, out_name, expected_count=None, source_pdf=None)
     ws["K1"].alignment = Alignment(horizontal="right", vertical="center")
     ws["K1"].fill = gray_fill
 
-    # Nome final
-    data_util = ws["A4"].value or datetime.now()
-    if isinstance(data_util, datetime):
-        data_util = data_util.strftime("%Y%m%d")
+    # ───────────────────────────────────────────────
+    # 💾 Nome final baseado na data em A4 (YYYYMMDD)
+    # ───────────────────────────────────────────────
+    cell_A4 = ws["A4"].value or datetime.now()
+    
+    # Converter para datetime se for string (ex.: "02/11/2025")
+    if isinstance(cell_A4, str):
+        norm = normalize_date_str(cell_A4)
+        try:
+            cell_A4 = datetime.strptime(norm, "%d/%m/%Y")
+        except Exception:
+            cell_A4 = datetime.now()
+    
+    # Extrair data como YYYYMMDD
+    if isinstance(cell_A4, datetime):
+        data_util = cell_A4.strftime("%Y%m%d")
     else:
         data_util = datetime.now().strftime("%Y%m%d")
+    
+    # Nome base sem prefixo de data anterior
     base_name = Path(out_name).stem
-    new_name = re.sub(r"^\d{8}_", f"{data_util}_", base_name)
-    out_path = Path(OUTPUT_DIR) / f"{new_name}.xlsx"
+    base_name = re.sub(r"^\d{8}_", "", base_name)
+    
+    # Novo nome → YYYYMMDD_restante.xlsx
+    new_name = f"{data_util}_{base_name}.xlsx"
+    
+    out_path = Path(OUTPUT_DIR) / new_name
     wb.save(out_path)
+    
+    print(f"📁 Ficheiro gravado: {out_path}")
     return str(out_path)
+
 
 
 
@@ -955,6 +976,7 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
     return created_files
+
 
 
 
