@@ -973,7 +973,35 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
     except Exception as e:
         print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
 
+    # 6️⃣ Gerar ZIP com Excel(s), OCR e PDF original
+    try:
+        zip_name = f"{Path(pdf_path).stem}_output.zip"
+        zip_path = OUTPUT_DIR / zip_name
+
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+            # adicionar todos os Excels criados
+            for f in created_files:
+                zipf.write(f, Path(f).name)
+
+            # adicionar ficheiros OCR auxiliares
+            ocr_debug = OUTPUT_DIR / f"{Path(pdf_path).stem}_ocr_debug.txt"
+            ocr_excerpt = OUTPUT_DIR / f"{Path(pdf_path).stem}_ocr_debug_excerpt.txt"
+            for extra in (ocr_debug, ocr_excerpt):
+                if extra.exists():
+                    zipf.write(extra, extra.name)
+
+            # adicionar o PDF original
+            if Path(pdf_path).exists():
+                zipf.write(pdf_path, Path(pdf_path).name)
+
+        print(f"📦 ZIP final criado em: {zip_path}")
+        created_files.append(str(zip_path))
+
+    except Exception as e:
+        print(f"[WARN] Falha ao criar ZIP: {e}")
+
     return created_files
+
 
 
 
