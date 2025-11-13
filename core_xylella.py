@@ -1006,19 +1006,7 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
         r"prospe[cç][aã]o\s*de:?\s*xylella\s+fastidiosa\s+em\s+zonas\s+demarcadas",
         re.IGNORECASE,
     )
-    if icnf_pattern.search(full_text):
-        print("🔎 Template ICNF/Zonas Demarcadas detetado — usar colunas 0,1,2.")
-        context = extract_context_from_text(full_text)
-        amostras = parse_xylella_tables(
-            result_json,
-            context,
-            req_id=1,
-            col_ref=0,
-            col_hosp=1,
-            col_obs=2,
-        )
-        expected = context.get("declared_samples") or len(amostras)
-        return [{"rows": amostras, "expected": expected}] if amostras else []
+    is_icnf = icnf_pattern.search(full_text) is not None
 
     # ───────────────────────────────────────────────
     # Caminho normal (template antigo DGAV)
@@ -1555,6 +1543,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
