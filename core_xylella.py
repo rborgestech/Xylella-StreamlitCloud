@@ -407,10 +407,62 @@ def extract_context_from_text(full_text: str):
     ctx = {}
 
     # ───────────────────────────────────────────────
-    # Zona
+    # Zona (Zona demarcada OU (Zona Isenta))
     # ───────────────────────────────────────────────
-    m_zona = re.search(r"Xylella\s+fastidiosa\s*\(([^)]+)\)", full_text, re.I)
-    ctx["zona"] = m_zona.group(1).strip() if m_zona else "Zona Isenta"
+    m_zd = re.search(r"Zona\s+demarcada\s*:\s*(.+)", full_text, re.I)
+    if m_zd:
+        ctx["zona"] = m_zd.group(1).strip()
+        ctx["template_tipo"] = "ZONAS_DEMARCADAS"
+    else:
+        m_zona = re.search(r"Xylella\s+fastidiosa\s*\(([^)]+)\)", full_text, re.I)
+        ctx["zona"] = m_zona.group(1).strip() if m_zona else "Zona Isenta"
+        ctx["template_tipo"] = "PROGRAMA_NACIONAL"
+
+        # ───────────────────────────────────────────────
+    # Entidade / DGAV + Técnico responsável
+    # ───────────────────────────────────────────────
+    
+    # 1) Novo template: "Entidade: DGAV Centro"
+    m_ent = re.search(r"Entidade\s*:\s*(.+)", full_text, re.I)
+    if m_ent:
+        entidade = m_ent.group(1).strip()
+    else:
+        entidade = None
+    
+    # 2) Técnico responsável (novo template)
+    m_tecnico = re.search(r"T[ée]cnico\s+respons[aá]vel\s*:\s*(.+)", full_text, re.I)
+    tecnico_resp = m_tecnico.group(1).strip() if m_tecnico else None
+    
+    # Mantém a lógica anterior para DGAV, mas com fallback para "Entidade"
+    responsavel, dgav = None, None
+    m_hdr = re.search(
+        r"Amostra(?:s|\(s\))?\s*colhida(?:s|\(s\))?\s*por\s*DGAV\s*[:\-]?\s*(.*)",
+        full_text,
+        re.IGNORECASE,
+    )
+    if m_hdr:
+        tail = full_text[m_hdr.end():]
+        linhas = [m_hdr.group(1)] + tail.splitlines()
+        for ln in linhas[:4]:
+            ln = (ln or "").strip()
+            if ln:
+                responsavel = ln
+                break
+        if responsavel:
+            responsavel = re.sub(r"\S+@dgav\.pt|\S+@\S+", "", responsavel, flags=re.I)
+            responsavel = re.sub(r"PROGRAMA.*|Data.*|N[º°].*", "", responsavel, flags=re.I)
+            responsavel = re.sub(r"[:;,.\-–—]+$", "", responsavel).strip()
+    
+    if responsavel:
+        dgav = f"DGAV {responsavel}".strip() if not re.match(r"^DGAV\b", responsavel, re.I) else responsavel
+    elif entidade:
+        dgav = entidade  # ex: "DGAV Centro"
+    else:
+        m_d = re.search(r"\bDGAV(?:\s+[A-Za-zÀ-ÿ?]+){1,4}", full_text)
+        dgav = re.sub(r"[:;,.\-–—]+$", "", m_d.group(0)).strip() if m_d else None
+    
+    ctx["dgav"] = dgav
+    ctx["responsavel_colheita"] = tecnico_resp  # no template novo vem daqui
 
     # ───────────────────────────────────────────────
     # DGAV / Responsável pela colheita
@@ -462,17 +514,29 @@ def extract_context_from_text(full_text: str):
     # ───────────────────────────────────────────────
     # Data de envio ao laboratório
     # ───────────────────────────────────────────────
+    
+    # 1) Novo template: "Data envio amostras ao laboratório: 6/11/2025"
     m_envio = re.search(
-        r"Data\s+(?:do|de)\s+envio(?:\s+ao\s+laborat[oó]rio)?[:\-\s]*([0-9/\-\s]+)",
+        r"Data\s+envio\s+amostras\s+ao\s+laborat[oó]rio\s*[:\-\s]*([0-9/\-\s]+)",
         full_text,
         re.I,
     )
+    
+    # 2) Antigo: "Data do envio ao laboratório: 27 / 10 /2025"
+    if not m_envio:
+        m_envio = re.search(
+            r"Data\s+(?:do|de)\s+envio(?:\s+ao\s+laborat[oó]rio)?[:\-\s]*([0-9/\-\s]+)",
+            full_text,
+            re.I,
+        )
+    
     if m_envio:
         ctx["data_envio"] = normalize_date_str(m_envio.group(1))
     elif default_colheita:
         ctx["data_envio"] = default_colheita
     else:
         ctx["data_envio"] = datetime.now().strftime("%d/%m/%Y")
+
 
     # ───────────────────────────────────────────────
     # Nº de amostras declaradas (debug + robusto a OCR e placeholders)
@@ -941,7 +1005,7 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
             col_hosp=1,
             col_obs=2,
         )
-        expected = context.get("declared_samples", 0)
+        expected = context.get("declared_samples") or len(amostras)
         return [{"rows": amostras, "expected": expected}] if amostras else []
 
     # ───────────────────────────────────────────────
@@ -1492,6 +1556,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
