@@ -22,6 +22,9 @@ import requests
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+import zipfile
+import shutil
+
 
 # 🟢 Biblioteca Excel
 from openpyxl import load_workbook
@@ -29,6 +32,7 @@ from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 
 from datetime import datetime, timedelta
 from workalendar.europe import Portugal
+from openpyxl.formula.translate import Translator
 
 # ───────────────────────────────────────────────
 # Diretório de saída seguro
@@ -82,55 +86,42 @@ ITALIC= Font(italic=True, color="555555")
 # ───────────────────────────────────────────────
 
 from datetime import datetime, timedelta
+def integrate_logic_and_generate_name(source_pdf: str) -> tuple[str, str]:
+    """
+    Função utilitária que:
+    - Extrai a data (YYYYMMDD) do início do nome do ficheiro PDF
+    - Adiciona 1 dia útil (PT)
+    - Substitui esse prefixo de data pelo novo (YYYYMMDD) no nome final do ficheiro Excel
 
+    Retorna:
+        (data_ddmm, novo_nome_base)
+    """
+    base_name = os.path.splitext(os.path.basename(source_pdf))[0]
+
+    # 1. Extrair prefixo de data (YYYYMMDD)
+    m = re.match(r"(\d{8})_", base_name)
+    if not m:
+        return "0000", base_name
+
+    try:
+        data_envio = datetime.strptime(m.group(1), "%Y%m%d").date()
+        cal = Portugal()
+        data_util = cal.add_working_days(data_envio, 1)
+        data_ddmm = data_util.strftime("%d%m")
+        data_util_str = data_util.strftime("%Y%m%d")
+    except Exception:
+        return "0000", base_name
+
+    # 2. Substituir prefixo no nome do ficheiro
+    novo_nome = re.sub(r"^\d{8}_", f"{data_util_str}_", base_name)
+    return data_ddmm, novo_nome
 # Feriados fixos em Portugal
 FERIADOS_FIXOS = [
     "01-01", "25-04", "01-05", "10-06", "15-08",
     "05-10", "01-11", "01-12", "08-12", "25-12"
 ]
 
-def pascoa(ano):
-    """Calcula a data da Páscoa (Calendário Gregoriano)."""
-    a = ano % 19
-    b = ano // 100
-    c = ano % 100
-    d = b // 4
-    e = b % 4
-    f = (b + 8) // 25
-    g = (b - f + 1) // 3
-    h = (19 * a + b - d - g + 15) % 30
-    i = c // 4
-    k = c % 4
-    l = (32 + 2 * e + 2 * i - h - k) % 7
-    m = (a + 11 * h + 22 * l) // 451
-    mes = (h + l - 7 * m + 114) // 31
-    dia = ((h + l - 7 * m + 114) % 31) + 1
-    return datetime(ano, mes, dia)
 
-def get_feriados(ano):
-    """Gera lista de feriados no formato 'YYYY-MM-DD' para o ano dado."""
-    feriados = [f"{ano}-{dia}" for dia in FERIADOS_FIXOS]
-    pascoa_base = pascoa(ano)
-    moveis = [
-        pascoa_base,                           # Páscoa
-        pascoa_base - timedelta(days=2),       # Sexta-feira Santa
-        pascoa_base + timedelta(days=60),      # Corpo de Deus
-    ]
-    feriados += [d.strftime("%Y-%m-%d") for d in moveis]
-    return set(feriados)
-
-def add_dias_uteis(data_str: str, dias: int = 1) -> str:
-    """
-    Adiciona dias úteis a uma data 'dd/mm/yyyy', ignorando fins de semana e feriados nacionais PT.
-    """
-    cal = Portugal()
-    data = datetime.strptime(data_str, "%d/%m/%Y").date()
-    dias_adicionados = 0
-    while dias_adicionados < dias:
-        data += timedelta(days=1)
-        if cal.is_working_day(data):
-            dias_adicionados += 1
-    return data.strftime("%d/%m/%Y")
 
 def _is_valid_date(v) -> bool:
     try:
@@ -698,30 +689,19 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
 # Escrita no TEMPLATE — 1 ficheiro por requisição
 # ───────────────────────────────────────────────
 
-def get_next_business_day(date_str: str) -> str | None:
-    """Recebe uma data no formato dd/mm/yyyy e devolve a próxima data útil (formato ddmm)."""
-    try:
-        cal = Portugal()
-        dt = datetime.strptime(date_str.strip(), "%d/%m/%Y").date()
-        next_day = cal.add_working_days(dt, 1)
-        return next_day.strftime("%d%m")
-    except Exception as e:
-        print(f"⚠️ Erro ao calcular dia útil: {e}")
-        return None
+
+def gerar_nome_excel_corrigido(source_pdf: str, data_envio: str) -> str:
+    """
+    Substitui a data inicial do nome do PDF pela nova data (com +1 útil).
+    Ex: 20251030_ReqX19_27-10 Formulário.pdf -> 20251031_ReqX19_27-10 Formulário.xlsx
+    """
+    base_pdf = Path(source_pdf).name
+    nova_data = get_next_business_day(data_envio)  # YYYYMMDD
+    nome_corrigido = re.sub(r"^\d{8}_", f"{nova_data}_", base_pdf)
+    return nome_corrigido.replace(".pdf", ".xlsx")
 
 
-def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
-    """
-    Escreve as linhas extraídas no template base (1 ficheiro).
-    Campo de observações (coluna I) é sempre vazio.
-    Inclui:
-      • Validação do nº de amostras (E1:F1)
-      • Origem real do PDF (G1:J1)
-      • Data/hora de processamento (K1:L1)
-      • Conversão automática de datas
-      • Validação de campos obrigatórios
-      • Fórmula Data requerido = Data receção + 30 dias
-    """
+def write_to_template (ocr_rows, out_name, expected_count=None, source_pdf=None):
     if not ocr_rows:
         print(f"⚠️ {out_name}: sem linhas para escrever.")
         return None
@@ -733,14 +713,14 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
     ws = wb.worksheets[0]
     start_row = 4
 
-    # 🎨 Estilos
+    # Estilos
     yellow_fill = PatternFill(start_color="FFFACD", end_color="FFFACD", fill_type="solid")
     green_fill  = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
     red_fill    = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
     gray_fill   = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")
     bold_center = Font(bold=True, color="000000")
 
-    # 🧹 Limpar linhas anteriores (A→L)
+    # Limpa linhas antigas
     for row in range(start_row, 201):
         for col in range(1, 13):
             cell = ws.cell(row=row, column=col)
@@ -748,12 +728,8 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
             cell.fill = PatternFill(fill_type=None)
         ws[f"I{row}"].value = None
 
-    # 🔧 Funções auxiliares ---------------------------------------------
-    import re
-    from datetime import datetime, date
-
+    # Funções auxiliares
     def normalize_date_str(val: str) -> str:
-        """Corrige datas OCR como 23110/2025 → 23/10/2025."""
         if not val:
             return ""
         s = re.sub(r"\D", "", str(val))
@@ -761,7 +737,6 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
             d, m, y = int(s[:2]), int(s[2:4]), int(s[4:8])
             if 1 <= d <= 31 and 1 <= m <= 12:
                 return f"{d:02d}/{m:02d}/{y:04d}"
-        # já vem em dd/mm/yyyy?
         m = re.match(r"^\s*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s*$", str(val))
         if m:
             d, m_, y = map(int, m.groups())
@@ -769,77 +744,100 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
         return str(val).strip()
 
     def to_excel_date(val: str):
-        """Converte string normalizada em datetime.date para Excel."""
         s = normalize_date_str(val)
         try:
             return datetime.strptime(s, "%d/%m/%Y")
         except Exception:
             return None
 
-    # ✍️ Escrever novas linhas ------------------------------------------
+    # Extração do req_id do nome do ficheiro PDF
+    base = Path(source_pdf or out_name).name
+    m = re.search(r"(X\d{2,3})", base, flags=re.I)
+    req_id = m.group(1).upper() if m else "X??"
+    
+        
+    # Processar linhas
+       # ───────────────────────────────────────────────
+    # 🔁 Processar linhas OCR
+    # ───────────────────────────────────────────────
     for idx, row in enumerate(ocr_rows, start=start_row):
-        rececao_val  = row.get("datarececao", "")
+        # Extrair valores da linha OCR
+        rececao_val = row.get("datarececao", "")
         colheita_val = row.get("datacolheita", "")
-
-        cell_A = ws[f"A{idx}"]  # Data receção
-        cell_B = ws[f"B{idx}"]  # Data colheita
-        cell_L = ws[f"L{idx}"]  # Data requerido
-
-        # 🧭 Data de receção
-        dt_recepcao = _to_datetime(rececao_val)
-        if dt_recepcao:
-            cell_A.value = dt_recepcao
-            cell_A.number_format = "dd/mm/yyyy"
-            # fórmula automática apenas se A for válida
-            cell_L.value = f"=A{idx}+30"
-            cell_L.number_format = "dd/mm/yyyy"
+        
+        # ───────────────────────────────────────────────
+        # 🧭 Coluna A — Data de receção + 1 dia útil
+        # ───────────────────────────────────────────────
+        base_date = normalize_date_str(rececao_val)
+        if base_date and re.match(r"\d{2}/\d{2}/\d{4}", str(base_date)):
+            try:
+                cal = Portugal()
+                dt = datetime.strptime(base_date, "%d/%m/%Y").date()
+                next_bd = cal.add_working_days(dt, 1)
+                ws[f"A{idx}"].value = next_bd
+                ws[f"A{idx}"].number_format = "dd/mm/yyyy"
+                ws[f"L{idx}"].value = f"=A{idx}+30"
+                ws[f"L{idx}"].number_format = "dd/mm/yyyy"
+            except Exception:
+                ws[f"A{idx}"].value = base_date
+                ws[f"A{idx}"].fill = red_fill
+                ws[f"L{idx}"].value = ""
+                ws[f"L{idx}"].fill = red_fill
         else:
-            # tenta normalizar e mostrar valor original corrigido
-            norm = normalize_date_str(rececao_val)
-            if norm:
-                cell_A.value = norm
-            else:
-                cell_A.value = str(rececao_val).strip()
-            cell_A.fill = red_fill
-            cell_L.value = ""
-            cell_L.fill = red_fill
-
-        # 🧭 Data de colheita
-        dt_colheita = _to_datetime(colheita_val)
+            ws[f"A{idx}"].value = str(rececao_val or "").strip()
+            ws[f"A{idx}"].fill = red_fill
+            ws[f"L{idx}"].value = ""
+            ws[f"L{idx}"].fill = red_fill
+    
+        # ───────────────────────────────────────────────
+        # 🧭 Coluna B — Data de colheita (valor direto)
+        # ───────────────────────────────────────────────
+        cell_B = ws[f"B{idx}"]
+        dt_colheita = to_excel_date(colheita_val)
         if dt_colheita:
             cell_B.value = dt_colheita
             cell_B.number_format = "dd/mm/yyyy"
         else:
             norm = normalize_date_str(colheita_val)
-            if norm:
-                cell_B.value = norm
-            else:
-                cell_B.value = str(colheita_val).strip()
+            cell_B.value = norm or str(colheita_val).strip()
             cell_B.fill = red_fill
-
-        # 🧩 Outras colunas
+    
+        # ───────────────────────────────────────────────
+        # 📄 Restantes colunas
+        # ───────────────────────────────────────────────
         ws[f"C{idx}"] = row.get("referencia", "")
         ws[f"D{idx}"] = row.get("hospedeiro", "")
         ws[f"E{idx}"] = row.get("tipo", "")
         ws[f"F{idx}"] = row.get("zona", "")
         ws[f"G{idx}"] = row.get("responsavelamostra", "")
         ws[f"H{idx}"] = row.get("responsavelcolheita", "")
-        ws[f"I{idx}"] = ""  # Observações
+        ws[f"I{idx}"] = ""
+    
+        # 🧩 Coluna J — Código interno Lab (sem @)
+        ws[f"J{idx}"] = f'=TEXT(A{idx},"ddmm")&"{req_id}."&TEXT(ROW()-3,"000")'
+    
+        # Coluna K — Procedimento
         ws[f"K{idx}"] = row.get("procedure", "")
 
-        # Campos obrigatórios (A→G)
+         # 📅 Coluna L — Data requerido (+30 dias após receção)
+        ws[f"L{idx}"].value = f"=A{idx}+30"
+        ws[f"L{idx}"].number_format = "dd/mm/yyyy"
+        
+        # ───────────────────────────────────────────────
+        # 🚨 Validação visual
+        # ───────────────────────────────────────────────
         for col in ("A", "B", "C", "D", "E", "F", "G"):
             c = ws[f"{col}{idx}"]
             if not c.value or str(c.value).strip() == "":
                 c.fill = red_fill
-
-        # Destaque amarelo (flags de validação)
+    
         if row.get("WasCorrected") or row.get("ValidationStatus") in ("review", "unknown", "no_list"):
             ws[f"D{idx}"].fill = yellow_fill
 
-    # 📊 Validação E1:F1 -----------------------------------------------
+
+    # Validação E1:F1
     processed = len(ocr_rows)
-    expected  = expected_count
+    expected = expected_count
     ws.merge_cells("E1:F1")
     cell = ws["E1"]
     val_str = f" {expected or 0} / {processed}"
@@ -847,49 +845,47 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
     cell.font = bold_center
     cell.alignment = Alignment(horizontal="center", vertical="center")
     cell.fill = red_fill if (expected is not None and expected != processed) else green_fill
-    if expected is not None and expected != processed:
-        print(f"⚠️ Diferença de nº de amostras: esperado={expected}, processado={processed}")
 
-    # 🗂️ Origem do PDF (G1:J1)
+    # Origem do PDF
     ws.merge_cells("G1:J1")
-    pdf_orig_name = os.path.basename(source_pdf) if source_pdf else "(desconhecida)"
+    pdf_orig_name = Path(source_pdf).name if source_pdf else "(desconhecida)"
     ws["G1"].value = f"Origem: {pdf_orig_name}"
     ws["G1"].font = Font(italic=True, color="555555")
     ws["G1"].alignment = Alignment(horizontal="left", vertical="center")
     ws["G1"].fill = gray_fill
 
-    # 🕒 Data/hora de processamento (K1:L1)
-    ws.merge_cells("K1:L1")
-    timestamp = datetime.now().strftime("%d/%m/%Y %H:%M")
-    ws["K1"].value = f"Processado em: {timestamp}"
-    ws["K1"].font = Font(italic=True, color="555555")
-    ws["K1"].alignment = Alignment(horizontal="right", vertical="center")
-    ws["K1"].fill = gray_fill
-
-    # Código interno Lab (coluna J)
-    for i in range(start_row, start_row + len(ocr_rows)):
-        seq = i - start_row + 1
-        ws[f"J{i}"] = f"{data_ddmm}{req_id}.{seq:03d}"
-
-    # 💾 Guardar ficheiro ---------------------------------------------
-    base_name = os.path.splitext(os.path.basename(out_name))[0]
-    # Lê a data da célula A4 (data de envio)
-    data_envio = ws["A4"].value
-    data_envio_str = data_envio.strftime("%d/%m/%Y") if isinstance(data_envio, datetime) else str(data_envio)
-    data_ddmm = get_next_business_day(data_envio_str) or "0000"
-
-    # Extrai identificador da requisição (ex: X03)
-    import re
-    req_match = re.search(r"(X[\w\d]+)", out_name)
-    req_id = req_match.group(1) if req_match else "X00"
-
-    # Nome final: {YYYYMMDD}_{nome_pdf_original}.xlsx
-    final_name = f"{data_ddmm}_{base_name}.xlsx"
-    out_path = os.path.join(OUTPUT_DIR, final_name)
-
+    # ───────────────────────────────────────────────
+    # 💾 Nome final baseado na data_envio (data_rececao + 1 dia útil)
+    # ───────────────────────────────────────────────
+    try:
+        # Tenta usar a última data calculada (coluna A)
+        data_envio = next_bd
+    except NameError:
+        # Fallback se a variável não existir
+        data_envio = datetime.now().date()
+    
+    # Converter para datetime se necessário
+    if not isinstance(data_envio, datetime):
+        data_envio = datetime.combine(data_envio, datetime.min.time())
+    
+    # Extrair data como YYYYMMDD
+    data_util = data_envio.strftime("%Y%m%d")
+    
+    # Nome base sem prefixo de data anterior
+    base_name = Path(out_name).stem
+    base_name = re.sub(r"^\d{8}_", "", base_name)
+    
+    # Novo nome → YYYYMMDD_restante.xlsx
+    new_name = f"{data_util}_{base_name}.xlsx"
+    
+    out_path = Path(OUTPUT_DIR) / new_name
     wb.save(out_path)
-    print(f"🟢 Gravado (com validação E1/F1, origem G1:J1 e timestamp K1:L1): {out_path}")
-    return out_path
+    
+    print(f"📁 Ficheiro gravado: {out_path}")
+    return str(out_path)
+
+
+
 
 
 # ───────────────────────────────────────────────
@@ -917,16 +913,13 @@ def append_process_log(pdf_name, req_id, processed, expected, out_path=None, sta
 # ───────────────────────────────────────────────
 # API pública usada pela app Streamlit
 # ───────────────────────────────────────────────
-def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
+def process_pdf_sync(pdf_path: str) -> list[str]:
     """
-    Executa o OCR Azure direto ao PDF e o parser Colab integrado.
-    Devolve: lista de requisições, cada uma no formato:
-      {
-        "rows": [ {dados da amostra}, ... ],
-        "expected": nº_declarado
-      }
-    A escrita do Excel é feita a jusante (no xylella_processor.py),
-    1 ficheiro por requisição, com validação esperadas/processadas.
+    Processa um único PDF:
+      - executa OCR Azure,
+      - extrai requisições e amostras,
+      - gera 1 ficheiro Excel por requisição.
+    Retorna: lista de caminhos absolutos dos ficheiros Excel criados.
     """
     base = os.path.basename(pdf_path)
     print(f"\n🧪 Início de processamento: {base}")
@@ -934,86 +927,115 @@ def process_pdf_sync(pdf_path: str) -> List[Dict[str, Any]]:
     # 1️⃣ Executar OCR Azure
     result_json = azure_analyze_pdf(pdf_path)
 
-    # 2️⃣ Guardar texto OCR global para debug
-    txt_path = OUTPUT_DIR / f"{os.path.splitext(base)[0]}_ocr_debug.txt"
+    # 2️⃣ Guardar texto OCR para debug
+    txt_path = OUTPUT_DIR / f"{Path(base).stem}_ocr_debug.txt"
     txt_path.write_text(extract_all_text(result_json), encoding="utf-8")
     print(f"📝 Texto OCR bruto guardado em: {txt_path}")
 
     # 3️⃣ Parser — dividir em requisições e extrair amostras
     req_results = parse_all_requisitions(result_json, pdf_path, str(txt_path))
 
-    # 4️⃣ Log e resumo de validação
-    total_amostras = sum(len(req["rows"]) for req in req_results)
-    print(f"✅ {base}: {len(req_results)} requisições, {total_amostras} amostras extraídas.")
+    valid_reqs = [req for req in req_results if req.get("rows")]
+    total_amostras = sum(len(req["rows"]) for req in valid_reqs)
+    print(f"✅ {base}: {len(valid_reqs)} requisição(ões) válidas, {total_amostras} amostras extraídas.")
 
-    # 5️⃣ Escrever ficheiros Excel diretamente (para compatibilidade cloud)
     created_files = []
-    for i, req in enumerate(req_results, start=1):
+    for i, req in enumerate(valid_reqs, start=1):
         rows = req.get("rows", [])
         expected = req.get("expected", 0)
 
         if not rows:
-            print(f"⚠️ Requisição {i}: sem amostras — ignorada.")
             continue
 
-        base_name = os.path.splitext(base)[0]
-        out_name = f"{base_name}_req{i}.xlsx" if len(req_results) > 1 else f"{base_name}.xlsx"
+        # Nome base para o Excel (mantém a data original)
+        base_name = Path(pdf_path).stem
+        out_name = f"{base_name}_req{i}.xlsx" if len(valid_reqs) > 1 else f"{base_name}.xlsx"
 
         out_path = write_to_template(rows, out_name, expected_count=expected, source_pdf=pdf_path)
         created_files.append(out_path)
-
-        diff = len(rows) - (expected or 0)
-        if len(rows) > 0 and diff != 0:
-            if expected == 0:
-                print(f"⚠️ Requisição {i}: {len(rows)} amostras vs ausente/0 declaradas (diferença {diff:+d}).")
-            else:
-                print(f"⚠️ Requisição {i}: {len(rows)} amostras vs {expected} declaradas (diferença {diff:+d}).")
-        else:
-            print(f"✅ Requisição {i}: {len(rows)} amostras gravadas → {out_path}")
+        print(f"💾 Excel criado: {out_path}")
 
     print(f"🏁 {base}: {len(created_files)} ficheiro(s) Excel gerado(s).")
-    # Guardar excerto OCR para debug de "Nº de amostras"
-    try:
-        ocr_text_path = OUTPUT_DIR / f"{Path(pdf_path).stem}_ocr_debug_excerpt.txt"
-        with open(ocr_text_path, "w", encoding="utf-8") as dbg:
-            with open(OUTPUT_DIR / f"{Path(pdf_path).stem}_ocr_debug.txt", "r", encoding="utf-8") as full:
-                text = full.read()
-                # guarda apenas 400 caracteres à volta de "amostra" para ver o contexto real
-                match = re.search(r".{0,200}amostra.{0,200}", text, re.I)
-                dbg.write(match.group(0) if match else text[:400])
-        print(f"🪶 Excerto OCR guardado em: {ocr_text_path}")
-    except Exception as e:
-        print(f"[WARN] Não foi possível gerar excerto OCR: {e}")
+    return [str(f) for f in created_files if Path(f).exists()]
 
-    return created_files
+# ───────────────────────────────────────────────
+# API pública usada pela app Streamlit
+# ───────────────────────────────────────────────
 
+def process_folder_async(input_dir: str = "/tmp") -> str:
+    """
+    Processa todos os PDFs em `input_dir` chamando `process_pdf_sync(pdf_path)`.
+    Cria:
+      - ficheiros Excel (um por requisição)
+      - summary.txt
+      - ZIP final apenas com XLSX + summary.txt
+    Retorna o caminho completo do ZIP criado.
+    """
+    start_time = time.time()
+    input_path = Path(input_dir)
+    pdf_files = sorted(input_path.glob("*.pdf"))
 
+    if not pdf_files:
+        print("⚠️ Nenhum PDF encontrado na pasta.")
+        return ""
 
+    print(f"📂 Início do processamento: {input_path} ({len(pdf_files)} PDF(s))")
 
+    all_excels = []
 
+    # Processar cada PDF → gerar Excels
+    for pdf_path in pdf_files:
+        base = pdf_path.name
+        print(f"\n🔹 A processar: {base}")
+        try:
+            created = process_pdf_sync(str(pdf_path))
+            excels = [f for f in created if str(f).lower().endswith(".xlsx")]
+            all_excels.extend(excels)
+            print(f"✅ {base}: {len(excels)} ficheiro(s) Excel.")
+        except Exception as e:
+            print(f"❌ Erro ao processar {base}: {e}")
 
+    elapsed_time = time.time() - start_time
 
+    # Criar summary.txt
+    summary_path = input_path / "summary.txt"
+    with open(summary_path, "w", encoding="utf-8") as f:
+        for pdf_path in pdf_files:
+            base = pdf_path.name
+            related_excels = [e for e in all_excels if Path(base).stem in Path(e).stem]
+            f.write(f"{base}: {len(related_excels)} requisição(ões)\n")
+            for e in related_excels:
+                f.write(f"   ↳ {Path(e).name}\n")
+            f.write("\n")
 
+        f.write("──────────────────────────────\n")
+        f.write(f"📊 Total de ficheiros Excel: {len(all_excels)}\n")
+        f.write(f"⏱️ Tempo total: {elapsed_time:.1f} segundos\n")
+        f.write(f"📅 Executado em: {datetime.now():%d/%m/%Y às %H:%M:%S}\n")
 
+    print(f"🧾 Summary criado: {summary_path}")
 
+    # Criar ZIP apenas com XLSX e summary.txt
+    first_pdf = pdf_files[0]
+    base_name = Path(first_pdf).stem
+    zip_name = f"{base_name}_output.zip"
+    zip_path = Path("/tmp") / zip_name  # usa o /tmp global (não apagado pela sessão)
 
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+        # Adiciona todos os Excel
+        for e in all_excels:
+            e_path = Path(e)
+            if e_path.exists():
+                zipf.write(e_path, e_path.name)
 
+        # Adiciona summary.txt
+        if summary_path.exists():
+            zipf.write(summary_path, summary_path.name)
 
+    print(f"📦 ZIP final criado: {zip_path}")
+    print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    return str(zip_path)
 
 
 
