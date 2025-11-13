@@ -637,6 +637,116 @@ def parse_xylella_tables(
     print(f"✅ {len(out)} amostras extraídas no total (req_id={req_id}).")
     return out
 
+def parse_xylella_from_text_block(block_text: str, context: Dict[str, Any], req_id: int = 1) -> List[Dict[str, Any]]:
+    """
+    Parser genérico baseado em texto (linhas) que funciona para:
+      - Template antigo DGAV (com linha de 'Natureza da amostra')
+      - Template novo ICNF (sem 'Natureza da amostra')
+
+    Estrutura típica por amostra (vertical):
+
+      [ref]
+      [natureza?]      ← opcional, só no template antigo
+      [hospedeiro]
+      [tipo]           ← 'simples', 'composta', 'Amostra composta', ...
+
+    O objectivo é:
+      • reconhecer ref (63020090 ou 91/Xf/DGAVC/MRLRA/25)
+      • saltar natureza se existir
+      • ler hospedeiro
+      • ler tipo
+    """
+
+    lines_raw = block_text.splitlines()
+    lines: List[str] = []
+    for ln in lines_raw:
+        ln = ln.replace("\u00A0", " ")
+        ln = re.sub(r"\s+", " ", ln).strip()
+        if ln:
+            lines.append(ln)
+
+    # contexto de datas
+    data_envio = context.get("data_envio", datetime.now().strftime("%d/%m/%Y"))
+    data_colheita = context.get("default_colheita", data_envio)
+
+    results: List[Dict[str, Any]] = []
+
+    # referência: ou só dígitos (63020090) ou padrão 91/Xf/DGAV...
+    ref_re = re.compile(
+        r"^(\d{5,8}|\d{1,3}\s*/\s*X[fF][^ ]*)$"
+    )
+
+    i = 0
+    n = len(lines)
+    while i < n:
+        line = lines[i]
+
+        m_ref = ref_re.match(line)
+        if not m_ref:
+            i += 1
+            continue
+
+        # referência normalizada
+        ref = m_ref.group(1)
+        ref = re.sub(r"\s*/\s*", "/", ref).strip()
+
+        i += 1
+
+        # ── opcional: natureza da amostra (aparece no template antigo)
+        natureza = None
+        while i < n and not lines[i].strip():
+            i += 1
+        if i < n:
+            low = lines[i].lower()
+            if _looks_like_natureza(low) or "partes de vegetais" in low or "insetos" in low:
+                natureza = lines[i].strip()
+                i += 1
+
+        # ── hospedeiro
+        while i < n and not lines[i].strip():
+            i += 1
+        hospedeiro = ""
+        if i < n:
+            hospedeiro = lines[i].strip()
+            i += 1
+
+        # ── tipo (simples/composta/amostra simples/amostra composta)
+        while i < n and not lines[i].strip():
+            i += 1
+        tipo = ""
+        if i < n:
+            tipo_line = lines[i].strip()
+            m_tipo = re.search(r"(simples|composta|amostra simples|amostra composta)", tipo_line, re.I)
+            if m_tipo:
+                t = m_tipo.group(1).lower()
+                if "composta" in t:
+                    tipo = "Composta"
+                else:
+                    tipo = "Simples"
+                i += 1
+            else:
+                # se não reconhecer tipo, pode ser continuação do hospedeiro
+                hospedeiro = (hospedeiro + " " + tipo_line).strip()
+                i += 1
+
+        results.append({
+            "requisicao_id": req_id,
+            "datarececao": data_envio,
+            "datacolheita": data_colheita,
+            "referencia": ref,
+            "hospedeiro": hospedeiro,
+            "tipo": tipo,
+            "zona": context.get("zona", ""),
+            "responsavelamostra": context.get("dgav", ""),
+            "responsavelcolheita": context.get("responsavel_colheita", ""),
+            "observacoes": "",
+            "procedure": "XYLELLA",
+            "datarequerido": data_envio,
+            "Score": "",
+        })
+
+    print(f"✅ [fallback texto] Extraídas {len(results)} amostras no bloco (req_id={req_id}).")
+    return results
 
 
 # ───────────────────────────────────────────────
@@ -833,13 +943,18 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
     # Caso simples (1 requisição)
     if count <= 1:
         context = extract_context_from_text(full_text)
-        amostras = parse_xylella_tables(
-            result_json,
-            context,
-            req_id=1,          # usa índices por defeito: 0,2,3
-        )
-        expected = context.get("declared_samples", 0)
+    
+        # 1º tentar via tabelas (comportamento original)
+        amostras = parse_xylella_tables(result_json, context, req_id=1)
+    
+        # Fallback: se não vier nada das tabelas, usar parser baseado em texto (linhas)
+        if not amostras:
+            print("⚠️ Nenhuma amostra via tables — a usar fallback de texto.")
+            amostras = parse_xylella_from_text_block(full_text, context, req_id=1)
+    
+        expected = context.get("declared_samples", len(amostras))
         return [{"rows": amostras, "expected": expected}] if amostras else []
+
 
     # Múltiplas requisições — segmentar por cabeçalhos
     blocos = split_if_multiple_requisicoes(full_text)
@@ -891,10 +1006,12 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
                 tables_filtradas = all_tables
 
             local = {"analyzeResult": {"tables": tables_filtradas}}
-
-            # Aqui usamos o parser com índices por defeito (0,2,3) para o template clássico
             amostras = parse_xylella_tables(local, context, req_id=bi+1)
-
+            
+            if not amostras:
+                print(f"⚠️ Bloco {bi+1}: tables vazias — a usar fallback de texto.")
+                amostras = parse_xylella_from_text_block(blocos[bi], context, req_id=bi+1)
+            
             out[bi] = amostras or []
         except Exception as e:
             print(f"❌ Erro no bloco {bi+1}: {e}")
@@ -1364,6 +1481,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
