@@ -1442,21 +1442,8 @@ def process_pdf_sync(pdf_path: str) -> list[str]:
     print(f"📝 Texto OCR bruto guardado em: {txt_path}")
 
     # 3️⃣ Parser — dividir em requisições e extrair amostras
-    full_text = txt_path.read_text(encoding="utf-8")
-
-    text_lower = full_text.lower()
-    is_icnf_template = re.search(
-        r"prospe[cç][aã]o\s+de:?\s*xylella\s+fastidiosa\s+em\s+zonas\s+demarcadas",
-        text_lower,
-        flags=re.IGNORECASE,
-    ) is not None
-
-    if is_icnf_template:
-        print("🔎 [ICNF] Template 'Prospeção de: Xylella fastidiosa em Zonas Demarcadas' detetado.")
-        req_results = parse_icnf_requisition(result_json, full_text, pdf_path, str(txt_path))
-    else:
-        req_results = parse_all_requisitions(result_json, pdf_path, str(txt_path))
-
+    #    (inclui a lógica interna para ICNF / Zonas Demarcadas)
+    req_results = parse_all_requisitions(result_json, pdf_path, str(txt_path))
 
     valid_reqs = [req for req in req_results if req.get("rows")]
     total_amostras = sum(len(req["rows"]) for req in valid_reqs)
@@ -1559,6 +1546,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
