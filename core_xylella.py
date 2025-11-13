@@ -551,8 +551,25 @@ def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, An
             if not ref or re.match(r"^\D+$", ref):
                 continue
 
-            hospedeiro = row[2] if len(row) > 2 else ""
-            obs        = row[3] if len(row) > 3 else ""
+            # ───────────────────────────────────────────────
+            # Extração de colunas robusta (3-col universal)
+            # ───────────────────────────────────────────────
+            
+            # Todas as colunas após referência
+            cols_after_ref = row[1:]
+            
+            # Remover natureza da amostra (ramos, folhas, material herbário, etc.)
+            cols_after_ref_clean = [
+                c for c in cols_after_ref
+                if c and isinstance(c, str) and not _looks_like_natureza(c)
+            ]
+            
+            # Hospedeiro = 1ª coluna útil após referência
+            hospedeiro = cols_after_ref_clean[0] if len(cols_after_ref_clean) > 0 else ""
+            
+            # Observações = 2ª coluna útil após referência
+            obs = cols_after_ref_clean[1] if len(cols_after_ref_clean) > 1 else ""
+
 
             if _looks_like_natureza(hospedeiro):
                 hospedeiro = ""
@@ -1326,6 +1343,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
