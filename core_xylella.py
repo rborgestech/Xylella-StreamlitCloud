@@ -587,6 +587,83 @@ def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, An
     print(f"✅ {len(out)} amostras extraídas no total (req_id={req_id}).")
     return out
 
+
+
+# ───────────────────────────────────────────────
+# Parser ICNF – "Prospeção de: Xylella fastidiosa em Zonas Demarcadas"
+# ───────────────────────────────────────────────
+def parse_icnf_from_text(full_text: str, pdf_name: str) -> List[Dict[str, Any]]:
+    """
+    Parser dedicado ao template ICNF / XF / Zonas Demarcadas.
+
+    Linhas típicas de amostras (OCR):
+        1 /XF/ICNFC/... Accacia dealbata Individual
+        2 /XF/ICNFC/... Pteridium aquilinium Composta 3
+    Gera um único bloco {rows, expected}.
+    """
+
+    ctx = extract_context_from_text(full_text)
+    data_envio = ctx.get("data_envio", datetime.now().strftime("%d/%m/%Y"))
+    data_colheita = ctx.get("default_colheita", data_envio)
+
+    rows: List[Dict[str, Any]] = []
+
+    # Normalização de linhas
+    lines = full_text.replace("\t", " ").splitlines()
+
+    pattern = re.compile(
+        r"""
+        ^\s*
+        (?P<num>\d{1,3})                    # nº amostra
+        \s+
+        (?P<ref>/XF/[A-Z0-9\-\/]+)          # referência /XF/...
+        \s+
+        (?P<hosp>[A-Za-zÀ-ÿ\s\.\-]+?)       # hospedeiro
+        \s+
+        (?P<tipo>Individual|Composta\s*\d+) # tipo
+        \s*$
+        """,
+        flags=re.IGNORECASE | re.VERBOSE,
+    )
+
+    for ln in lines:
+        m = pattern.match(ln)
+        if not m:
+            continue
+
+        ref = m.group("ref").strip()
+        hosp = m.group("hosp").strip()
+        tipo_raw = m.group("tipo").strip()
+
+        tipo = "Individual"
+        if re.match(r"Composta", tipo_raw, flags=re.I):
+            tipo = "Composta"
+
+        rows.append(
+            {
+                "requisicao_id": 1,
+                "datarececao": data_envio,
+                "datacolheita": data_colheita,
+                "referencia": ref,
+                "hospedeiro": hosp,
+                "tipo": tipo,
+                "zona": ctx.get("zona", ""),
+                "responsavelamostra": ctx.get("dgav", ""),
+                "responsavelcolheita": ctx.get("responsavel_colheita", ""),
+                "observacoes": "",
+                "procedure": "XYLELLA",
+                "datarequerido": data_envio,
+                "Score": "",
+            }
+        )
+
+    # nº declarado de amostras; se não conseguir, usa len(rows)
+    expected = ctx.get("declared_samples") or len(rows)
+
+    print(f"✅ [ICNF] Extraídas {len(rows)} amostras (esperadas: {expected}).")
+
+    return [{"rows": rows, "expected": expected}] if rows else []
+
 # ───────────────────────────────────────────────
 # Dividir em requisições e extrair por bloco
 # ───────────────────────────────────────────────
@@ -603,8 +680,19 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
     else:
         full_text = extract_all_text(result_json)
 
-    # Detetar nº de requisições
+    # 🔎 Detetar template ICNF (Zonas Demarcadas)
+    text_lower = full_text.lower()
+    icnf_pattern = re.compile(
+        r"prospe[cç][aã]o\s*de:?\s*xylella\s+fastidiosa\s+em\s+zonas\s+demarcadas",
+        re.IGNORECASE,
+    )
+    if icnf_pattern.search(text_lower):
+        print("🔎 Template ICNF 'Prospeção de: Xylella fastidiosa em Zonas Demarcadas' detetado.")
+        return parse_icnf_from_text(full_text, pdf_name)
+
+    # Detetar nº de requisições (template DGAV clássico)
     count, _ = detect_requisicoes(full_text)
+
     all_tables = result_json.get("analyzeResult", {}).get("tables", []) or []
 
     # Caso simples (1 requisição)
@@ -1133,6 +1221,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
