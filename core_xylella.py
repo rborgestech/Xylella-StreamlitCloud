@@ -216,20 +216,30 @@ def _clean_ref(raw: str) -> str:
     return s
 
 def detect_requisicoes(full_text: str):
-    """Conta quantas requisições DGAV→SGS existem no texto OCR de um PDF."""
+    """
+    Conta quantas requisições existem no texto OCR.
+    Suporta:
+      - 'Programa nacional de Prospeção de pragas de quarentena'
+      - 'Prospeção de: Xylella fastidiosa em Zonas Demarcadas'
+    """
     pattern = re.compile(
-        r"PROGRAMA\s+NACIONAL\s+DE\s+PROSPE[ÇC][AÃ]O\s+DE\s+PRAGAS\s+DE\s+QUARENTENA",
+        r"(?:PROGRAMA\s+NACIONAL\s+DE\s+PROSPE[ÇC][AÃ]O\s+DE\s+PRAGAS\s+DE\s+QUARENTENA"
+        r"|PROSPE[ÇC][AÃ]O\s*DE:?\s*XYLELLA\s+FASTIDIOSA\s+EM\s+ZONAS\s+DEMARCADAS)",
         re.IGNORECASE,
     )
+
     matches = list(pattern.finditer(full_text))
     count = len(matches)
     positions = [m.start() for m in matches]
+
     if count == 0:
         print("🔍 Nenhum cabeçalho encontrado — assumido 1 requisição.")
         count = 1
     else:
         print(f"🔍 Detetadas {count} requisições no ficheiro (posições: {positions})")
+
     return count, positions
+
 
 def split_if_multiple_requisicoes(full_text: str) -> List[str]:
     """Divide o texto OCR em blocos distintos, um por requisição DGAV→SGS."""
@@ -243,7 +253,8 @@ def split_if_multiple_requisicoes(full_text: str) -> List[str]:
     text = re.sub(r"\n{2,}", "\n", text)
 
     pattern = re.compile(
-        r"(?:PROGRAMA\s+NACIONAL\s+DE\s+PROSPE[ÇC][AÃ]O\s+DE\s+PRAGAS\s+DE\s+QUARENTENA)",
+        r"(?:PROGRAMA\s+NACIONAL\s+DE\s+PROSPE[ÇC][AÃ]O\s+DE\s+PRAGAS\s+DE\s+QUARENTENA"
+        r"|PROSPE[ÇC][AÃ]O\s*DE:?\s*XYLELLA\s+FASTIDIOSA\s+EM\s+ZONAS\s+DEMARCADAS)",
         re.IGNORECASE,
     )
     marks = [m.start() for m in pattern.finditer(text)]
@@ -1481,6 +1492,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
