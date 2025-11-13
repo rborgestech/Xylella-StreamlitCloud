@@ -191,6 +191,16 @@ elif st.session_state.stage == "processing":
         outdirs.append(tmpdir)
 
         created = process_pdf(str(tmp_pdf))
+        # DEBUG — mostrar conteúdo do ficheiro OCR
+        import glob
+        
+        debug_files = glob.glob("/tmp/*_ocr_debug.txt")
+        if debug_files:
+            st.subheader("Ficheiros OCR Debug encontrados")
+            for fpath in debug_files:
+                st.write(f"📄 {fpath}")
+                with open(fpath, "r", encoding="utf-8") as f:
+                    st.text(f.read())
         st.session_state.processed_files.add(up.name)
 
         if not created:
