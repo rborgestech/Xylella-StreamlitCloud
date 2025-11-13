@@ -503,37 +503,6 @@ def extract_context_from_text(full_text: str):
 
 
     # ───────────────────────────────────────────────
-    # DGAV / Responsável pela colheita
-    # ───────────────────────────────────────────────
-    responsavel, dgav = None, None
-    m_hdr = re.search(
-        r"Amostra(?:s|\(s\))?\s*colhida(?:s|\(s\))?\s*por\s*DGAV\s*[:\-]?\s*(.*)",
-        full_text,
-        re.IGNORECASE,
-    )
-    if m_hdr:
-        tail = full_text[m_hdr.end():]
-        linhas = [m_hdr.group(1)] + tail.splitlines()
-        for ln in linhas[:4]:
-            ln = (ln or "").strip()
-            if ln:
-                responsavel = ln
-                break
-        if responsavel:
-            responsavel = re.sub(r"\S+@dgav\.pt|\S+@\S+", "", responsavel, flags=re.I)
-            responsavel = re.sub(r"PROGRAMA.*|Data.*|N[º°].*", "", responsavel, flags=re.I)
-            responsavel = re.sub(r"[:;,.\-–—]+$", "", responsavel).strip()
-
-    if responsavel:
-        dgav = f"DGAV {responsavel}".strip() if not re.match(r"^DGAV\b", responsavel, re.I) else responsavel
-    else:
-        m_d = re.search(r"\bDGAV(?:\s+[A-Za-zÀ-ÿ?]+){1,4}", full_text)
-        dgav = re.sub(r"[:;,.\-–—]+$", "", m_d.group(0)).strip() if m_d else None
-
-    ctx["dgav"] = dgav
-    ctx["responsavel_colheita"] = None
-
-    # ───────────────────────────────────────────────
     # Datas de colheita (mapeamento com asteriscos, se existir)
     # ───────────────────────────────────────────────
     colheita_map = {}
@@ -1594,6 +1563,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
