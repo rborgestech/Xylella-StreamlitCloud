@@ -419,29 +419,66 @@ def extract_context_from_text(full_text: str):
         ctx["template_tipo"] = "PROGRAMA_NACIONAL"
 
     # ───────────────────────────────────────────────
-    # Entidade + Técnico responsável (NOVO TEMPLATE)
+    # Entidade + Técnico responsável (novos templates)
     # ───────────────────────────────────────────────
-    # Exemplo:
-    #   Entidade: DGAV Centro
-    #   Tecnico responsável: Marta Caetano e Sara Pinheiro
-    
-    m_ent_new = re.search(r"Entidade\s*:\s*(.+)", full_text, re.I)
-    m_tecnico_new = re.search(r"T[ée]cnico\s+respons[aá]vel\s*:\s*(.+)", full_text, re.I)
-    
-    entidade = m_ent_new.group(1).strip() if m_ent_new else None
-    tecnico_resp = m_tecnico_new.group(1).strip() if m_tecnico_new else None
-    
-    # Se vier "Técnico responsável" colado ao texto da entidade (erro de OCR), removemos:
-    if entidade:
+    entidade = None
+    tecnico_resp = None
+
+    # Entidade: DGAV Centro
+    m_ent = re.search(r"Entidade\s*:\s*(.+)", full_text, re.I)
+    if m_ent:
+        entidade = m_ent.group(1).strip()
+        # Se o OCR colar "Técnico responsável" na mesma linha, limpa:
         entidade = re.sub(r"T[ée]cnico\s+respons[aá]vel.*$", "", entidade, flags=re.I).strip()
-    
-    # Guardar no contexto
+
+    # Técnico responsável: Marta Caetano e Sara Pinheiro
+    m_tecnico = re.search(r"T[ée]cnico\s+respons[aá]vel\s*:\s*(.+)", full_text, re.I)
+    if m_tecnico:
+        tecnico_resp = m_tecnico.group(1).strip()
+
+    # Guardar no contexto se encontrarmos algo
     if entidade:
-        ctx["dgav"] = entidade                   # Vai para coluna G
-    else:
-        ctx["dgav"] = None
-    
-    ctx["responsavel_colheita"] = tecnico_resp   # Vai para coluna H
+        ctx["dgav"] = entidade          # vai alimentar a coluna G
+    # se não houver entidade aqui, deixamos para o fallback antigo mais abaixo
+
+    ctx["responsavel_colheita"] = tecnico_resp  # vai alimentar a coluna H
+
+    # ───────────────────────────────────────────────
+    # Fallback para o TEMPLATE ANTIGO (DGAV: ... )
+    # ───────────────────────────────────────────────
+    if not entidade:
+        responsavel, dgav = None, None
+        m_hdr = re.search(
+            r"Amostra(?:s|\(s\))?\s*colhida(?:s|\(s\))?\s*por\s*DGAV\s*[:\-]?\s*(.*)",
+            full_text,
+            re.IGNORECASE,
+        )
+        if m_hdr:
+            tail = full_text[m_hdr.end():]
+            linhas = [m_hdr.group(1)] + tail.splitlines()
+            for ln in linhas[:4]:
+                ln = (ln or "").strip()
+                if ln:
+                    responsavel = ln
+                    break
+            if responsavel:
+                responsavel = re.sub(r"\S+@dgav\.pt|\S+@\S+", "", responsavel, flags=re.I)
+                responsavel = re.sub(r"PROGRAMA.*|Data.*|N[º°].*", "", responsavel, flags=re.I)
+                responsavel = re.sub(r"[:;,.\-–—]+$", "", responsavel).strip()
+
+        if responsavel:
+            dgav = f"DGAV {responsavel}".strip() if not re.match(r"^DGAV\b", responsavel, re.I) else responsavel
+        else:
+            m_d = re.search(r"\bDGAV(?:\s+[A-Za-zÀ-ÿ?]+){1,4}", full_text)
+            dgav = re.sub(r"[:;,.\-–—]+$", "", m_d.group(0)).strip() if m_d else None
+
+        if dgav:
+            ctx["dgav"] = dgav
+
+        # no template antigo não temos "técnico responsável" explícito
+        if not ctx.get("responsavel_colheita"):
+            ctx["responsavel_colheita"] = None
+
     
     
     # ───────────────────────────────────────────────
@@ -1557,6 +1594,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
