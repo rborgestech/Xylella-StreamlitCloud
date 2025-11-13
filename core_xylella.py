@@ -268,6 +268,38 @@ def split_if_multiple_requisicoes(full_text: str) -> List[str]:
     print(f"🔍 Detetadas {len(blocos)} requisições distintas (por cabeçalho).")
     return blocos
 
+def normalize_ocr_line(ln: str) -> str:
+    """
+    Normalização agressiva de uma linha OCR:
+    - remove caracteres invisíveis
+    - colapsa espaços
+    - normaliza barras (/)
+    - normaliza /XF/ independente de maiúsculas
+    - corrige espaço entre nº e primeira barra
+    """
+    if not ln:
+        return ""
+
+    # remover caracteres invisíveis / estranhos
+    ln = re.sub(r"[\u200b\u00A0\r\t\f\v]", "", str(ln))
+
+    # normalizar espaços múltiplos
+    ln = re.sub(r"\s+", " ", ln).strip()
+
+    # normalizar espaços à volta de barras -> " / XF / " -> "/XF/"
+    ln = re.sub(r"\s*/\s*", "/", ln)
+
+    # normalizar /XF/ (XF, Xf, xf, xF)
+    ln = re.sub(r"/x[fF]/", "/XF/", ln, flags=re.IGNORECASE)
+
+    # corrigir espaço entre nº e primeira barra: "91 /XF" -> "91/XF"
+    ln = re.sub(r"^(\d{1,3})\s+/", r"\1/", ln)
+
+    # se ainda houver espaços imediatamente antes de "/", remove
+    ln = re.sub(r"\s+/", "/", ln)
+
+    return ln
+
 
 
 def normalize_date_str(val: str) -> str:
@@ -593,60 +625,148 @@ def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, An
 # Parser ICNF – "Prospeção de: Xylella fastidiosa em Zonas Demarcadas"
 # ───────────────────────────────────────────────
 def parse_icnf_from_text(full_text: str, pdf_name: str):
+    """
+    Parser dedicado aos templates ICNF / XF / Zonas Demarcadas.
+
+    Suporta dois formatos de linha:
+
+      A) Formato "lista numerada" (ex. ICNF-C SL-FC):
+         1 /XF/ICNF-C/GAD/SL-FC/2025 Salvia rosmarinus Simples (1)
+         (ou em duas linhas OCR: cabeçalho + espécie/tipo na linha seguinte)
+
+      B) Formato "Refª amostra" (ex. ZD XF MRLRA):
+         91/Xf/DGAVC/MRLRA/25 Laurus nobilis L. simples
+    """
+
     ctx = extract_context_from_text(full_text)
     data_envio = ctx.get("data_envio", datetime.now().strftime("%d/%m/%Y"))
     data_colheita = ctx.get("default_colheita", data_envio)
 
-    rows = []
+    rows: List[Dict[str, Any]] = []
 
-    # Normalizar linhas
-    lines = full_text.splitlines()
+    # ───────────────────────────────────────────────
+    # 1) Preparar linhas OCR (limpas e normalizadas)
+    # ───────────────────────────────────────────────
+    raw_lines = [ln for ln in full_text.splitlines() if ln.strip()]
+    clean_lines = [normalize_ocr_line(ln) for ln in raw_lines]
 
-    # NOVO REGEX — compatível com o teu OCR real
-    pattern = re.compile(
+    # ───────────────────────────────────────────────
+    # 2) Tentar formato A — lista numerada /XF/ICNF-C/...
+    #    (com possível quebra em 2 linhas → combinamos)
+    # ───────────────────────────────────────────────
+    combined_lines: List[str] = []
+    i = 0
+    while i < len(clean_lines):
+        ln = clean_lines[i]
+
+        # linha do tipo "1 /XF/ICNF-C/GAD/SL-FC/2025 1"
+        m_head = re.match(r"^\d{1,3}\s+/XF/[A-Z0-9\-\/]+.*", ln)
+        if m_head and i + 1 < len(clean_lines):
+            # junta com a linha seguinte (espécie + tipo)
+            combined = ln + " " + clean_lines[i + 1]
+            combined_lines.append(combined)
+            i += 2
+        else:
+            i += 1
+
+    # Se não tivermos combinações, usamos as linhas limpas tal como estão
+    if not combined_lines:
+        combined_lines = clean_lines.copy()
+
+    pattern_A = re.compile(
         r"""
         ^\s*
-        (?P<num>\d{1,3})                         # número da linha
+        (?P<num>\d{1,3})                         # número da amostra (ignoramos)
         \s+
-        (?P<ref>/XF/[A-Z0-9\-\/]+)               # referência /XF/ICNF-C/GAD/SL-FC/2025
+        (?P<ref>/XF/[A-Za-z0-9\-\/]+)            # /XF/ICNF-C/...
+        (?:\s+\d+)?                              # dígito extra opcional do OCR
         \s+
         (?P<hosp>[A-Za-zÀ-ÿ\s\.\-]+?)            # hospedeiro
         \s+
-        (?P<tipo>Simples|Composta)               # tipo Simples ou Composta
-        (?:\s*\((?P<n_comp>\d+)\))?              # número dentro de parênteses opcional
+        (?P<tipo>Simples|Composta)               # tipo
+        (?:\s*\((?P<n_comp>\d+)\))?              # nº em parênteses opcional
         \s*$
         """,
-        flags=re.IGNORECASE | re.VERBOSE
+        flags=re.IGNORECASE | re.VERBOSE,
     )
 
-    for ln in lines:
-        m = pattern.match(ln)
+    for ln in combined_lines:
+        m = pattern_A.match(ln)
         if not m:
             continue
 
-        tipo = m.group("tipo").capitalize()
+        ref = m.group("ref").strip()
         hosp = m.group("hosp").strip()
-        ref  = m.group("ref").strip()
+        tipo = m.group("tipo").capitalize()
 
-        rows.append({
-            "requisicao_id": 1,
-            "datarececao": data_envio,
-            "datacolheita": data_colheita,
-            "referencia": ref,
-            "hospedeiro": hosp,
-            "tipo": tipo,
-            "zona": ctx.get("zona", ""),
-            "responsavelamostra": ctx.get("dgav", ""),
-            "responsavelcolheita": ctx.get("responsavel_colheita", ""),
-            "observacoes": "",
-            "procedure": "XYLELLA",
-            "datarequerido": data_envio,
-            "Score": "",
-        })
+        rows.append(
+            {
+                "requisicao_id": 1,
+                "datarececao": data_envio,
+                "datacolheita": data_colheita,
+                "referencia": ref,
+                "hospedeiro": hosp,
+                "tipo": tipo,  # "Simples" / "Composta"
+                "zona": ctx.get("zona", ""),
+                "responsavelamostra": ctx.get("dgav", ""),
+                "responsavelcolheita": ctx.get("responsavel_colheita", ""),
+                "observacoes": "",
+                "procedure": "XYLELLA",
+                "datarequerido": data_envio,
+                "Score": "",
+            }
+        )
+
+    # ───────────────────────────────────────────────
+    # 3) Se ainda não apanhámos nada, tentar formato B
+    #    "91/Xf/DGAVC/MRLRA/25 Laurus nobilis L. simples"
+    # ───────────────────────────────────────────────
+    if not rows:
+        pattern_B = re.compile(
+            r"""
+            ^\s*
+            (?P<ref>\d{1,3}/XF/[A-Za-z0-9\-\/]+)   # 91/XF/DGAVC/MRLRA/25
+            \s+
+            (?P<hosp>[A-Za-zÀ-ÿ\s\.\-]+?)          # hospedeiro
+            \s+
+            (?P<tipo>simples|composta)\b           # tipo simples/composta
+            .*$
+            """,
+            flags=re.IGNORECASE | re.VERBOSE,
+        )
+
+        for ln in clean_lines:
+            m = pattern_B.match(ln)
+            if not m:
+                continue
+
+            ref = m.group("ref").strip()
+            hosp = m.group("hosp").strip()
+            tipo = m.group("tipo").capitalize()  # "Simples" / "Composta"
+
+            rows.append(
+                {
+                    "requisicao_id": 1,
+                    "datarececao": data_envio,
+                    "datacolheita": data_colheita,
+                    "referencia": ref,
+                    "hospedeiro": hosp,
+                    "tipo": tipo,
+                    "zona": ctx.get("zona", ""),
+                    "responsavelamostra": ctx.get("dgav", ""),
+                    "responsavelcolheita": ctx.get("responsavel_colheita", ""),
+                    "observacoes": "",
+                    "procedure": "XYLELLA",
+                    "datarequerido": data_envio,
+                    "Score": "",
+                }
+            )
 
     expected = ctx.get("declared_samples") or len(rows)
     print(f"✅ [ICNF] Extraídas {len(rows)} amostras (esperadas: {expected}).")
+
     return [{"rows": rows, "expected": expected}] if rows else []
+
 
 
 # ───────────────────────────────────────────────
@@ -1206,6 +1326,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
