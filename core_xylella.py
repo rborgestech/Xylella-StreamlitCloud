@@ -532,12 +532,19 @@ def extract_context_from_text(full_text: str):
 def parse_xylella_tables(
     result_json,
     context,
-    req_id=None,
+    req_id: int | None = None,
     col_ref: int = 0,
     col_hosp: int = 2,
     col_obs: int = 3,
 ) -> List[Dict[str, Any]]:
-    """Extrai as amostras das tabelas Azure OCR, aplicando o contexto da requisição."""
+    """
+    Extrai as amostras das tabelas Azure OCR, aplicando o contexto da requisição.
+
+    Os índices das colunas podem ser parametrizados:
+      - col_ref  : índice da coluna da referência (default 0)
+      - col_hosp : índice da coluna do hospedeiro (default 2 – template antigo)
+      - col_obs  : índice da coluna das observações (default 3 – template antigo)
+    """
     out: List[Dict[str, Any]] = []
     tables = result_json.get("analyzeResult", {}).get("tables", [])
     if not tables:
@@ -554,29 +561,15 @@ def parse_xylella_tables(
         for row in grid:
             if not row or not any(row):
                 continue
-            ref = _clean_ref(row[0]) if len(row) > 0 else ""
+
+            # Referência (coluna parametrizável, por defeito 0)
+            ref = _clean_ref(row[col_ref]) if len(row) > col_ref else ""
             if not ref or re.match(r"^\D+$", ref):
                 continue
 
-            # ───────────────────────────────────────────────
-            # Extração de colunas robusta (3-col universal)
-            # ───────────────────────────────────────────────
-            
-            # Todas as colunas após referência
-            cols_after_ref = row[1:]
-            
-            # Remover natureza da amostra (ramos, folhas, material herbário, etc.)
-            cols_after_ref_clean = [
-                c for c in cols_after_ref
-                if c and isinstance(c, str) and not _looks_like_natureza(c)
-            ]
-            
-            # Hospedeiro = 1ª coluna útil após referência
+            # Hospedeiro e observações (colunas parametrizáveis)
             hospedeiro = row[col_hosp] if len(row) > col_hosp else ""
-            
-            # Observações = 2ª coluna útil após referência
-            obs = row[col_obs] if len(row) > col_obs else ""
-
+            obs        = row[col_obs]  if len(row) > col_obs else ""
 
             if _looks_like_natureza(hospedeiro):
                 hospedeiro = ""
@@ -615,6 +608,7 @@ def parse_xylella_tables(
                 "datarequerido": context["data_envio"],
                 "Score": ""
             })
+
     # 🧩 Fallback — tentar extrair linhas da tabela via regex se Azure não devolveu cells válidas
     if not out:
         full_text = extract_all_text(result_json)
@@ -802,6 +796,7 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
     é um dicionário: { "rows": [...amostras...], "expected": nº_declarado }.
     Suporta múltiplas requisições e atribuição exclusiva de tabelas por bloco.
     """
+
     # Texto global OCR
     if txt_path and os.path.exists(txt_path):
         full_text = Path(txt_path).read_text(encoding="utf-8")
@@ -809,25 +804,40 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
     else:
         full_text = extract_all_text(result_json)
 
-    # 🔎 Detetar template ICNF (Zonas Demarcadas)
-    text_lower = full_text.lower()
+    # 🔎 DETEÇÃO DO NOVO TEMPLATE ICNF / ZONAS DEMARCADAS
     icnf_pattern = re.compile(
         r"prospe[cç][aã]o\s*de:?\s*xylella\s+fastidiosa\s+em\s+zonas\s+demarcadas",
         re.IGNORECASE,
     )
-    if icnf_pattern.search(text_lower):
-        print("🔎 Template ICNF 'Prospeção de: Xylella fastidiosa em Zonas Demarcadas' detetado.")
-        return parse_icnf_from_text(full_text, pdf_name)
+    if icnf_pattern.search(full_text):
+        print("🔎 Template ICNF/Zonas Demarcadas detetado — usar colunas 0,1,2.")
+        context = extract_context_from_text(full_text)
+        amostras = parse_xylella_tables(
+            result_json,
+            context,
+            req_id=1,
+            col_ref=0,
+            col_hosp=1,
+            col_obs=2,
+        )
+        expected = context.get("declared_samples", 0)
+        return [{"rows": amostras, "expected": expected}] if amostras else []
 
-    # Detetar nº de requisições (template DGAV clássico)
+    # ───────────────────────────────────────────────
+    # Caminho normal (template antigo DGAV)
+    # ───────────────────────────────────────────────
+    # Detetar nº de requisições
     count, _ = detect_requisicoes(full_text)
-
     all_tables = result_json.get("analyzeResult", {}).get("tables", []) or []
 
     # Caso simples (1 requisição)
     if count <= 1:
         context = extract_context_from_text(full_text)
-        amostras = parse_xylella_tables(result_json, context, req_id=1)
+        amostras = parse_xylella_tables(
+            result_json,
+            context,
+            req_id=1,          # usa índices por defeito: 0,2,3
+        )
         expected = context.get("declared_samples", 0)
         return [{"rows": amostras, "expected": expected}] if amostras else []
 
@@ -881,7 +891,10 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
                 tables_filtradas = all_tables
 
             local = {"analyzeResult": {"tables": tables_filtradas}}
+
+            # Aqui usamos o parser com índices por defeito (0,2,3) para o template clássico
             amostras = parse_xylella_tables(local, context, req_id=bi+1)
+
             out[bi] = amostras or []
         except Exception as e:
             print(f"❌ Erro no bloco {bi+1}: {e}")
@@ -891,7 +904,7 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
     out = [req for req in out if req]
     print(f"\n🏁 Concluído: {len(out)} requisições com amostras extraídas (atribuição exclusiva).")
 
-    # 🔹 NOVO: devolve [{rows, expected}] para validação esperadas/processadas
+    # 🔹 Devolve [{rows, expected}] para validação esperadas/processadas
     results = []
     for bi, bloco in enumerate(blocos[:len(out)], start=1):
         ctx = extract_context_from_text(bloco)
@@ -901,6 +914,7 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
             "expected": expected
         })
     return results
+
 
 # ───────────────────────────────────────────────
 # Parser ICNF – "Prospeção de: Xylella fastidiosa em Zonas Demarcadas"
@@ -1350,6 +1364,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
