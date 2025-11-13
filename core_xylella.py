@@ -601,6 +601,15 @@ def extract_context_from_text(full_text: str) -> Dict[str, Any]:
                     declared = 0
 
     ctx["declared_samples"] = declared
+    
+    # 🔎 Novo template – Total: 27/35 amostras
+    m_total = re.search(r"Total\s*[:\-]?\s*\d+\s*/\s*([0-9]{1,4})\s*amostras", full_text, re.I)
+    if m_total:
+        try:
+            ctx["declared_samples"] = int(m_total.group(1))
+        except:
+            pass
+
     print(f"📊 Nº de amostras declaradas detetadas: {ctx['declared_samples']}")
 
     return ctx
@@ -1546,6 +1555,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
