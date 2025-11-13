@@ -418,51 +418,52 @@ def extract_context_from_text(full_text: str):
         ctx["zona"] = m_zona.group(1).strip() if m_zona else "Zona Isenta"
         ctx["template_tipo"] = "PROGRAMA_NACIONAL"
 
-        # ───────────────────────────────────────────────
-    # Entidade / DGAV + Técnico responsável
     # ───────────────────────────────────────────────
+    # Entidade + Técnico responsável (NOVO TEMPLATE)
+    # ───────────────────────────────────────────────
+    # Exemplo:
+    #   Entidade: DGAV Centro
+    #   Tecnico responsável: Marta Caetano e Sara Pinheiro
     
-    # 1) Novo template: "Entidade: DGAV Centro"
-    m_ent = re.search(r"Entidade\s*:\s*(.+)", full_text, re.I)
-    if m_ent:
-        entidade = m_ent.group(1).strip()
+    m_ent_new = re.search(r"Entidade\s*:\s*(.+)", full_text, re.I)
+    m_tecnico_new = re.search(r"T[ée]cnico\s+respons[aá]vel\s*:\s*(.+)", full_text, re.I)
+    
+    entidade = m_ent_new.group(1).strip() if m_ent_new else None
+    tecnico_resp = m_tecnico_new.group(1).strip() if m_tecnico_new else None
+    
+    # Se vier "Técnico responsável" colado ao texto da entidade (erro de OCR), removemos:
+    if entidade:
+        entidade = re.sub(r"T[ée]cnico\s+respons[aá]vel.*$", "", entidade, flags=re.I).strip()
+    
+    # Guardar no contexto
+    if entidade:
+        ctx["dgav"] = entidade                   # Vai para coluna G
     else:
-        entidade = None
+        ctx["dgav"] = None
     
-    # 2) Técnico responsável (novo template)
-    m_tecnico = re.search(r"T[ée]cnico\s+respons[aá]vel\s*:\s*(.+)", full_text, re.I)
-    tecnico_resp = m_tecnico.group(1).strip() if m_tecnico else None
+    ctx["responsavel_colheita"] = tecnico_resp   # Vai para coluna H
     
-    # Mantém a lógica anterior para DGAV, mas com fallback para "Entidade"
-    responsavel, dgav = None, None
-    m_hdr = re.search(
-        r"Amostra(?:s|\(s\))?\s*colhida(?:s|\(s\))?\s*por\s*DGAV\s*[:\-]?\s*(.*)",
-        full_text,
-        re.IGNORECASE,
-    )
-    if m_hdr:
-        tail = full_text[m_hdr.end():]
-        linhas = [m_hdr.group(1)] + tail.splitlines()
-        for ln in linhas[:4]:
-            ln = (ln or "").strip()
-            if ln:
-                responsavel = ln
-                break
-        if responsavel:
-            responsavel = re.sub(r"\S+@dgav\.pt|\S+@\S+", "", responsavel, flags=re.I)
-            responsavel = re.sub(r"PROGRAMA.*|Data.*|N[º°].*", "", responsavel, flags=re.I)
-            responsavel = re.sub(r"[:;,.\-–—]+$", "", responsavel).strip()
     
-    if responsavel:
-        dgav = f"DGAV {responsavel}".strip() if not re.match(r"^DGAV\b", responsavel, re.I) else responsavel
-    elif entidade:
-        dgav = entidade  # ex: "DGAV Centro"
-    else:
-        m_d = re.search(r"\bDGAV(?:\s+[A-Za-zÀ-ÿ?]+){1,4}", full_text)
-        dgav = re.sub(r"[:;,.\-–—]+$", "", m_d.group(0)).strip() if m_d else None
+    # ───────────────────────────────────────────────
+    # Compatibilidade COM O TEMPLATE ANTIGO (fallback)
+    # ───────────────────────────────────────────────
+    if not entidade:
+        # Antigo: "Amostra(s) colhida(s) por DGAV: XXXXXX"
+        m_hdr = re.search(
+            r"Amostra(?:s|\(s\))?\s*colhida(?:s|\(s\))?\s*por\s*DGAV\s*[:\-]?\s*(.*)",
+            full_text,
+            re.IGNORECASE,
+        )
+        if m_hdr:
+            responsavel_antigo = m_hdr.group(1).strip()
+            responsavel_antigo = re.sub(r"\S+@.+", "", responsavel_antigo)  # remove emails
+            responsavel_antigo = re.sub(r"Data.*", "", responsavel_antigo)
+            ctx["dgav"] = f"DGAV {responsavel_antigo}".strip()
     
-    ctx["dgav"] = dgav
-    ctx["responsavel_colheita"] = tecnico_resp  # no template novo vem daqui
+        if not tecnico_resp:
+            # Antigo não fornece técnico → manter vazio
+            ctx["responsavel_colheita"] = None
+
 
     # ───────────────────────────────────────────────
     # DGAV / Responsável pela colheita
@@ -1556,6 +1557,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
