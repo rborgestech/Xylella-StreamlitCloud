@@ -529,7 +529,14 @@ def extract_context_from_text(full_text: str):
     return ctx
 
 
-def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, Any]]:
+def parse_xylella_tables(
+    result_json,
+    context,
+    req_id=None,
+    col_ref: int = 0,
+    col_hosp: int = 2,
+    col_obs: int = 3,
+) -> List[Dict[str, Any]]:
     """Extrai as amostras das tabelas Azure OCR, aplicando o contexto da requisição."""
     out: List[Dict[str, Any]] = []
     tables = result_json.get("analyzeResult", {}).get("tables", [])
@@ -565,10 +572,10 @@ def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, An
             ]
             
             # Hospedeiro = 1ª coluna útil após referência
-            hospedeiro = cols_after_ref_clean[0] if len(cols_after_ref_clean) > 0 else ""
+            hospedeiro = row[col_hosp] if len(row) > col_hosp else ""
             
             # Observações = 2ª coluna útil após referência
-            obs = cols_after_ref_clean[1] if len(cols_after_ref_clean) > 1 else ""
+            obs = row[col_obs] if len(row) > col_obs else ""
 
 
             if _looks_like_natureza(hospedeiro):
@@ -1343,6 +1350,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
