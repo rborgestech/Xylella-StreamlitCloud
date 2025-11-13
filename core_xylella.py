@@ -686,6 +686,89 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
     return results
 
 # ───────────────────────────────────────────────
+# Parser ICNF – "Prospeção de: Xylella fastidiosa em Zonas Demarcadas"
+# ───────────────────────────────────────────────
+def parse_icnf_requisition(
+    result_json: Dict[str, Any],
+    full_text: str,
+    pdf_name: str,
+    txt_path: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """
+    Parser dedicado ao template ICNF / XF / Zonas Demarcadas.
+
+    Assume que o documento inteiro corresponde a 1 requisição
+    e que as linhas das amostras têm formato aproximado:
+
+        1 /XF/ICNFC/COV-FND/AC/25 Accacia dealbata Individual
+        2 /XF/ICNFC/COV-FND/AC/25 Pteridium aquilinium Composta 3
+    """
+
+    # Contexto base (data_envio, zona, etc.). Se não encontrar nada, usa defaults da função.
+    ctx = extract_context_from_text(full_text)
+    data_envio = ctx.get("data_envio", datetime.now().strftime("%d/%m/%Y"))
+    data_colheita = ctx.get("default_colheita", data_envio)
+
+    rows: List[Dict[str, Any]] = []
+
+    # Normalização leve de linhas
+    lines = full_text.replace("\t", " ").splitlines()
+
+    pattern = re.compile(
+        r"""
+        ^\s*
+        (?P<num>\d{1,3})                    # nº amostra
+        \s+
+        (?P<ref>/XF/[A-Z0-9\-\/]+)          # referência /XF/ICNFC/...
+        \s+
+        (?P<hosp>[A-Za-zÀ-ÿ\s\.\-]+?)       # hospedeiro
+        \s+
+        (?P<tipo>Individual|Composta\s*\d+) # tipo
+        \s*$
+        """,
+        flags=re.IGNORECASE | re.VERBOSE,
+    )
+
+    for ln in lines:
+        m = pattern.match(ln)
+        if not m:
+            continue
+
+        hosp = m.group("hosp").strip()
+        ref = m.group("ref").strip()
+        tipo_raw = m.group("tipo").strip()
+
+        tipo = "Individual"
+        m_comp = re.match(r"Composta\s*(\d+)", tipo_raw, flags=re.I)
+        if m_comp:
+            tipo = "Composta"
+
+        rows.append(
+            {
+                "requisicao_id": 1,
+                "datarececao": data_envio,
+                "datacolheita": data_colheita,
+                "referencia": ref,
+                "hospedeiro": hosp,
+                "tipo": tipo,
+                "zona": ctx.get("zona", ""),
+                "responsavelamostra": ctx.get("dgav", ""),
+                "responsavelcolheita": ctx.get("responsavel_colheita", ""),
+                "observacoes": "",
+                "procedure": "XYLELLA",
+                "datarequerido": data_envio,
+                "Score": "",
+            }
+        )
+
+    # nº de amostras declaradas → tenta usar lógica atual; se não encontrar, assume len(rows)
+    expected = ctx.get("declared_samples") or len(rows)
+
+    print(f"✅ [ICNF] Extraídas {len(rows)} amostras (esperadas: {expected}).")
+
+    return [{"rows": rows, "expected": expected}] if rows else []
+
+# ───────────────────────────────────────────────
 # Escrita no TEMPLATE — 1 ficheiro por requisição
 # ───────────────────────────────────────────────
 
@@ -933,7 +1016,21 @@ def process_pdf_sync(pdf_path: str) -> list[str]:
     print(f"📝 Texto OCR bruto guardado em: {txt_path}")
 
     # 3️⃣ Parser — dividir em requisições e extrair amostras
-    req_results = parse_all_requisitions(result_json, pdf_path, str(txt_path))
+    full_text = txt_path.read_text(encoding="utf-8")
+
+    text_lower = full_text.lower()
+    is_icnf_template = re.search(
+        r"prospe[cç][aã]o\s+de:?\s*xylella\s+fastidiosa\s+em\s+zonas\s+demarcadas",
+        text_lower,
+        flags=re.IGNORECASE,
+    ) is not None
+
+    if is_icnf_template:
+        print("🔎 [ICNF] Template 'Prospeção de: Xylella fastidiosa em Zonas Demarcadas' detetado.")
+        req_results = parse_icnf_requisition(result_json, full_text, pdf_path, str(txt_path))
+    else:
+        req_results = parse_all_requisitions(result_json, pdf_path, str(txt_path))
+
 
     valid_reqs = [req for req in req_results if req.get("rows")]
     total_amostras = sum(len(req["rows"]) for req in valid_reqs)
@@ -1036,6 +1133,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
