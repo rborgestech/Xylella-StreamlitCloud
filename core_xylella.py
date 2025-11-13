@@ -402,26 +402,16 @@ def _to_datetime(value: str):
 
 
 
-def extract_context_from_text(full_text: str) -> Dict[str, Any]:
-    """
-    Extrai informações gerais da requisição (zona, entidade, técnico responsável,
-    datas e nº de amostras declaradas).
-
-    Suporta:
-      • Template antigo DGAV (Programa nacional de Prospeção de pragas de quarentena)
-      • Template novo ICNF (Prospeção de: Xylella fastidiosa em Zonas Demarcadas)
-    """
-    ctx: Dict[str, Any] = {}
+def extract_context_from_text(full_text: str):
+    """Extrai informações gerais da requisição (zona, DGAV, datas, nº de amostras)."""
+    ctx = {}
 
     # ───────────────────────────────────────────────
-    # Zona (Zona demarcada OU (Zona Isenta))
+    # 🟩 1. Zona (ICNF "Zona demarcada:" OU DGAV "(Zona Isenta)")
     # ───────────────────────────────────────────────
     m_zd = re.search(r"Zona\s+demarcada\s*:\s*(.+)", full_text, re.I)
     if m_zd:
-        # até final da linha apenas
-        zona = m_zd.group(1).strip()
-        zona = zona.splitlines()[0].strip()
-        ctx["zona"] = zona
+        ctx["zona"] = m_zd.group(1).strip()
         ctx["template_tipo"] = "ZONAS_DEMARCADAS"
     else:
         m_zona = re.search(r"Xylella\s+fastidiosa\s*\(([^)]+)\)", full_text, re.I)
@@ -429,105 +419,82 @@ def extract_context_from_text(full_text: str) -> Dict[str, Any]:
         ctx["template_tipo"] = "PROGRAMA_NACIONAL"
 
     # ───────────────────────────────────────────────
-    # Entidade + Técnico responsável (template novo)
+    # 🟩 2. Entidade (ICNF)
+    # Ex: "Entidade: DGAV Centro"
     # ───────────────────────────────────────────────
     entidade = None
-    tecnico_resp = None
-
-    # Ex.: "Entidade: DGAV Centro"
     m_ent = re.search(r"Entidade\s*:\s*(.+)", full_text, re.I)
     if m_ent:
-        entidade_line = m_ent.group(1).strip()
-        entidade_line = entidade_line.splitlines()[0].strip()
+        entidade = m_ent.group(1).strip()
+        entidade = re.sub(r"T[ée]cnico\s+respons[aá]vel.*$", "", entidade, flags=re.I).strip()
 
-        # Se o OCR colar "Técnico responsável" na mesma linha, remove essa parte
-        entidade_line = re.sub(
-            r"T[ée]cnico\s+respons[aá]vel.*$",
-            "",
-            entidade_line,
-            flags=re.I,
-        ).strip()
+    # ───────────────────────────────────────────────
+    # 🟩 3. Técnico responsável (limpeza robusta)
+    # Ex OCR: "Técnico responsável: Marta Caetano e Sara Pinheiro Data envio..."
+    # ───────────────────────────────────────────────
+    tecnico_resp = None
 
-        if entidade_line:
-            entidade = entidade_line
-
-    # Ex.: "Técnico responsável: Marta Caetano e Sara Pinheiro"
-    m_tecnico = re.search(r"T[ée]cnico\s+respons[aá]vel\s*:\s*(.+)", full_text, re.I)
+    m_tecnico = re.search(
+        r"T[ée]cnico\s+respons[aá]vel\s*:\s*(.+?)(?:\n|$|Data\s+envio|Ref[ºª]|Hospedeiro|Tipo\s+amostra)",
+        full_text,
+        flags=re.I | re.S,
+    )
     if m_tecnico:
-        tecnico_line = m_tecnico.group(1).strip()
-        tecnico_resp = tecnico_line.splitlines()[0].strip()
+        tecnico_resp = m_tecnico.group(1).strip()
+        # Remover resíduos que porventura o OCR tenha colado
+        tecnico_resp = re.sub(r"(Data\s+.*)$", "", tecnico_resp, flags=re.I).strip()
+        tecnico_resp = re.sub(r"(Ref[ºª].*)$", "", tecnico_resp, flags=re.I).strip()
+        tecnico_resp = re.sub(r"(Hospedeiro.*)$", "", tecnico_resp, flags=re.I).strip()
+        tecnico_resp = re.sub(r"(Tipo\s+amostra.*)$", "", tecnico_resp, flags=re.I).strip()
 
+    # Guardar
     if entidade:
-        ctx["dgav"] = entidade           # vai para a coluna G
-    if tecnico_resp:
-        ctx["responsavel_colheita"] = tecnico_resp  # vai para a coluna H
+        ctx["dgav"] = entidade
+    ctx["responsavel_colheita"] = tecnico_resp
 
     # ───────────────────────────────────────────────
-    # Fallback DGAV (template antigo)
+    # 🟩 4. Fallback DGAV antigo ("Amostra colhida por DGAV: X")
     # ───────────────────────────────────────────────
-    if not ctx.get("dgav"):
-        # Ex.: "Amostra(s) colhida(s) por DGAV: LVT – Caldas da Rainha"
+    if not entidade:
         m_hdr = re.search(
-            r"Amostra(?:s|\(s\))?\s*colhida(?:s|\(s\))?\s*por\s*DGAV\s*[:\-]?\s*([^\n]+)",
+            r"Amostra(?:s|\(s\))?\s*colhida(?:s|\(s\))?\s*por\s*DGAV\s*[:\-]?\s*(.*)",
             full_text,
             re.IGNORECASE,
         )
-        responsavel = None
         if m_hdr:
             responsavel = m_hdr.group(1).strip()
-            responsavel = re.sub(r"\S+@\S+", "", responsavel, flags=re.I)
-            responsavel = re.sub(r"PROGRAMA.*|Data.*|N[º°].*", "", responsavel, flags=re.I)
-            responsavel = re.sub(r"[:;,.\-–—]+$", "", responsavel).strip()
+            responsavel = re.sub(r"\S+@\S+", "", responsavel).strip()
+            responsavel = re.sub(r"Data.*", "", responsavel, flags=re.I).strip()
+            if responsavel:
+                ctx["dgav"] = f"DGAV {responsavel}".strip()
 
-        if responsavel:
-            if re.match(r"^DGAV\b", responsavel, re.I):
-                dgav = responsavel
-            else:
-                dgav = f"DGAV {responsavel}".strip()
-            ctx["dgav"] = dgav
-        else:
-            # último recurso: primeira ocorrência de "DGAV xxxx"
-            m_d = re.search(r"\bDGAV(?:\s+[A-Za-zÀ-ÿ?]+){1,4}", full_text)
-            if m_d:
-                ctx["dgav"] = re.sub(r"[:;,.\-–—]+$", "", m_d.group(0)).strip()
-
-    # Se ainda não houver técnico no template antigo, fica vazio
-    if "responsavel_colheita" not in ctx:
-        ctx["responsavel_colheita"] = None
+        if not tecnico_resp:
+            ctx["responsavel_colheita"] = None
 
     # ───────────────────────────────────────────────
-    # Datas de colheita (mapeamento com asteriscos, se existir)
+    # 🟩 5. Data de colheita das amostras (NOVO TEMPLATE)
+    # Ex: "Data colheita das amostras: 3/11/2025"
     # ───────────────────────────────────────────────
-    colheita_map: Dict[str, str] = {}
-    for m in re.finditer(r"(\d{1,2}/\d{1,2}/\d{4})\s*\(\s*(\*+)\s*\)", full_text):
-        colheita_map[f"({m.group(2).replace(' ', '')})"] = m.group(1)
+    m_col_fim = re.search(r"Data\s+colheita\s+das\s+amostras\s*[:\-]?\s*([0-9/\-\s]+)", full_text, re.I)
+    if m_col_fim:
+        ctx["default_colheita"] = normalize_date_str(m_col_fim.group(1))
 
-    if not colheita_map:
-        # Ex.: "Data de colheita: 22/10/2025"
-        m_simple = re.search(
-            r"Data\s+de\s+colheita\s*[:\-\s]*([0-9/\-\s]+)",
-            full_text,
-            re.I,
-        )
+    # Caso não exista esta linha, usa fallback do código existente
+    if "default_colheita" not in ctx:
+        m_simple = re.search(r"Data\s+de\s+colheita\s*[:\-\s]*([0-9/\-\s]+)", full_text, re.I)
         if m_simple:
-            only_date = re.sub(r"\s+", "", m_simple.group(1))
-            for key in ("(*)", "(**)", "(***)"):
-                colheita_map[key] = only_date
-
-    default_colheita = normalize_date_str(next(iter(colheita_map.values()), ""))
-    ctx["colheita_map"] = colheita_map
-    ctx["default_colheita"] = default_colheita
+            ctx["default_colheita"] = normalize_date_str(m_simple.group(1))
+        else:
+            ctx["default_colheita"] = ""
 
     # ───────────────────────────────────────────────
-    # Data de envio ao laboratório
+    # 🟩 6. Data de envio ao laboratório
     # ───────────────────────────────────────────────
-    # 1) Novo template: "Data envio amostras ao laboratório: 6/11/2025"
     m_envio = re.search(
         r"Data\s+envio\s+amostras\s+ao\s+laborat[oó]rio\s*[:\-\s]*([0-9/\-\s]+)",
         full_text,
         re.I,
     )
-    # 2) Antigo: "Data do envio ao laboratório: 27 / 10 /2025"
     if not m_envio:
         m_envio = re.search(
             r"Data\s+(?:do|de)\s+envio(?:\s+ao\s+laborat[oó]rio)?[:\-\s]*([0-9/\-\s]+)",
@@ -537,80 +504,36 @@ def extract_context_from_text(full_text: str) -> Dict[str, Any]:
 
     if m_envio:
         ctx["data_envio"] = normalize_date_str(m_envio.group(1))
-    elif default_colheita:
-        ctx["data_envio"] = default_colheita
     else:
-        ctx["data_envio"] = datetime.now().strftime("%d/%m/%Y")
+        ctx["data_envio"] = ctx.get("default_colheita", "") or datetime.now().strftime("%d/%m/%Y")
 
     # ───────────────────────────────────────────────
-    # Nº de amostras declaradas (robusto a OCR)
+    # 🟩 7. Nº de amostras — NOVO FORMATO (Total: 27/35 amostras)
     # ───────────────────────────────────────────────
-    print("\n──────── OCR RAW EXCERPT ────────")
-    sample_zone = re.findall(r"(N.?amostras?.{0,40})", full_text, flags=re.I)
-    for s in sample_zone:
-        print("👉", s)
-    print("────────────────────────────────\n")
-
-    flat = re.sub(r"[\u00A0_\s]+", " ", full_text)  # normaliza espaços e underscores
-    flat = flat.replace("–", "-").replace("—", "-")
-
-    patterns = [
-        r"N[º°o]?\s*de\s*amostras(?:\s+neste\s+env[i1]o)?[\s:.\-]*([0-9OoQIl]{1,4})\b",
-        r"N[º°o]?\s*amostras.*?([0-9OoQIl]{1,4})\b",
-        r"amostras\s*(?:neste\s+env[i1]o)?\s*[:\-]?\s*([0-9OoQIl]{1,4})\b",
-        r"n\s*[º°o]?\s*de\s*amostras.*?([0-9OoQIl]{1,4})\b",
-        r"N\s*amostras.*?([0-9OoQIl]{1,4})\b",
-        r"N.*?amostras.*?([0-9OoQIl]{1,4})\b",
-    ]
-
-    found = None
-    for pat in patterns:
-        m_decl = re.search(pat, flat, re.I)
-        if m_decl:
-            found = m_decl.group(1)
-            break
-
-    declared = 0
-    if found:
-        raw = found.strip()
-        raw = (
-            raw.replace("O", "0").replace("o", "0")
-               .replace("Q", "0").replace("q", "0")
-               .replace("I", "1").replace("l", "1")
-               .replace("|", "1").replace("B", "8")
-        )
-        try:
-            declared = int(raw)
-        except ValueError:
-            declared = 0
-    else:
-        m_line = re.search(r"(N[º°o]?\s*de\s*amostras[^\n]*)", full_text, re.I)
-        if m_line:
-            line = re.sub(r"[_\s]+", " ", m_line.group(1))
-            m_num = re.search(r"([0-9OoQIl]{1,4})(?!\s*/)\b", line)
-            if m_num:
-                raw = m_num.group(1)
-                raw = (
-                    raw.replace("O", "0").replace("o", "0")
-                       .replace("Q", "0").replace("q", "0")
-                       .replace("I", "1").replace("l", "1")
-                )
-                try:
-                    declared = int(raw)
-                except ValueError:
-                    declared = 0
-
-    ctx["declared_samples"] = declared
-    
-    # 🔎 Novo template – Total: 27/35 amostras
     m_total = re.search(r"Total\s*[:\-]?\s*\d+\s*/\s*([0-9]{1,4})\s*amostras", full_text, re.I)
     if m_total:
         try:
             ctx["declared_samples"] = int(m_total.group(1))
         except:
-            pass
-
-    print(f"📊 Nº de amostras declaradas detetadas: {ctx['declared_samples']}")
+            ctx["declared_samples"] = 0
+    else:
+        # fallback antigo
+        ctx["declared_samples"] = 0
+        flat = re.sub(r"[\u00A0_\s]+", " ", full_text)
+        patterns = [
+            r"N[º°o]?\s*de\s*amostras.*?([0-9OoQIl]{1,4})\b",
+            r"N[º°o]?\s*amostras.*?([0-9OoQIl]{1,4})\b",
+        ]
+        for pat in patterns:
+            m = re.search(pat, flat, re.I)
+            if m:
+                raw = m.group(1)
+                raw = raw.replace("O", "0").replace("o", "0").replace("Q", "0").replace("I", "1")
+                try:
+                    ctx["declared_samples"] = int(raw)
+                except:
+                    pass
+                break
 
     return ctx
 
@@ -1543,6 +1466,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
