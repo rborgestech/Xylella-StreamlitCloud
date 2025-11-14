@@ -309,15 +309,15 @@ def split_if_multiple_requisicoes(full_text: str) -> List[str]:
     blocos = []
 
     for i in range(len(marks) - 1):
-        # o bloco começa EXACTAMENTE no cabeçalho, sem lixo anterior
+        # bloco começa EXACTAMENTE no cabeçalho detectado
         start = marks[i]
 
-        # apenas um pequeno padding no final (20 chars) para capturar tudo
-        end = min(len(text), marks[i + 1] + 20)
+        # bloco termina EXACTAMENTE antes do cabeçalho seguinte
+        end = marks[i + 1]
 
         bloco = text[start:end].strip()
 
-        if len(bloco) > 100:   # ICNF tem sempre blocos grandes
+        if len(bloco) > 100:   # ICNF e DGAV têm sempre blocos grandes
             blocos.append(bloco)
         else:
             print(f"⚠️ Bloco {i+1} demasiado pequeno ({len(bloco)} chars).")
@@ -1605,6 +1605,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
