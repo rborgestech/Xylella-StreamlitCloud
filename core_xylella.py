@@ -623,9 +623,9 @@ def extract_context_from_text(full_text: str):
                 
         # a0) DGAV – Formato: "Nº de amostras neste envio: 4"
         m_envio = re.search(
-            r"N[º°o]?\s*de\s*amostras\s+neste\s+envio\s*[:\-]?\s*([0-9]{1,4})",
+            r"N[º°o]?\s*de\s*amostras\s+neste\s+envio\s*[:\-]?\s*[_\s]*([0-9]{1,4})",
             full_text,
-            re.I,
+            flags=re.I,
         )
         if m_envio:
             try:
@@ -1592,6 +1592,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
