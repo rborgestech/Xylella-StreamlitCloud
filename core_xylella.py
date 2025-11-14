@@ -1034,26 +1034,23 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
     # ───────────────────────────────────────────────
     if count <= 1:
         context = extract_context_from_text(full_text)
-
-        # ⭐ CASO ESPECIAL: ICNF / ZONAS DEMARCADAS
-        # Se o contexto disser que é ZONAS_DEMARCADAS ou o cabeçalho for de Zonas Demarcadas,
-        # ignoramos COMPLETAMENTE as tabelas e usamos o parser vertical dedicado.
-        if context.get("template_tipo") == "ZONAS_DEMARCADAS" or is_icnf:
+    
+        # ⭐ USAR APENAS informação do parseador para decidir ICNF-ZONAS
+        if context.get("template_tipo") == "ZONAS_DEMARCADAS":
             print("🟦 Parser ICNF-Zonas: ignorar tabelas, usar parser vertical real (parse_icnf_zonas).")
             rows = parse_icnf_zonas(full_text, context, req_id=1)
             expected = context.get("declared_samples", len(rows))
             return [{"rows": rows, "expected": expected}] if rows else []
-
-        # 🟢 CASO NORMAL (DGAV, ICNF antigo, etc.) → usa tabelas primeiro
+    
+        # DGAV normal → tabelas
         amostras = parse_xylella_tables(result_json, context, req_id=1)
-
-        # Fallback: se não vier nada das tabelas, usar parser baseado em texto (linhas)
         if not amostras:
-            print("⚠️ Nenhuma amostra via tables — a usar fallback de texto (DGAV-style).")
+            print("⚠️ Nenhuma amostra via tables — a usar fallback de texto.")
             amostras = parse_xylella_from_text_block(full_text, context, req_id=1)
-
+    
         expected = context.get("declared_samples", len(amostras))
         return [{"rows": amostras, "expected": expected}] if amostras else []
+
 
     # ───────────────────────────────────────────────
     # MÚLTIPLAS REQUISIÇÕES — segmentar por cabeçalhos
@@ -1582,6 +1579,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
