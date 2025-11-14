@@ -778,7 +778,7 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
     is_icnf = icnf_pattern.search(full_text) is not None
 
     # ───────────────────────────────────────────────
-    # Caminho normal (template antigo DGAV)
+    # Caminho normal (template antigo DGAV / ICNF)
     # ───────────────────────────────────────────────
     # Detetar nº de requisições
     count, _ = detect_requisicoes(full_text)
@@ -787,20 +787,21 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
     # Caso simples (1 requisição)
     if count <= 1:
         context = extract_context_from_text(full_text)
-    
+
         # 1º tentar via tabelas (comportamento original)
         amostras = parse_xylella_tables(result_json, context, req_id=1)
-    
+
         # Fallback: se não vier nada das tabelas, usar parser baseado em texto (linhas)
         if not amostras:
             print("⚠️ Nenhuma amostra via tables — a usar fallback de texto.")
             amostras = parse_xylella_from_text_block(full_text, context, req_id=1)
-    
+
         expected = context.get("declared_samples", len(amostras))
         return [{"rows": amostras, "expected": expected}] if amostras else []
 
-
+    # ───────────────────────────────────────────────
     # Múltiplas requisições — segmentar por cabeçalhos
+    # ───────────────────────────────────────────────
     blocos = split_if_multiple_requisicoes(full_text)
     num_blocos = len(blocos)
     out: List[List[Dict[str, Any]]] = [[] for _ in range(num_blocos)]
@@ -810,14 +811,17 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
     for i, bloco in enumerate(blocos, start=1):
         refs_bloco = re.findall(
             r"\b\d{1,3}/[A-Z]{0,2}/DGAV(?:-[A-Z0-9/]+)?|\b\d{2,4}/\d{2,4}/[A-Z0-9\-]+",
-            bloco, re.I
+            bloco,
+            re.I,
         )
         refs_bloco = [r.strip() for r in refs_bloco if len(r.strip()) > 4]
         print(f"   ↳ Bloco {i}: {len(refs_bloco)} referências detectadas")
         refs_por_bloco.append(refs_bloco)
 
     # Pré-calcular texto de cada tabela
-    table_texts = [" ".join(c.get("content", "") for c in t.get("cells", [])) for t in all_tables]
+    table_texts = [
+        " ".join(c.get("content", "") for c in t.get("cells", [])) for t in all_tables
+    ]
 
     # Atribuição exclusiva de tabelas por bloco
     assigned_to: List[int] = [-1] * len(all_tables)
@@ -842,44 +846,49 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
 
     # Construir amostras por bloco com base na atribuição
     for bi in range(num_blocos):
-    try:
-        context = extract_context_from_text(blocos[bi])
-        tables_filtradas = [all_tables[ti] for ti in range(len(all_tables)) if assigned_to[ti] == bi]
-        if not tables_filtradas:
-            print(f"⚠️ Bloco {bi+1}: sem tabelas atribuídas (usar todas como fallback).")
-            tables_filtradas = all_tables
+        try:
+            context = extract_context_from_text(blocos[bi])
+            tables_filtradas = [
+                all_tables[ti]
+                for ti in range(len(all_tables))
+                if assigned_to[ti] == bi
+            ]
+            if not tables_filtradas:
+                print(f"⚠️ Bloco {bi+1}: sem tabelas atribuídas (usar todas como fallback).")
+                tables_filtradas = all_tables
 
-        local = {"analyzeResult": {"tables": tables_filtradas}}
-        amostras = parse_xylella_tables(local, context, req_id=bi+1)
-        
-        if not amostras:
-            print(f"⚠️ Bloco {bi+1}: tables vazias — a usar fallback de texto.")
-            amostras = parse_xylella_from_text_block(blocos[bi], context, req_id=bi+1)
-        
-        out[bi] = amostras or []
-    except Exception as e:
-        print(f"❌ Erro no bloco {bi+1}: {e}")
-        out[bi] = []
+            local = {"analyzeResult": {"tables": tables_filtradas}}
+            amostras = parse_xylella_tables(local, context, req_id=bi + 1)
 
-# ---------------------------------------------------------
-#  ⬇️  SUBSTITUIR tudo o que estava A SEGUIR por ESTE BLOCO
-# ---------------------------------------------------------
+            if not amostras:
+                print(f"⚠️ Bloco {bi+1}: tables vazias — a usar fallback de texto.")
+                amostras = parse_xylella_from_text_block(
+                    blocos[bi], context, req_id=bi + 1
+                )
 
-# Remover blocos vazios no fim (mantém ordenação)
-out = [req for req in out if req]
-print(f"\n🏁 Concluído: {len(out)} requisições com amostras extraídas (atribuição exclusiva).")
+            out[bi] = amostras or []
+        except Exception as e:
+            print(f"❌ Erro no bloco {bi+1}: {e}")
+            out[bi] = []
 
-# 🔹 Devolve [{rows, expected}] para validação esperadas/processadas
-results = []
-for bi, bloco in enumerate(blocos[:len(out)], start=1):
-    ctx = extract_context_from_text(bloco)
-    expected = ctx.get("declared_samples") or len(out[bi - 1])
-    results.append({
-        "rows": out[bi - 1],
-        "expected": expected,
-    })
+    # Remover blocos vazios no fim (mantém ordenação)
+    out = [req for req in out if req]
+    print(f"\n🏁 Concluído: {len(out)} requisições com amostras extraídas (atribuição exclusiva).")
 
-return results
+    # 🔹 Devolve [{rows, expected}] para validação esperadas/processadas
+    results: List[Dict[str, Any]] = []
+    for bi, bloco in enumerate(blocos[: len(out)], start=1):
+        ctx = extract_context_from_text(bloco)
+        expected = ctx.get("declared_samples") or len(out[bi - 1])
+        results.append(
+            {
+                "rows": out[bi - 1],
+                "expected": expected,
+            }
+        )
+
+    return results
+
 
 
 
@@ -1318,6 +1327,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
