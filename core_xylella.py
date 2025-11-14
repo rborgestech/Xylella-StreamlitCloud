@@ -620,6 +620,18 @@ def extract_context_from_text(full_text: str):
                 ctx["declared_samples"] = int(matches_simple[-1])
             except Exception:
                 ctx["declared_samples"] = 0
+                
+        # a0) DGAV – Formato: "Nº de amostras neste envio: 4"
+        m_envio = re.search(
+            r"N[º°o]?\s*de\s*amostras\s+neste\s+envio\s*[:\-]?\s*([0-9]{1,4})",
+            full_text,
+            re.I,
+        )
+        if m_envio:
+            try:
+                ctx["declared_samples"] = int(m_envio.group(1))
+            except:
+                ctx["declared_samples"] = 0
 
     # c) Fallback antigo (Nº de amostras ...)
     if ctx["declared_samples"] == 0:
@@ -1580,6 +1592,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
