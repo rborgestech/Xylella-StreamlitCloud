@@ -530,32 +530,33 @@ def extract_context_from_text(full_text: str):
     # ───────────────────────────────────────────────
     # 🟩 7. Nº de amostras — vários formatos
     #  a) Novo formato DGAV: "Total: 27/35 amostras"
-    #  b) ICNF: "Total:\n30" (ou "Total: 30")
+    #  b) ICNF: "Total:\n30\nAmostras" ou "Total: 30"
     #  c) Fallback antigo: "Nº de amostras ..."
     # ───────────────────────────────────────────────
     ctx["declared_samples"] = 0
 
-    # a) "Total: 27/35 amostras" → ficamos com o 2.º número (35)
-    m_total = re.search(
+    # a) "Total: 27/35 amostras" → usar SEMPRE o ÚLTIMO match do bloco
+    matches_frac = re.findall(
         r"Total\s*[:\-]?\s*\d+\s*/\s*([0-9]{1,4})\s*amostras",
         full_text,
         re.I,
     )
-    if m_total:
+    if matches_frac:
         try:
-            ctx["declared_samples"] = int(m_total.group(1))
+            ctx["declared_samples"] = int(matches_frac[-1])
         except Exception:
             ctx["declared_samples"] = 0
-    else:
-        # b) "Total:\s*30" ou "Total: 30 amostras"
-        m_total_simple = re.search(
+
+    if ctx["declared_samples"] == 0:
+        # b) "Total:\n30\nAmostras" ou "Total: 30" → usar o ÚLTIMO match
+        matches_simple = re.findall(
             r"Total\s*[:\-]?\s*([0-9]{1,4})\s*(?:amostras)?\b",
             full_text,
             re.I,
         )
-        if m_total_simple:
+        if matches_simple:
             try:
-                ctx["declared_samples"] = int(m_total_simple.group(1))
+                ctx["declared_samples"] = int(matches_simple[-1])
             except Exception:
                 ctx["declared_samples"] = 0
 
@@ -1414,6 +1415,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
