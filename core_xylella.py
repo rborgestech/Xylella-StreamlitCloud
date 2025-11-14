@@ -784,14 +784,14 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
     if count <= 1:
         context = extract_context_from_text(full_text)
     
-        # 🔵 ICNF → usar parser vertical exclusivo
-        if "ICNF" in full_text.upper() or "ZONA DEMARCADA" in full_text.upper():
+        # 🔵 ICNF — parser vertical exclusivo
+        if "ENTIDADE: ICNF" in full_text.upper().replace(" ", "") or "ICNF" in full_text and "ZONA DEMARCADA" in full_text.upper():
             print("🟦 Detetado ICNF — Parser vertical ativado.")
             rows = parse_icnf_zonas(full_text, context, req_id=1)
             expected = context.get("declared_samples", len(rows))
             return [{"rows": rows, "expected": expected}]
     
-        # 🔶 DGAV → usar parser por tabelas (intacto)
+        # 🔶 DGAV — parser normal de tabelas
         amostras = parse_xylella_tables(result_json, context, req_id=1)
         expected = context.get("declared_samples", len(amostras))
         return [{"rows": amostras, "expected": expected}]
@@ -1219,6 +1219,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
