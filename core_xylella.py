@@ -836,10 +836,12 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
     # ------------------------------------------------------------
     # 🔎 DETEÇÃO ISOLADA DO TEMPLATE ICNF (SEM MEXER NO DGAV)
     # ------------------------------------------------------------
-    is_icnf = (
-        ("Entidade: ICNF" in full_text.replace(" ", "")) or 
-        ("ICNF" in full_text and "/XF/ICNF" in full_text.upper())
-    )
+    # ⚠️ A deteção ICNF antiga estava errada e ativava ICNF só porque aparecia "icnf.pt" nos emails.
+    # Agora ICNF só é verdadeiro quando a ENTIDADE é ICNF.
+    
+    m_entidade = re.search(r"Entidade\s*:\s*(.+)", full_text, re.I)
+    entidade_txt = m_entidade.group(1).strip() if m_entidade else ""
+    is_icnf = "ICNF" in entidade_txt.upper() and not "DGAV" in entidade_txt.upper()
 
     # ------------------------------------------------------------
     # 🟦 ICNF → parser totalmente separado, SEM usar tabelas
@@ -1305,6 +1307,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
