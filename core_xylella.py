@@ -595,6 +595,65 @@ def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, An
     print(f"✅ {len(out)} amostras extraídas no total (req_id={req_id}).")
     return out
 
+def parse_icnf_zonas(full_text: str, ctx: dict, req_id: int = 1) -> List[Dict[str, Any]]:
+    """
+    Parser vertical para ICNF / Zonas Demarcadas.
+    Extrai (referência, hospedeiro, tipo) linha a linha, ignorando tabelas do Azure.
+    """
+    linhas = [l.strip() for l in full_text.splitlines() if l.strip()]
+    out = []
+
+    # Padrão ICNF referência
+    re_ref = re.compile(r"^\d{1,3}\s*/\s*XF/[A-Z0-9\-/]+", re.I)
+
+    pend_ref = None
+
+    for ln in linhas:
+        # Junta "3" com "/XF/..."
+        ln = re.sub(r"(\d{1,3})\s*/\s*(XF)", r"\1 /XF", ln, flags=re.I)
+
+        # Novo bloco começa por referência
+        if re_ref.match(ln):
+            pend_ref = _clean_ref(ln)
+            continue
+
+        # Se tínhamos uma referência e agora vem o hospedeiro
+        if pend_ref:
+            hosp = ln.strip()
+
+            # Tipo → simples/composta/individual
+            tipo = ""
+            m_tipo = re.search(r"(Simples|Composta|Composto|Individual)", ln, re.I)
+            if m_tipo:
+                tipo = m_tipo.group(1).capitalize()
+                hosp = hosp[: m_tipo.start()].strip()
+
+            # extrair "Composta 3" → "Composta"
+            m_n = re.search(r"Compost[ao]?\s*\(?(\d+)\)?", ln, re.I)
+            if not tipo and m_n:
+                tipo = "Composta"
+
+            out.append({
+                "requisicao_id": req_id,
+                "datarececao": ctx["data_envio"],
+                "datacolheita": ctx.get("default_colheita",""),
+                "referencia": pend_ref,
+                "hospedeiro": hosp,
+                "tipo": tipo,
+                "zona": ctx.get("zona",""),
+                "responsavelamostra": ctx.get("entidade","ICNF"),
+                "responsavelcolheita": ctx.get("tecnico",""),
+                "observacoes": "",
+                "procedure": "XYLELLA",
+                "datarequerido": ctx.get("data_envio",""),
+                "Score": ""
+            })
+
+            pend_ref = None
+
+    print(f"🟦 parse_icnf_zonas: {len(out)} amostras ICNF extraídas (req_id={req_id})")
+    return out
+
 # ───────────────────────────────────────────────
 # Dividir em requisições e extrair por bloco
 # ───────────────────────────────────────────────
@@ -1072,6 +1131,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
