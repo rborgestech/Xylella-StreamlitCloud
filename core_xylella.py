@@ -584,6 +584,7 @@ def extract_context_from_text(full_text: str):
 
 
 
+
 def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, Any]]:
     """Extrai as amostras das tabelas Azure OCR, aplicando o contexto da requisição."""
     out: List[Dict[str, Any]] = []
@@ -1218,6 +1219,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
