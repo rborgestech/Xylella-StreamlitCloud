@@ -1035,7 +1035,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"📦 ZIP final criado: {zip_path}")
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
-    return str(zip_path) este código que partilho garante o funcionamento pleno do DGAV. Como integro o novo template sem colidir com este desenvolvimento? 
+    return str(zip_path)
 
 
 
