@@ -946,16 +946,20 @@ def parse_xylella_tables(
             #   linha N   → "3"          ""      ...
             #   linha N+1 → ""   "/XF/ICNF-..."  ...
             prev_row = grid[row_index - 1] if row_index > 0 else None
-            if (
-                prev_row
-                and len(prev_row) > 0
-                and re.fullmatch(r"\d{1,3}", (prev_row[0] or "").strip())  # contador em cima
-                and (row[0] is None or str(row[0]).strip() == "")           # 1.ª célula vazia agora
-                and any(isinstance(c, str) and "/XF/" in c for c in row)    # esta linha tem /XF/
-                and not any(isinstance(c, str) and "/XF/" in c for c in prev_row)  # em cima não tinha /XF/
-            ):
-                # a referência desta linha já foi usada em prev_row + next_row ⇒ saltar
-                continue
+
+            # 🚫 Lógica de “linha partida” (contador em cima, /XF/ em baixo)
+            # 👉 Só se aplica ao ICNF / Zonas Demarcadas
+            if is_icnf:
+                if (
+                    prev_row
+                    and len(prev_row) > 0
+                    and re.fullmatch(r"\d{1,3}", (prev_row[0] or "").strip())  # contador na linha de cima
+                    and (row[0] is None or str(row[0]).strip() == "")           # primeira célula desta linha vazia
+                    and any(isinstance(c, str) and "/XF/" in c for c in row)    # esta linha traz /XF/
+                    and not any(isinstance(c, str) and "/XF/" in c for c in prev_row)  # a de cima não tinha /XF/
+                ):
+                    # Esta linha é apenas o “resto” da referência que já foi juntada com o contador
+                    continue
 
             # referência (com lógica de merge)
             next_row = grid[row_index + 1] if row_index + 1 < nr else None
@@ -1594,6 +1598,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
