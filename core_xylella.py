@@ -403,71 +403,112 @@ def _to_datetime(value: str):
 
 
 def extract_context_from_text(full_text: str):
-    ctx = {}
+    """Extrai informações gerais da requisição (zona, DGAV/ICNF, datas, nº de amostras)."""
+    ctx: Dict[str, Any] = {}
 
-    # 1) Zona demarcada (ICNF)
-    m_zd = re.search(r"Zona\s+demarcada\s*:\s*(.+)", full_text, re.I)
+    # ───────────────────────────────────────────────
+    # 🟩 1. Zona (ICNF "Zona demarcada:" OU DGAV "(Zona Isenta)")
+    #    → parar em 'Entidade:', 'Técnico', 'Data...' ou fim de linha
+    # ───────────────────────────────────────────────
+    m_zd = re.search(
+        r"Zona\s+demarcada\s*:\s*(.+?)(?:\n|Entidade\s*:|T[ée]cnico\s+respons[aá]vel|Data\s+de\s+envio|Ref[ºª]?\s*da\s*amostra|$)",
+        full_text,
+        re.I | re.S,
+    )
     if m_zd:
         ctx["zona"] = m_zd.group(1).strip()
-        ctx["template_tipo"] = "ICNF"
+        ctx["template_tipo"] = "ZONAS_DEMARCADAS"
     else:
-        # Template antigo (DGAV)
         m_zona = re.search(r"Xylella\s+fastidiosa\s*\(([^)]+)\)", full_text, re.I)
         ctx["zona"] = m_zona.group(1).strip() if m_zona else "Zona Isenta"
-        ctx["template_tipo"] = "DGAV"
+        ctx["template_tipo"] = "PROGRAMA_NACIONAL"
 
-    # 2) Entidade (ICNF)
+    # ───────────────────────────────────────────────
+    # 🟩 2. Entidade (DGAV / ICNF)
+    # ───────────────────────────────────────────────
     entidade = None
     m_ent = re.search(r"Entidade\s*:\s*(.+)", full_text, re.I)
     if m_ent:
         entidade = m_ent.group(1).strip()
         entidade = re.sub(r"T[ée]cnico\s+respons[aá]vel.*$", "", entidade, flags=re.I).strip()
 
-    # 3) Técnico responsável (limpeza muito robusta)
+    # ───────────────────────────────────────────────
+    # 🟩 3. Técnico responsável
+    # ───────────────────────────────────────────────
     tecnico_resp = None
     m_tecnico = re.search(
-        r"T[ée]cnico\s+respons[aá]vel\s*:\s*(.+?)(?:\n|$|Data\s+envio|Data\s+colheita|Total\s*:)",
+        r"T[ée]cnico\s+respons[aá]vel\s*:\s*(.+?)(?:\n|$|Data\s+envio|Ref[ºª]|Hospedeiro|Tipo\s+amostra)",
         full_text,
         flags=re.I | re.S,
     )
     if m_tecnico:
-        tecnico_resp = (
-            m_tecnico.group(1)
-            .replace("\n", " ")
-            .strip()
-        )
+        tecnico_resp = m_tecnico.group(1).strip()
         tecnico_resp = re.sub(r"(Data\s+.*)$", "", tecnico_resp, flags=re.I).strip()
+        tecnico_resp = re.sub(r"(Ref[ºª].*)$", "", tecnico_resp, flags=re.I).strip()
+        tecnico_resp = re.sub(r"(Hospedeiro.*)$", "", tecnico_resp, flags=re.I).strip()
+        tecnico_resp = re.sub(r"(Tipo\s+amostra.*)$", "", tecnico_resp, flags=re.I).strip()
 
-    # guardar entidade e técnico
     if entidade:
         ctx["dgav"] = entidade
     ctx["responsavel_colheita"] = tecnico_resp
 
     # Fallback DGAV antigo
     if not entidade:
-        m_hdr = re.search(r"Amostra.*por\s*DGAV\s*[:\-]?\s*(.*)", full_text, re.I)
+        m_hdr = re.search(
+            r"Amostra(?:s|\(s\))?\s*colhida(?:s|\(s\))?\s*por\s*DGAV\s*[:\-]?\s*(.*)",
+            full_text,
+            re.IGNORECASE,
+        )
         if m_hdr:
-            resp = re.sub(r"\S+@\S+", "", m_hdr.group(1)).strip()
-            ctx["dgav"] = f"DGAV {resp}"
-        if not ctx.get("responsavel_colheita"):
+            responsavel = m_hdr.group(1).strip()
+            responsavel = re.sub(r"\S+@\S+", "", responsavel).strip()
+            responsavel = re.sub(r"Data.*", "", responsavel, flags=re.I).strip()
+            if responsavel:
+                ctx["dgav"] = f"DGAV {responsavel}".strip()
+
+        if not tecnico_resp:
             ctx["responsavel_colheita"] = None
 
-    # 4) Data de colheita — NOVO ICNF (no fim da página)
-    m_col_fim = re.search(r"Data\s+colheita\s+das\s+amostras\s*:\s*([0-9/\- ]+)", full_text, re.I)
-    if m_col_fim:
-        ctx["default_colheita"] = normalize_date_str(m_col_fim.group(1))
+    # ───────────────────────────────────────────────
+    # 🟩 4. Data de colheita / recolha das amostras
+    #    Suporta:
+    #      • "Data colheita das amostras: 3/11/2025"
+    #      • "Datas de recolha de amostras: 04-11-2025"
+    # ───────────────────────────────────────────────
+    m_col = re.search(
+        r"Datas?\s+de\s+recolha\s+de\s+amostras\s*[:\-]?\s*([0-9/\-\s]+)",
+        full_text,
+        re.I,
+    )
+    if not m_col:
+        m_col = re.search(
+            r"Data\s+colheita\s+das\s+amostras\s*[:\-]?\s*([0-9/\-\s]+)",
+            full_text,
+            re.I,
+        )
+    if not m_col:
+        m_col = re.search(
+            r"Data\s+de\s+colheita\s*[:\-]?\s*([0-9/\-\s]+)",
+            full_text,
+            re.I,
+        )
+
+    if m_col:
+        ctx["default_colheita"] = normalize_date_str(m_col.group(1))
     else:
         ctx["default_colheita"] = ""
 
-    # 5) Data de envio ao laboratório
+    # ───────────────────────────────────────────────
+    # 🟩 5. Data de envio ao laboratório
+    # ───────────────────────────────────────────────
     m_envio = re.search(
-        r"Data\s+envio\s+amostras\s+ao\s+laborat[oó]rio\s*:\s*([0-9/\- ]+)",
+        r"Data\s+envio\s+amostras\s+ao\s+laborat[oó]rio\s*[:\-\s]*([0-9/\-\s]+)",
         full_text,
         re.I,
     )
     if not m_envio:
         m_envio = re.search(
-            r"Data\s+(?:do|de)\s+envio.*?:\s*([0-9/\- ]+)",
+            r"Data\s+(?:do|de)\s+envio(?:\s+ao\s+laborat[oó]rio)?[:\-\s]*([0-9/\-\s]+)",
             full_text,
             re.I,
         )
@@ -475,143 +516,58 @@ def extract_context_from_text(full_text: str):
     if m_envio:
         ctx["data_envio"] = normalize_date_str(m_envio.group(1))
     else:
-        ctx["data_envio"] = ctx["default_colheita"] or datetime.now().strftime("%d/%m/%Y")
+        ctx["data_envio"] = ctx.get("default_colheita", "") or datetime.now().strftime("%d/%m/%Y")
 
-    # 6) Nº amostras — NOVO ICNF (Total: 30 amostras)
-    m_total = re.search(r"Total\s*:\s*\d+\s*/\s*([0-9]{1,4})\s*amostras", full_text, re.I)
-    if m_total:
-        ctx["declared_samples"] = int(m_total.group(1))
+    # ───────────────────────────────────────────────
+    # 🟩 6. Nº de amostras declaradas
+    #    Suporta:
+    #      • "Total: 27/35 amostras"
+    #      • "Total:\n30"
+    # ───────────────────────────────────────────────
+    ctx["declared_samples"] = 0
+
+    # Formato fração "27/35"
+    m_total_frac = re.search(
+        r"Total\s*[:\-]?\s*\d+\s*/\s*([0-9]{1,4})\s*amostras",
+        full_text,
+        re.I,
+    )
+    if m_total_frac:
+        try:
+            ctx["declared_samples"] = int(m_total_frac.group(1))
+        except Exception:
+            ctx["declared_samples"] = 0
     else:
-        ctx["declared_samples"] = 0
+        # Formato simples "Total:\n30" ou "Total: 30"
+        m_total_simple = re.search(
+            r"Total\s*[:\-]?\s*([0-9]{1,4})\b",
+            full_text,
+            re.I,
+        )
+        if m_total_simple:
+            try:
+                ctx["declared_samples"] = int(m_total_simple.group(1))
+            except Exception:
+                ctx["declared_samples"] = 0
+        else:
+            # Fallback antigo (Nº de amostras ...)
+            flat = re.sub(r"[\u00A0_\s]+", " ", full_text)
+            patterns = [
+                r"N[º°o]?\s*de\s*amostras.*?([0-9OoQIl]{1,4})\b",
+                r"N[º°o]?\s*amostras.*?([0-9OoQIl]{1,4})\b",
+            ]
+            for pat in patterns:
+                m = re.search(pat, flat, re.I)
+                if m:
+                    raw = m.group(1)
+                    raw = raw.replace("O", "0").replace("o", "0").replace("Q", "0").replace("I", "1")
+                    try:
+                        ctx["declared_samples"] = int(raw)
+                    except Exception:
+                        pass
+                    break
 
     return ctx
-
-def parse_xylella_tables(
-    result_json,
-    context,
-    req_id: int | None = None,
-    col_ref: int = 0,
-    col_hosp: int = 2,
-    col_obs: int = 3,
-) -> List[Dict[str, Any]]:
-
-    out: List[Dict[str, Any]] = []
-    tables = result_json.get("analyzeResult", {}).get("tables", [])
-    if not tables:
-        print("⚠️ Nenhuma tabela encontrada.")
-        return out
-
-    print("\n🧩 DEBUG GRID OCR — DETEÇÃO DE TABELAS")
-    # Cada tabela
-    for t in tables:
-
-        # Construir matriz
-        nc = max(c.get("columnIndex", 0) for c in t.get("cells", [])) + 1
-        nr = max(c.get("rowIndex", 0) for c in t.get("cells", [])) + 1
-
-        grid = [[""] * nc for _ in range(nr)]
-        for c in t.get("cells", []):
-            grid[c["rowIndex"]][c["columnIndex"]] = clean_value(c.get("content", ""))
-
-        # Mostrar tabela completa
-        for r in grid:
-            print("   →", r)
-
-        # ---------------------------------------------------------
-        # 1) Deteção inteligente da coluna correta de hospedeiro e tipo
-        # ---------------------------------------------------------
-
-        # Se for template novo (ICNF), normalmente há 3 colunas: ref, hosp, tipo
-        if grid and len(grid[0]) == 3:
-            col_ref = 0
-            col_hosp = 1
-            col_obs = 2
-        # Se for template antigo, mantém 0,2,3
-        else:
-            col_ref = col_ref
-            col_hosp = col_hosp
-            col_obs = col_obs
-
-        # ---------------------------------------------------------
-        # 2) Processar cada linha da tabela
-        # ---------------------------------------------------------
-        for row in grid:
-            if not row or not any(row):
-                continue
-
-            # Referência obrigatória
-            ref_raw = row[col_ref] if len(row) > col_ref else ""
-            ref = _clean_ref(ref_raw)
-
-            if not ref or re.match(r"^\D+$", ref):
-                continue
-
-            # Hospedeiro + Observações (inicial)
-            hospedeiro = row[col_hosp] if len(row) > col_hosp else ""
-            obs = row[col_obs] if len(row) > col_obs else ""
-
-            # ---------------------------------------------------------
-            # 3) Corrigir misturas OCR — tipo dentro do hospedeiro
-            # ---------------------------------------------------------
-
-            joined = " ".join([x for x in row if isinstance(x, str)])
-
-            # extrair tipo de qualquer parte da linha
-            m_tipo = re.search(r"\b(simples|composta|composto|individual)\b", joined, re.I)
-            tipo = ""
-            if m_tipo:
-                tipo = m_tipo.group(1).capitalize()
-                if tipo.lower() == "composto":
-                    tipo = "Composta"
-
-            # 🩹 Se hospedeiro contiver o tipo → remover o tipo e deixar só hospedeiro
-            if isinstance(hospedeiro, str):
-                m2 = re.search(r"\b(simples|composta|composto|individual)\b", hospedeiro, re.I)
-                if m2:
-                    hospedeiro = hospedeiro[:m2.start()].strip()
-
-            # 🩹 Se hospedeiro vier vazio mas houver padrão hosp + tipo na mesma célula
-            if not hospedeiro and tipo:
-                m3 = re.match(r"([A-Za-zÀ-ÿ\.\- ]+?)\s+(Simples|Composta|Composto|Individual)", joined, re.I)
-                if m3:
-                    hospedeiro = m3.group(1).strip()
-
-            # ---------------------------------------------------------
-            # 4) Limpeza final
-            # ---------------------------------------------------------
-            if _looks_like_natureza(hospedeiro.lower()):
-                hospedeiro = ""
-
-            hospedeiro = hospedeiro.strip()
-            obs = obs.strip()
-
-            # ---------------------------------------------------------
-            # 5) Data de colheita
-            # ---------------------------------------------------------
-            datacolheita = context.get("default_colheita", "")
-
-            # ---------------------------------------------------------
-            # 6) Construção da linha final
-            # ---------------------------------------------------------
-            out.append({
-                "requisicao_id": req_id,
-                "datarececao": context["data_envio"],
-                "datacolheita": datacolheita,
-                "referencia": ref,
-                "hospedeiro": hospedeiro,
-                "tipo": tipo,
-                "zona": context["zona"],
-                "responsavelamostra": context["dgav"],
-                "responsavelcolheita": context["responsavel_colheita"],
-                "observacoes": obs,
-                "procedure": "XYLELLA",
-                "datarequerido": context["data_envio"],
-                "Score": ""
-            })
-
-    print(f"✅ {len(out)} amostras extraídas no total (req_id={req_id}).")
-    return out
-
 
 def parse_xylella_from_text_block(block_text: str, context: Dict[str, Any], req_id: int = 1) -> List[Dict[str, Any]]:
     """
@@ -902,13 +858,14 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
     # 🔹 Devolve [{rows, expected}] para validação esperadas/processadas
     results = []
     for bi, bloco in enumerate(blocos[:len(out)], start=1):
-        ctx = extract_context_from_text(bloco)
-        expected = ctx.get("declared_samples", 0)
-        results.append({
-            "rows": out[bi - 1],
-            "expected": expected
-        })
-    return results
+            ctx = extract_context_from_text(bloco)
+            # se não houver nº declarado, usa o nº de linhas realmente extraídas
+            expected = ctx.get("declared_samples") or len(out[bi - 1])
+            results.append({
+                "rows": out[bi - 1],
+                "expected": expected,
+            })
+        return results
 
 
 # ───────────────────────────────────────────────
@@ -1346,6 +1303,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
