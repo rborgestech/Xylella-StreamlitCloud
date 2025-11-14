@@ -486,8 +486,20 @@ def extract_context_from_text(full_text: str):
             m_d = re.search(r"\bDGAV(?:\s+[A-Za-zÀ-ÿ?]+){1,4}", full_text)
             dgav = re.sub(r"[:;,.\-–—]+$", "", m_d.group(0)).strip() if m_d else None
 
-        ctx["dgav"] = dgav
-        ctx["responsavel_colheita"] = None
+        # responsável amostragem = DGAV Centro (a entidade)
+        ctx["responsavel_amostragem"] = dgav
+        
+        # responsável colheita = técnico responsável listado no PDF
+        m_tecnico = re.search(
+            r"T[ée]cnico\s+respons[aá]vel\s*:\s*(.+?)(?:\n|$|Data\s+de|Data\s+envio)",
+            full_text,
+            re.I
+        )
+        if m_tecnico:
+            ctx["responsavel_colheita"] = m_tecnico.group(1).strip()
+        else:
+            ctx["responsavel_colheita"] = ""
+
 
         # Datas de colheita DGAV (mapa com asteriscos)
         colheita_map = {}
@@ -706,8 +718,8 @@ def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, An
                 "hospedeiro": hospedeiro,
                 "tipo": tipo,
                 "zona": context["zona"],
-                "responsavelamostra": context.get("dgav"),
-                "responsavelcolheita": context.get("responsavel_colheita"),
+                "responsavelamostra": context.get("responsavel_amostragem", ""),
+                "responsavelcolheita": context.get("responsavel_colheita", ""),
                 "observacoes": obs.strip(),
                 "procedure": "XYLELLA",
                 "datarequerido": context["data_envio"],
@@ -1307,6 +1319,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
