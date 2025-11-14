@@ -430,7 +430,15 @@ def extract_context_from_text(full_text: str):
         ctx["data_envio"] = default_colheita
     else:
         ctx["data_envio"] = datetime.now().strftime("%d/%m/%Y")
-
+        
+    # 🔵 ICNF — Datas de recolha de amostras
+    m_icnf_col = re.search(
+        r"Datas?\s+de\s+recolha\s+de\s+amostras\s*[:\- ]*\s*([0-9/\-]{8,10})",
+        full_text,
+        re.I,
+    )
+    if m_icnf_col:
+        ctx["default_colheita"] = normalize_date_str(m_icnf_col.group(1))
     # ───────────────────────────────────────────────
     # Nº de amostras declaradas (debug + robusto a OCR e placeholders)
     # ───────────────────────────────────────────────
@@ -1064,6 +1072,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
