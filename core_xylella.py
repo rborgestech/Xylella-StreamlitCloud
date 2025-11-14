@@ -494,77 +494,105 @@ def parse_xylella_tables(
     col_hosp: int = 2,
     col_obs: int = 3,
 ) -> List[Dict[str, Any]]:
-    """
-    Extrai as amostras das tabelas Azure OCR, aplicando o contexto da requisição.
 
-    Os índices das colunas podem ser parametrizados:
-      - col_ref  : índice da coluna da referência (default 0)
-      - col_hosp : índice da coluna do hospedeiro (default 2 – template antigo)
-      - col_obs  : índice da coluna das observações (default 3 – template antigo)
-    """
     out: List[Dict[str, Any]] = []
     tables = result_json.get("analyzeResult", {}).get("tables", [])
-    
-    # 🆕 Auto-detecção do tipo de template (DGAV antigo vs ICNF novo)
-    template = context.get("template_tipo", "").upper()
-
-    if template == "ZONAS_DEMARCADAS":      # Novo template ICNF
-        col_ref = 0
-        col_hosp = 1
-        col_obs = 2
-    else:                                   # Template DGAV antigo (default)
-        col_ref = 0
-        col_hosp = 2
-        col_obs = 3
-
-    print(f"📐 Mapeamento de colunas aplicado → ref={col_ref}, hosp={col_hosp}, obs={col_obs}")
-
     if not tables:
         print("⚠️ Nenhuma tabela encontrada.")
         return out
 
+    print("\n🧩 DEBUG GRID OCR — DETEÇÃO DE TABELAS")
+    # Cada tabela
     for t in tables:
+
+        # Construir matriz
         nc = max(c.get("columnIndex", 0) for c in t.get("cells", [])) + 1
         nr = max(c.get("rowIndex", 0) for c in t.get("cells", [])) + 1
+
         grid = [[""] * nc for _ in range(nr)]
         for c in t.get("cells", []):
             grid[c["rowIndex"]][c["columnIndex"]] = clean_value(c.get("content", ""))
 
+        # Mostrar tabela completa
+        for r in grid:
+            print("   →", r)
+
+        # ---------------------------------------------------------
+        # 1) Deteção inteligente da coluna correta de hospedeiro e tipo
+        # ---------------------------------------------------------
+
+        # Se for template novo (ICNF), normalmente há 3 colunas: ref, hosp, tipo
+        if grid and len(grid[0]) == 3:
+            col_ref = 0
+            col_hosp = 1
+            col_obs = 2
+        # Se for template antigo, mantém 0,2,3
+        else:
+            col_ref = col_ref
+            col_hosp = col_hosp
+            col_obs = col_obs
+
+        # ---------------------------------------------------------
+        # 2) Processar cada linha da tabela
+        # ---------------------------------------------------------
         for row in grid:
             if not row or not any(row):
                 continue
 
-            # Referência (coluna parametrizável, por defeito 0)
-            ref = _clean_ref(row[col_ref]) if len(row) > col_ref else ""
+            # Referência obrigatória
+            ref_raw = row[col_ref] if len(row) > col_ref else ""
+            ref = _clean_ref(ref_raw)
+
             if not ref or re.match(r"^\D+$", ref):
                 continue
 
-            # Hospedeiro e observações (colunas parametrizáveis)
+            # Hospedeiro + Observações (inicial)
             hospedeiro = row[col_hosp] if len(row) > col_hosp else ""
-            obs        = row[col_obs]  if len(row) > col_obs else ""
+            obs = row[col_obs] if len(row) > col_obs else ""
 
-            if _looks_like_natureza(hospedeiro):
-                hospedeiro = ""
+            # ---------------------------------------------------------
+            # 3) Corrigir misturas OCR — tipo dentro do hospedeiro
+            # ---------------------------------------------------------
 
-            tipo = ""
             joined = " ".join([x for x in row if isinstance(x, str)])
-            m_tipo = re.search(r"\b(Simples|Composta|Composto|Individual)\b", joined, re.I)
+
+            # extrair tipo de qualquer parte da linha
+            m_tipo = re.search(r"\b(simples|composta|composto|individual)\b", joined, re.I)
+            tipo = ""
             if m_tipo:
                 tipo = m_tipo.group(1).capitalize()
-                # 🔧 Correção do erro comum: "Composto" → "Composta"
                 if tipo.lower() == "composto":
                     tipo = "Composta"
-                obs = re.sub(r"\b(Simples|Composta|Composto|Individual)\b", "", obs, flags=re.I).strip()
 
+            # 🩹 Se hospedeiro contiver o tipo → remover o tipo e deixar só hospedeiro
+            if isinstance(hospedeiro, str):
+                m2 = re.search(r"\b(simples|composta|composto|individual)\b", hospedeiro, re.I)
+                if m2:
+                    hospedeiro = hospedeiro[:m2.start()].strip()
+
+            # 🩹 Se hospedeiro vier vazio mas houver padrão hosp + tipo na mesma célula
+            if not hospedeiro and tipo:
+                m3 = re.match(r"([A-Za-zÀ-ÿ\.\- ]+?)\s+(Simples|Composta|Composto|Individual)", joined, re.I)
+                if m3:
+                    hospedeiro = m3.group(1).strip()
+
+            # ---------------------------------------------------------
+            # 4) Limpeza final
+            # ---------------------------------------------------------
+            if _looks_like_natureza(hospedeiro.lower()):
+                hospedeiro = ""
+
+            hospedeiro = hospedeiro.strip()
+            obs = obs.strip()
+
+            # ---------------------------------------------------------
+            # 5) Data de colheita
+            # ---------------------------------------------------------
             datacolheita = context.get("default_colheita", "")
-            m_ast = re.search(r"\(\s*\*+\s*\)", joined)
-            if m_ast:
-                mark = re.sub(r"\s+", "", m_ast.group(0))
-                datacolheita = context.get("colheita_map", {}).get(mark, datacolheita)
 
-            if obs.strip().lower() in ("simples", "composta", "composto", "individual"):
-                obs = ""
-
+            # ---------------------------------------------------------
+            # 6) Construção da linha final
+            # ---------------------------------------------------------
             out.append({
                 "requisicao_id": req_id,
                 "datarececao": context["data_envio"],
@@ -575,39 +603,15 @@ def parse_xylella_tables(
                 "zona": context["zona"],
                 "responsavelamostra": context["dgav"],
                 "responsavelcolheita": context["responsavel_colheita"],
-                "observacoes": obs.strip(),
+                "observacoes": obs,
                 "procedure": "XYLELLA",
                 "datarequerido": context["data_envio"],
                 "Score": ""
             })
 
-    # 🧩 Fallback — tentar extrair linhas da tabela via regex se Azure não devolveu cells válidas
-    if not out:
-        full_text = extract_all_text(result_json)
-        # procura padrões tipo "63020099" ou "01/LVT/DGAV-23/..." etc.
-        pattern = re.compile(r"(\d{5,8}|[0-9]{1,3}/[A-Z]{1,3}/DGAV[-/]?\d{0,4})", re.I)
-        matches = pattern.findall(full_text)
-        if matches:
-            for ref in matches:
-                out.append({
-                    "requisicao_id": req_id,
-                    "datarececao": context["data_envio"],
-                    "datacolheita": context.get("default_colheita", ""),
-                    "referencia": ref.strip(),
-                    "hospedeiro": "",
-                    "tipo": "",
-                    "zona": context["zona"],
-                    "responsavelamostra": context["dgav"],
-                    "responsavelcolheita": context["responsavel_colheita"],
-                    "observacoes": "",
-                    "procedure": "XYLELLA",
-                    "datarequerido": context["data_envio"],
-                    "Score": ""
-                })
-            print(f"🔍 Fallback regex: {len(matches)} amostras detetadas.")
-
     print(f"✅ {len(out)} amostras extraídas no total (req_id={req_id}).")
     return out
+
 
 def parse_xylella_from_text_block(block_text: str, context: Dict[str, Any], req_id: int = 1) -> List[Dict[str, Any]]:
     """
@@ -1342,6 +1346,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
