@@ -834,6 +834,7 @@ def parse_xylella_tables(
     Suporta:
       • Template DGAV antigo  → 4 colunas: ref, natureza, hosp, tipo
       • Template ICNF novo    → 3 colunas: ref, hospedeiro, tipo
+      • ICNF com contador + referência partida (1 /XF/..., 2 /XF/..., etc.)
     """
 
     # Detectar template ICNF → não tem coluna de observações
@@ -850,77 +851,91 @@ def parse_xylella_tables(
     def merge_ref_fragments(row, next_row=None):
         """
         Junta contador + /XF/... apenas quando a referência está partida.
-        Não toca em referências já completas (ex: "/XF/ICNFC/...").
+        Não toca em referências já completas (ex: "/XF/ICNF-..." ou "7/XF/...").
         """
-    
-        # 1) Se a própria linha já tem referência completa, NÃO mexemos.
-        for cel in row:
-            if "/XF/" in cel:
-                # Se já começa por número + "/XF", devolve tal como está
-                m_ok = re.match(r"^\d{1,3}/XF/", cel)
-                if m_ok:
-                    return cel.strip()
-                # Se começa apenas por "/XF", devolve direto
-                if cel.strip().startswith("/XF/"):
-                    return cel.strip()
-    
-        # 2) Procurar contador na coluna 0
+
+        # contador na primeira coluna?
         contador = None
-        if row and re.fullmatch(r"\d{1,3}", row[0].strip()):
-            contador = row[0].strip()
-    
-        # 3) Procurar referência na mesma linha
+        if row and re.fullmatch(r"\d{1,3}", (row[0] or "").strip()):
+            contador = (row[0] or "").strip()
+
+        # 1) Referência na própria linha
+        ref_cells = [c for c in row if isinstance(c, str) and "/XF/" in c]
         ref_part = None
-        for cel in row:
-            if "/XF/" in cel:
-                ref_part = cel.strip()
-                break
-    
-        # 4) Se não está aqui, procurar na linha seguinte
+
+        if ref_cells:
+            cel_str = ref_cells[0].strip()
+
+            # se já vier "7/XF/..." → referência completa, não mexer
+            if re.match(r"^\d{1,3}\s*/\s*XF/", cel_str, re.I):
+                return cel_str
+
+            # se NÃO houver contador separado, tratar "/XF/..." como referência completa
+            if not contador:
+                return cel_str
+
+            # caso típico: contador numa célula e "/XF/..." noutra → vamos juntar
+            ref_part = cel_str
+
+        # 2) Se não havia "/XF/" na linha, procurar na linha seguinte
         if not ref_part and next_row:
             for cel in next_row:
-                if "/XF/" in cel:
+                if isinstance(cel, str) and "/XF/" in cel:
                     ref_part = cel.strip()
                     break
-    
+
         if not ref_part:
-            return None  # não é referência
-    
-        # 5) Se já é completa, devolver tal como está
-        if ref_part.startswith("/XF/"):
-            return ref_part
-    
-        # 6) juntar contador + referência partida
+            return None  # esta linha não contém referência
+
+        # 3) Finalmente, juntar contador + referência (se houver contador)
         if contador:
             merged = f"{contador}/{ref_part.lstrip('/')}"
         else:
             merged = ref_part
-    
+
+        merged = re.sub(r"\s+", "", merged)
         merged = re.sub(r"//+", "/", merged)
-        merged = merged.strip()
         return merged
 
-
     for t in tables:
-
-        # reconstruir grelha
+        # reconstrução da grelha
         nc = max(c.get("columnIndex", 0) for c in t.get("cells", [])) + 1
         nr = max(c.get("rowIndex", 0) for c in t.get("cells", [])) + 1
         grid = [[""] * nc for _ in range(nr)]
         for c in t.get("cells", []):
             grid[c["rowIndex"]][c["columnIndex"]] = clean_value(c.get("content", ""))
 
-        # percorre linhas com índice correto
         for row_index, row in enumerate(grid):
             if not row or not any(row):
                 continue
 
-            # reconstruir referência
-            ref = merge_ref_fragments(
-                row,
-                next_row=grid[row_index + 1] if row_index + 1 < nr else None
-            )
-            if not ref:
+            # 🔁 Evitar duplicar linhas quando a referência veio partida:
+            # padrão típico:
+            #   linha N   → "3"          ""      ...
+            #   linha N+1 → ""   "/XF/ICNF-..."  ...
+            prev_row = grid[row_index - 1] if row_index > 0 else None
+            if (
+                prev_row
+                and len(prev_row) > 0
+                and re.fullmatch(r"\d{1,3}", (prev_row[0] or "").strip())  # contador em cima
+                and (row[0] is None or str(row[0]).strip() == "")           # 1.ª célula vazia agora
+                and any(isinstance(c, str) and "/XF/" in c for c in row)    # esta linha tem /XF/
+                and not any(isinstance(c, str) and "/XF/" in c for c in prev_row)  # em cima não tinha /XF/
+            ):
+                # a referência desta linha já foi usada em prev_row + next_row ⇒ saltar
+                continue
+
+            # referência (com lógica de merge)
+            next_row = grid[row_index + 1] if row_index + 1 < nr else None
+            ref = merge_ref_fragments(row, next_row=next_row)
+
+            # fallback para casos antigos (sem /XF/ e sem contador)
+            if not ref and len(row) > col_ref:
+                raw_ref = row[col_ref]
+                if raw_ref:
+                    ref = _clean_ref(raw_ref)
+
+            if not ref or re.match(r"^\D+$", ref):
                 continue
 
             ref = _clean_ref(ref)
@@ -930,12 +945,12 @@ def parse_xylella_tables(
             if _looks_like_natureza(hospedeiro):
                 hospedeiro = ""
 
-            # observações (DGAV)
+            # observações (só DGAV antigo)
             obs = ""
             if col_obs >= 0 and len(row) > col_obs:
                 obs = row[col_obs]
 
-            # tipo (Simples / Composta / Individual)
+            # tipo (extraído por regex do conjunto da linha)
             joined = " ".join(x for x in row if isinstance(x, str))
             tipo = ""
             m_tipo = re.search(r"\b(Simples|Composta|Individual|Composto)\b", joined, re.I)
@@ -944,7 +959,6 @@ def parse_xylella_tables(
                 if tipo.lower() == "composto":
                     tipo = "Composta"
 
-            # datas
             datacolheita = context.get("default_colheita", "")
 
             out.append({
@@ -1537,6 +1551,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
