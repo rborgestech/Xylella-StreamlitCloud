@@ -307,14 +307,21 @@ def split_if_multiple_requisicoes(full_text: str) -> List[str]:
 
     marks.append(len(text))
     blocos = []
+
     for i in range(len(marks) - 1):
-        start = max(0, marks[i] - 200)            # padding antes
-        end = min(len(text), marks[i + 1] + 200)  # padding depois
+        # o bloco começa EXACTAMENTE no cabeçalho, sem lixo anterior
+        start = marks[i]
+
+        # apenas um pequeno padding no final (20 chars) para capturar tudo
+        end = min(len(text), marks[i + 1] + 20)
+
         bloco = text[start:end].strip()
-        if len(bloco) > 400:
+
+        if len(bloco) > 100:   # ICNF tem sempre blocos grandes
             blocos.append(bloco)
         else:
-            print(f"⚠️ Bloco {i+1} demasiado pequeno ({len(bloco)} chars) — possivelmente OCR truncado.")
+            print(f"⚠️ Bloco {i+1} demasiado pequeno ({len(bloco)} chars).")
+
     print(f"🔍 Detetadas {len(blocos)} requisições distintas (por cabeçalho).")
     return blocos
 
@@ -1598,6 +1605,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
