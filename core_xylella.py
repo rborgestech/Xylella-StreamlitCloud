@@ -403,101 +403,71 @@ def _to_datetime(value: str):
 
 
 def extract_context_from_text(full_text: str):
-    """Extrai informações gerais da requisição (zona, DGAV, datas, nº de amostras)."""
     ctx = {}
 
-    # ───────────────────────────────────────────────
-    # 🟩 1. Zona (ICNF "Zona demarcada:" OU DGAV "(Zona Isenta)")
-    # ───────────────────────────────────────────────
+    # 1) Zona demarcada (ICNF)
     m_zd = re.search(r"Zona\s+demarcada\s*:\s*(.+)", full_text, re.I)
     if m_zd:
         ctx["zona"] = m_zd.group(1).strip()
-        ctx["template_tipo"] = "ZONAS_DEMARCADAS"
+        ctx["template_tipo"] = "ICNF"
     else:
+        # Template antigo (DGAV)
         m_zona = re.search(r"Xylella\s+fastidiosa\s*\(([^)]+)\)", full_text, re.I)
         ctx["zona"] = m_zona.group(1).strip() if m_zona else "Zona Isenta"
-        ctx["template_tipo"] = "PROGRAMA_NACIONAL"
+        ctx["template_tipo"] = "DGAV"
 
-    # ───────────────────────────────────────────────
-    # 🟩 2. Entidade (ICNF)
-    # Ex: "Entidade: DGAV Centro"
-    # ───────────────────────────────────────────────
+    # 2) Entidade (ICNF)
     entidade = None
     m_ent = re.search(r"Entidade\s*:\s*(.+)", full_text, re.I)
     if m_ent:
         entidade = m_ent.group(1).strip()
         entidade = re.sub(r"T[ée]cnico\s+respons[aá]vel.*$", "", entidade, flags=re.I).strip()
 
-    # ───────────────────────────────────────────────
-    # 🟩 3. Técnico responsável (limpeza robusta)
-    # Ex OCR: "Técnico responsável: Marta Caetano e Sara Pinheiro Data envio..."
-    # ───────────────────────────────────────────────
+    # 3) Técnico responsável (limpeza muito robusta)
     tecnico_resp = None
-
     m_tecnico = re.search(
-        r"T[ée]cnico\s+respons[aá]vel\s*:\s*(.+?)(?:\n|$|Data\s+envio|Ref[ºª]|Hospedeiro|Tipo\s+amostra)",
+        r"T[ée]cnico\s+respons[aá]vel\s*:\s*(.+?)(?:\n|$|Data\s+envio|Data\s+colheita|Total\s*:)",
         full_text,
         flags=re.I | re.S,
     )
     if m_tecnico:
-        tecnico_resp = m_tecnico.group(1).strip()
-        # Remover resíduos que porventura o OCR tenha colado
+        tecnico_resp = (
+            m_tecnico.group(1)
+            .replace("\n", " ")
+            .strip()
+        )
         tecnico_resp = re.sub(r"(Data\s+.*)$", "", tecnico_resp, flags=re.I).strip()
-        tecnico_resp = re.sub(r"(Ref[ºª].*)$", "", tecnico_resp, flags=re.I).strip()
-        tecnico_resp = re.sub(r"(Hospedeiro.*)$", "", tecnico_resp, flags=re.I).strip()
-        tecnico_resp = re.sub(r"(Tipo\s+amostra.*)$", "", tecnico_resp, flags=re.I).strip()
 
-    # Guardar
+    # guardar entidade e técnico
     if entidade:
         ctx["dgav"] = entidade
     ctx["responsavel_colheita"] = tecnico_resp
 
-    # ───────────────────────────────────────────────
-    # 🟩 4. Fallback DGAV antigo ("Amostra colhida por DGAV: X")
-    # ───────────────────────────────────────────────
+    # Fallback DGAV antigo
     if not entidade:
-        m_hdr = re.search(
-            r"Amostra(?:s|\(s\))?\s*colhida(?:s|\(s\))?\s*por\s*DGAV\s*[:\-]?\s*(.*)",
-            full_text,
-            re.IGNORECASE,
-        )
+        m_hdr = re.search(r"Amostra.*por\s*DGAV\s*[:\-]?\s*(.*)", full_text, re.I)
         if m_hdr:
-            responsavel = m_hdr.group(1).strip()
-            responsavel = re.sub(r"\S+@\S+", "", responsavel).strip()
-            responsavel = re.sub(r"Data.*", "", responsavel, flags=re.I).strip()
-            if responsavel:
-                ctx["dgav"] = f"DGAV {responsavel}".strip()
-
-        if not tecnico_resp:
+            resp = re.sub(r"\S+@\S+", "", m_hdr.group(1)).strip()
+            ctx["dgav"] = f"DGAV {resp}"
+        if not ctx.get("responsavel_colheita"):
             ctx["responsavel_colheita"] = None
 
-    # ───────────────────────────────────────────────
-    # 🟩 5. Data de colheita das amostras (NOVO TEMPLATE)
-    # Ex: "Data colheita das amostras: 3/11/2025"
-    # ───────────────────────────────────────────────
-    m_col_fim = re.search(r"Data\s+colheita\s+das\s+amostras\s*[:\-]?\s*([0-9/\-\s]+)", full_text, re.I)
+    # 4) Data de colheita — NOVO ICNF (no fim da página)
+    m_col_fim = re.search(r"Data\s+colheita\s+das\s+amostras\s*:\s*([0-9/\- ]+)", full_text, re.I)
     if m_col_fim:
         ctx["default_colheita"] = normalize_date_str(m_col_fim.group(1))
+    else:
+        ctx["default_colheita"] = ""
 
-    # Caso não exista esta linha, usa fallback do código existente
-    if "default_colheita" not in ctx:
-        m_simple = re.search(r"Data\s+de\s+colheita\s*[:\-\s]*([0-9/\-\s]+)", full_text, re.I)
-        if m_simple:
-            ctx["default_colheita"] = normalize_date_str(m_simple.group(1))
-        else:
-            ctx["default_colheita"] = ""
-
-    # ───────────────────────────────────────────────
-    # 🟩 6. Data de envio ao laboratório
-    # ───────────────────────────────────────────────
+    # 5) Data de envio ao laboratório
     m_envio = re.search(
-        r"Data\s+envio\s+amostras\s+ao\s+laborat[oó]rio\s*[:\-\s]*([0-9/\-\s]+)",
+        r"Data\s+envio\s+amostras\s+ao\s+laborat[oó]rio\s*:\s*([0-9/\- ]+)",
         full_text,
         re.I,
     )
     if not m_envio:
         m_envio = re.search(
-            r"Data\s+(?:do|de)\s+envio(?:\s+ao\s+laborat[oó]rio)?[:\-\s]*([0-9/\-\s]+)",
+            r"Data\s+(?:do|de)\s+envio.*?:\s*([0-9/\- ]+)",
             full_text,
             re.I,
         )
@@ -505,39 +475,16 @@ def extract_context_from_text(full_text: str):
     if m_envio:
         ctx["data_envio"] = normalize_date_str(m_envio.group(1))
     else:
-        ctx["data_envio"] = ctx.get("default_colheita", "") or datetime.now().strftime("%d/%m/%Y")
+        ctx["data_envio"] = ctx["default_colheita"] or datetime.now().strftime("%d/%m/%Y")
 
-    # ───────────────────────────────────────────────
-    # 🟩 7. Nº de amostras — NOVO FORMATO (Total: 27/35 amostras)
-    # ───────────────────────────────────────────────
-    m_total = re.search(r"Total\s*[:\-]?\s*\d+\s*/\s*([0-9]{1,4})\s*amostras", full_text, re.I)
+    # 6) Nº amostras — NOVO ICNF (Total: 30 amostras)
+    m_total = re.search(r"Total\s*:\s*\d+\s*/\s*([0-9]{1,4})\s*amostras", full_text, re.I)
     if m_total:
-        try:
-            ctx["declared_samples"] = int(m_total.group(1))
-        except:
-            ctx["declared_samples"] = 0
+        ctx["declared_samples"] = int(m_total.group(1))
     else:
-        # fallback antigo
         ctx["declared_samples"] = 0
-        flat = re.sub(r"[\u00A0_\s]+", " ", full_text)
-        patterns = [
-            r"N[º°o]?\s*de\s*amostras.*?([0-9OoQIl]{1,4})\b",
-            r"N[º°o]?\s*amostras.*?([0-9OoQIl]{1,4})\b",
-        ]
-        for pat in patterns:
-            m = re.search(pat, flat, re.I)
-            if m:
-                raw = m.group(1)
-                raw = raw.replace("O", "0").replace("o", "0").replace("Q", "0").replace("I", "1")
-                try:
-                    ctx["declared_samples"] = int(raw)
-                except:
-                    pass
-                break
 
     return ctx
-
-
 
 def parse_xylella_tables(
     result_json,
@@ -762,150 +709,64 @@ def parse_xylella_from_text_block(block_text: str, context: Dict[str, Any], req_
 # ───────────────────────────────────────────────
 # Parser ICNF – "Prospeção de: Xylella fastidiosa em Zonas Demarcadas"
 # ───────────────────────────────────────────────
-def parse_icnf_from_text(full_text: str, pdf_name: str):
-    """
-    Parser dedicado aos templates ICNF / XF / Zonas Demarcadas.
-
-    Suporta dois formatos de linha:
-
-      A) Formato "lista numerada" (ex. ICNF-C SL-FC):
-         1 /XF/ICNF-C/GAD/SL-FC/2025 Salvia rosmarinus Simples (1)
-         (ou em duas linhas OCR: cabeçalho + espécie/tipo na linha seguinte)
-
-      B) Formato "Refª amostra" (ex. ZD XF MRLRA):
-         91/Xf/DGAVC/MRLRA/25 Laurus nobilis L. simples
-    """
-
+def parse_icnf_requisition(result_json, full_text, pdf_name, txt_path=None):
     ctx = extract_context_from_text(full_text)
-    data_envio = ctx.get("data_envio", datetime.now().strftime("%d/%m/%Y"))
-    data_colheita = ctx.get("default_colheita", data_envio)
+    data_envio = ctx["data_envio"]
+    data_colheita = ctx["default_colheita"] or data_envio
 
-    rows: List[Dict[str, Any]] = []
-
-    # ───────────────────────────────────────────────
-    # 1) Preparar linhas OCR (limpas e normalizadas)
-    # ───────────────────────────────────────────────
-    raw_lines = [ln for ln in full_text.splitlines() if ln.strip()]
+    raw_lines = [ln.strip() for ln in full_text.splitlines() if ln.strip()]
     clean_lines = [normalize_ocr_line(ln) for ln in raw_lines]
 
-    # ───────────────────────────────────────────────
-    # 2) Tentar formato A — lista numerada /XF/ICNF-C/...
-    #    (com possível quebra em 2 linhas → combinamos)
-    # ───────────────────────────────────────────────
-    combined_lines: List[str] = []
+    rows = []
+
+    # 1) Combinar linhas (caso venham partidas)
+    combined = []
     i = 0
     while i < len(clean_lines):
         ln = clean_lines[i]
-
-        # linha do tipo "1 /XF/ICNF-C/GAD/SL-FC/2025 1"
-        m_head = re.match(r"^\d{1,3}\s+/XF/[A-Z0-9\-\/]+.*", ln)
-        if m_head and i + 1 < len(clean_lines):
-            # junta com a linha seguinte (espécie + tipo)
-            combined = ln + " " + clean_lines[i + 1]
-            combined_lines.append(combined)
+        if re.match(r"^\d{1,3}\s+/XF/", ln) and i + 1 < len(clean_lines):
+            combined.append(ln + " " + clean_lines[i + 1])
             i += 2
         else:
+            combined.append(ln)
             i += 1
 
-    # Se não tivermos combinações, usamos as linhas limpas tal como estão
-    if not combined_lines:
-        combined_lines = clean_lines.copy()
-
-    pattern_A = re.compile(
+    # 2) Padrões
+    pattern = re.compile(
         r"""
         ^\s*
-        (?P<num>\d{1,3})                         # número da amostra (ignoramos)
-        \s+
-        (?P<ref>/XF/[A-Za-z0-9\-\/]+)            # /XF/ICNF-C/...
-        (?:\s+\d+)?                              # dígito extra opcional do OCR
-        \s+
-        (?P<hosp>[A-Za-zÀ-ÿ\s\.\-]+?)            # hospedeiro
-        \s+
-        (?P<tipo>Simples|Composta)               # tipo
-        (?:\s*\((?P<n_comp>\d+)\))?              # nº em parênteses opcional
-        \s*$
+        (?P<num>\d{1,3})\s+
+        (?P<ref>/XF/[A-Z0-9\-\/]+)\s+
+        (?P<hosp>[A-Za-zÀ-ÿ\s\.\-]+?)\s+
+        (?P<tipo>Simples|Composta|Individual)(?:\s*\(\d+\))?
         """,
-        flags=re.IGNORECASE | re.VERBOSE,
+        re.I | re.VERBOSE,
     )
 
-    for ln in combined_lines:
-        m = pattern_A.match(ln)
+    for ln in combined:
+        m = pattern.search(ln)
         if not m:
             continue
 
-        ref = m.group("ref").strip()
-        hosp = m.group("hosp").strip()
         tipo = m.group("tipo").capitalize()
+        rows.append({
+            "requisicao_id": 1,
+            "datarececao": data_envio,
+            "datacolheita": data_colheita,
+            "referencia": m.group("ref").strip(),
+            "hospedeiro": m.group("hosp").strip(),
+            "tipo": tipo,
+            "zona": ctx["zona"],
+            "responsavelamostra": ctx["dgav"],
+            "responsavelcolheita": ctx["responsavel_colheita"],
+            "observacoes": "",
+            "procedure": "XYLELLA",
+            "datarequerido": data_envio,
+            "Score": "",
+        })
 
-        rows.append(
-            {
-                "requisicao_id": 1,
-                "datarececao": data_envio,
-                "datacolheita": data_colheita,
-                "referencia": ref,
-                "hospedeiro": hosp,
-                "tipo": tipo,  # "Simples" / "Composta"
-                "zona": ctx.get("zona", ""),
-                "responsavelamostra": ctx.get("dgav", ""),
-                "responsavelcolheita": ctx.get("responsavel_colheita", ""),
-                "observacoes": "",
-                "procedure": "XYLELLA",
-                "datarequerido": data_envio,
-                "Score": "",
-            }
-        )
-
-    # ───────────────────────────────────────────────
-    # 3) Se ainda não apanhámos nada, tentar formato B
-    #    "91/Xf/DGAVC/MRLRA/25 Laurus nobilis L. simples"
-    # ───────────────────────────────────────────────
-    if not rows:
-        pattern_B = re.compile(
-            r"""
-            ^\s*
-            (?P<ref>\d{1,3}/XF/[A-Za-z0-9\-\/]+)   # 91/XF/DGAVC/MRLRA/25
-            \s+
-            (?P<hosp>[A-Za-zÀ-ÿ\s\.\-]+?)          # hospedeiro
-            \s+
-            (?P<tipo>simples|composta)\b           # tipo simples/composta
-            .*$
-            """,
-            flags=re.IGNORECASE | re.VERBOSE,
-        )
-
-        for ln in clean_lines:
-            m = pattern_B.match(ln)
-            if not m:
-                continue
-
-            ref = m.group("ref").strip()
-            hosp = m.group("hosp").strip()
-            tipo = m.group("tipo").capitalize()  # "Simples" / "Composta"
-
-            rows.append(
-                {
-                    "requisicao_id": 1,
-                    "datarececao": data_envio,
-                    "datacolheita": data_colheita,
-                    "referencia": ref,
-                    "hospedeiro": hosp,
-                    "tipo": tipo,
-                    "zona": ctx.get("zona", ""),
-                    "responsavelamostra": ctx.get("dgav", ""),
-                    "responsavelcolheita": ctx.get("responsavel_colheita", ""),
-                    "observacoes": "",
-                    "procedure": "XYLELLA",
-                    "datarequerido": data_envio,
-                    "Score": "",
-                }
-            )
-
-    expected = ctx.get("declared_samples") or len(rows)
-    print(f"✅ [ICNF] Extraídas {len(rows)} amostras (esperadas: {expected}).")
-
+    expected = ctx["declared_samples"] or len(rows)
     return [{"rows": rows, "expected": expected}] if rows else []
-
-
 
 # ───────────────────────────────────────────────
 # Dividir em requisições e extrair por bloco
@@ -1466,6 +1327,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
