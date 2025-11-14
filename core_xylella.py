@@ -504,6 +504,21 @@ def parse_xylella_tables(
     """
     out: List[Dict[str, Any]] = []
     tables = result_json.get("analyzeResult", {}).get("tables", [])
+    
+    # 🆕 Auto-detecção do tipo de template (DGAV antigo vs ICNF novo)
+    template = context.get("template_tipo", "").upper()
+
+    if template == "ZONAS_DEMARCADAS":      # Novo template ICNF
+        col_ref = 0
+        col_hosp = 1
+        col_obs = 2
+    else:                                   # Template DGAV antigo (default)
+        col_ref = 0
+        col_hosp = 2
+        col_obs = 3
+
+    print(f"📐 Mapeamento de colunas aplicado → ref={col_ref}, hosp={col_hosp}, obs={col_obs}")
+
     if not tables:
         print("⚠️ Nenhuma tabela encontrada.")
         return out
@@ -1327,6 +1342,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
