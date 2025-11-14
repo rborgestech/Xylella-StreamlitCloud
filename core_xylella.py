@@ -149,6 +149,45 @@ def clean_value(s: str) -> str:
            .replace("  ", " "))
     return s.strip()
 
+# 🔎 Reconstruir referências quando vêm partidas entre contador e /XF/
+def merge_counter_and_ref(row, next_row=None):
+    """
+    Reconstroi refs partidas:
+    Ex:
+        ["3", ""] + ["", "/XF/ICNF-C/..."] → "3/XF/ICNF-C/..."
+        ["3", "/XF/..."] → "3/XF/..."
+        ["", "/XF/..."] → usa contador da linha anterior
+    """
+    # pega contador se existir
+    contador = None
+    if row and re.fullmatch(r"\d{1,3}", row[0].strip()):
+        contador = row[0].strip()
+
+    # primeira parte da referência (se estiver na mesma linha)
+    ref_raw = None
+    if len(row) > 1 and "/XF/" in row[1]:
+        ref_raw = row[1].strip()
+
+    # referência pode vir na linha seguinte se estiver vazia aqui
+    if not ref_raw and next_row and len(next_row) > 0:
+        if "/XF/" in next_row[0]:
+            ref_raw = next_row[0].strip()
+        elif len(next_row) > 1 and "/XF/" in next_row[1]:
+            ref_raw = next_row[1].strip()
+
+    if not ref_raw:
+        return None
+
+    # juntar contador quando existir
+    if contador:
+        final = f"{contador}{ref_raw}"
+        # normalizar “1/XF/...” → garante a barra correta
+        final = re.sub(r"^(\d+)\s*/?", r"\1/", final)
+        return final
+
+    return ref_raw
+
+
 def extract_all_text(result_json: Dict[str, Any]) -> str:
     """Concatena todo o texto linha a linha de todas as páginas."""
     lines = []
@@ -821,9 +860,10 @@ def parse_xylella_tables(
                 continue
 
             # referência
-            ref = _clean_ref(row[col_ref]) if len(row) > col_ref else ""
-            if not ref or re.match(r"^\D+$", ref):
+            ref = merge_counter_and_ref(row, next_row=grid[row_index+1] if row_index+1 < nr else None)
+            if not ref:
                 continue
+            ref = _clean_ref(ref)
 
             # hospedeiro
             hospedeiro = row[col_hosp] if len(row) > col_hosp else ""
@@ -1437,6 +1477,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
