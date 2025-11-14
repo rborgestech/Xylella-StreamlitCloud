@@ -575,10 +575,22 @@ def extract_context_from_text(full_text: str):
     # Fallback ICNF/DGAV zonas: "Total: 27/35 amostras", "Total: 170/170 amostras"
     # Usa SEMPRE o MAIOR valor encontrado → último total global (170, 35, 30, ...)
     matches_total = re.findall(
-        r"Total\s*[:\-]?\s*(\d{1,4})(?:\s*/\s*\d{1,4})?\s*amostras?",
-        flat,
-        re.I,
+    r"Total\s*[:\-]?\s*(\d{1,4})(?:\s*/\s*(\d{1,4}))?\s*amostras?",
+    flat,
+    re.I,
     )
+    if matches_total:
+        nums = []
+        for a, b in matches_total:
+            if a.isdigit(): nums.append(int(a))
+            if b and b.isdigit(): nums.append(int(b))
+        if nums:
+            declared_samples = max(nums)
+    matches_total = re.findall(
+            r"Total\s*[:\-]?\s*(\d{1,4})(?:\s*/\s*\d{1,4})?\s*amostras?",
+            flat,
+            re.I,
+        )
     if matches_total:
         try:
             nums = [int(x) for x in matches_total]
@@ -1365,6 +1377,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
