@@ -444,7 +444,7 @@ def extract_context_from_text(full_text: str):
     ctx: Dict[str, Any] = {}
 
     # ───────────────────────────────────────────────
-    # 🟩 1. Zona (ICNF "Zona demarcada" ENTRE "Zona demarcada" e "Entidade:")
+    # 🟩 1. Zona demarcada / Zona isenta
     # ───────────────────────────────────────────────
     zona = None
 
@@ -457,7 +457,7 @@ def extract_context_from_text(full_text: str):
     if m_zd_span:
         zona = m_zd_span.group(1).strip()
     else:
-        # Fallback antigo: tudo depois de "Zona demarcada:" até ao fim da linha
+        # Fallback: tudo depois de "Zona demarcada:" até ao fim da linha
         m_zd_line = re.search(
             r"Zona\s+demarcada\s*:?\s*(.+)",
             full_text,
@@ -467,30 +467,29 @@ def extract_context_from_text(full_text: str):
             zona = m_zd_line.group(1).strip()
 
     if zona:
-        # normalizar espaços, mas NÃO mexer em caracteres como "/"
         zona = re.sub(r"\s+", " ", zona)
         ctx["zona"] = zona
-        ctx["template_tipo"] = "ZONAS_DEMARCADAS"
     else:
-        # Ex: "Prospeção de: Xylella fastidiosa (Zona Isenta)"
+        # Ex: "Xylella fastidiosa (Zona Isenta)"
         m_zona = re.search(r"Xylella\s+fastidiosa\s*\(([^)]+)\)", full_text, re.I)
         ctx["zona"] = m_zona.group(1).strip() if m_zona else "Zona Isenta"
-        ctx["template_tipo"] = "PROGRAMA_NACIONAL"
-
 
     # ───────────────────────────────────────────────
-    # 🟩 2. Entidade (ICNF / DGAV)
-    # Ex: "Entidade: ICNF"
+    # 🟩 2. Entidade (ICNF / DGAV ...)
     # ───────────────────────────────────────────────
     entidade = None
     m_ent = re.search(r"Entidade\s*:\s*(.+)", full_text, re.I)
     if m_ent:
         entidade = m_ent.group(1).strip()
-        entidade = re.sub(r"T[ée]cnico\s+respons[aá]vel.*$", "", entidade, flags=re.I).strip()
+        entidade = re.sub(
+            r"T[ée]cnico\s+respons[aá]vel.*$",
+            "",
+            entidade,
+            flags=re.I
+        ).strip()
 
     # ───────────────────────────────────────────────
-    # 🟩 3. Técnico responsável (limpeza robusta)
-    # Ex OCR: "Técnico responsável: António Cabanas Data de envio..."
+    # 🟩 3. Técnico responsável
     # ───────────────────────────────────────────────
     tecnico_resp = None
     m_tecnico = re.search(
@@ -500,7 +499,6 @@ def extract_context_from_text(full_text: str):
     )
     if m_tecnico:
         tecnico_resp = m_tecnico.group(1).strip()
-        # Remover lixo colado pelo OCR
         tecnico_resp = re.sub(r"(Data\s+.*)$", "", tecnico_resp, flags=re.I).strip()
         tecnico_resp = re.sub(r"(Ref[ºª].*)$", "", tecnico_resp, flags=re.I).strip()
         tecnico_resp = re.sub(r"(Hospedeiro.*)$", "", tecnico_resp, flags=re.I).strip()
@@ -529,16 +527,31 @@ def extract_context_from_text(full_text: str):
         if not tecnico_resp:
             ctx["responsavel_colheita"] = None
 
-    # Garante que "dgav" existe sempre (evita KeyError)
     if "dgav" not in ctx:
         ctx["dgav"] = ""
 
     # ───────────────────────────────────────────────
-    # 🟩 5. Data de colheita das amostras (inclui "Datas de recolha...")
+    # 🟩 5. ICNF vs DGAV  → define template_tipo
+    #     👉 SÓ marcamos ICNF quando a palavra ICNF aparece!
+    # ───────────────────────────────────────────────
+    is_icnf = False
+    if entidade and re.search(r"\bICNF\b", entidade, re.I):
+        is_icnf = True
+    elif re.search(r"\bICNF\b", full_text, re.I):
+        is_icnf = True
+
+    if is_icnf:
+        ctx["template_tipo"] = "ICNF_ZONAS_DEMARCADAS"
+    else:
+        # Tudo o resto (DGAV zona isenta, DGAV zona demarcada, programa nacional, etc.)
+        ctx["template_tipo"] = "PROGRAMA_NACIONAL"
+
+    # ───────────────────────────────────────────────
+    # 🟩 6. Data de colheita das amostras
     # ───────────────────────────────────────────────
     m_col = None
 
-    # Novo formato ICNF: "Datas de recolha de amostras: 04-11-2025"
+    # "Datas de recolha de amostras: 04-11-2025"
     if not m_col:
         m_col = re.search(
             r"Datas?\s+de\s+recolha\s+de\s+amostras\s*[:\-]?\s*([0-9/\-\s]+)",
@@ -546,7 +559,7 @@ def extract_context_from_text(full_text: str):
             re.I,
         )
 
-    # Outro formato: "Data colheita das amostras: 03/11/2025"
+    # "Data colheita das amostras: 03/11/2025"
     if not m_col:
         m_col = re.search(
             r"Data\s+colheita\s+das\s+amostras\s*[:\-]?\s*([0-9/\-\s]+)",
@@ -554,7 +567,7 @@ def extract_context_from_text(full_text: str):
             re.I,
         )
 
-    # Fallback antigo: "Data de colheita: 03/11/2025"
+    # Fallback: "Data de colheita: 03/11/2025"
     if not m_col:
         m_col = re.search(
             r"Data\s+de\s+colheita\s*[:\-\s]*([0-9/\-\s]+)",
@@ -568,11 +581,7 @@ def extract_context_from_text(full_text: str):
         ctx["default_colheita"] = ""
 
     # ───────────────────────────────────────────────
-    # 🟩 6. Data de envio ao laboratório
-    # Suporta:
-    #   "Data de envio das amostras ao laboratório: 07/11/2025"
-    #   "Data envio amostras ao laboratório: 07/11/2025"
-    #   "Data de envio: 07/11/2025"
+    # 🟩 7. Data de envio ao laboratório
     # ───────────────────────────────────────────────
     m_envio = re.search(
         r"Data\s+(?:do|de)?\s*envio.*?([0-9]{1,2}[\/\-\s][0-9]{1,2}[\/\-\s][0-9]{2,4})",
@@ -583,21 +592,17 @@ def extract_context_from_text(full_text: str):
     if m_envio:
         ctx["data_envio"] = normalize_date_str(m_envio.group(1))
     else:
-        # fallback: se não houver data de envio, usar colheita ou hoje
         if ctx.get("default_colheita"):
             ctx["data_envio"] = ctx["default_colheita"]
         else:
             ctx["data_envio"] = datetime.now().strftime("%d/%m/%Y")
 
     # ───────────────────────────────────────────────
-    # 🟩 7. Nº de amostras — vários formatos
-    #  a) Novo formato DGAV: "Total: 27/35 amostras"
-    #  b) ICNF: "Total:\n30\nAmostras" ou "Total: 30"
-    #  c) Fallback antigo: "Nº de amostras ..."
+    # 🟩 8. Nº de amostras declaradas (Total: ...)
     # ───────────────────────────────────────────────
     ctx["declared_samples"] = 0
 
-    # a) "Total: 27/35 amostras" → usar SEMPRE o ÚLTIMO match do bloco
+    # a) "Total: 27/35 amostras" (usa sempre o ÚLTIMO match)
     matches_frac = re.findall(
         r"Total\s*[:\-]?\s*\d+\s*/\s*([0-9]{1,4})\s*amostras",
         full_text,
@@ -609,8 +614,8 @@ def extract_context_from_text(full_text: str):
         except Exception:
             ctx["declared_samples"] = 0
 
+    # b) "Total:\n30\nAmostras" ou "Total: 30"
     if ctx["declared_samples"] == 0:
-        # b) "Total:\n30\nAmostras" ou "Total: 30" → usar o ÚLTIMO match
         matches_simple = re.findall(
             r"Total\s*[:\-]?\s*([0-9]{1,4})\s*(?:amostras)?\b",
             full_text,
@@ -620,18 +625,6 @@ def extract_context_from_text(full_text: str):
             try:
                 ctx["declared_samples"] = int(matches_simple[-1])
             except Exception:
-                ctx["declared_samples"] = 0
-                
-        # a0) DGAV – Formato: "Nº de amostras neste envio: 4"
-        m_envio = re.search(
-            r"N[º°o]?\s*de\s*amostras\s+neste\s+envio\s*[:\-]?\s*[_\s]*([0-9]{1,4})",
-            full_text,
-            flags=re.I,
-        )
-        if m_envio:
-            try:
-                ctx["declared_samples"] = int(m_envio.group(1))
-            except:
                 ctx["declared_samples"] = 0
 
     # c) Fallback antigo (Nº de amostras ...)
@@ -658,7 +651,6 @@ def extract_context_from_text(full_text: str):
                 break
 
     return ctx
-
 
 def parse_xylella_from_text_block(block_text: str, context: Dict[str, Any], req_id: int = 1) -> List[Dict[str, Any]]:
     """
@@ -867,11 +859,12 @@ def parse_xylella_tables(
       • Template ICNF novo    → 3 colunas: ref, hospedeiro, tipo
       • ICNF com contador + referência partida (1 /XF/..., 2 /XF/..., etc.)
     """
-    # Apenas ICNF/Zonas Demarcadas usam contador + /XF/... e lógica de “linha partida”
-    is_icnf = context.get("template_tipo") == "ZONAS_DEMARCADAS"
-    
-    # Detectar template ICNF → não tem coluna de observações
-    if context.get("template_tipo") == "ZONAS_DEMARCADAS":
+
+    # ⚠️ MUITO IMPORTANTE:
+    # Só mexemos no layout das colunas quando for MESMO ICNF.
+    is_icnf_zd = context.get("template_tipo") == "ICNF_ZONAS_DEMARCADAS"
+    if is_icnf_zd:
+        # ICNF: tabela sem coluna de observações / natureza
         col_ref = 0
         col_hosp = 1
         col_obs = -1   # não existe observações
@@ -880,6 +873,7 @@ def parse_xylella_tables(
     tables = result_json.get("analyzeResult", {}).get("tables", [])
     if not tables:
         return out
+
 
     def merge_ref_fragments(row, next_row=None):
         """
@@ -1599,6 +1593,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
