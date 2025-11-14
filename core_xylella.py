@@ -602,6 +602,34 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
         print(f"📝 Contexto extraído de {os.path.basename(txt_path)}")
     else:
         full_text = extract_all_text(result_json)
+    # ------------------------------------------------------------
+    # 🔎 DETEÇÃO ISOLADA DO TEMPLATE ICNF (SEM MEXER NO DGAV)
+    # ------------------------------------------------------------
+    is_icnf = (
+        ("Entidade: ICNF" in full_text.replace(" ", "")) or 
+        ("ICNF" in full_text and "/XF/ICNF" in full_text.upper())
+    )
+
+    # ------------------------------------------------------------
+    # 🟦 ICNF → parser totalmente separado, SEM usar tabelas
+    # ------------------------------------------------------------
+    if is_icnf:
+        print("🟦 Documento ICNF detetado — parser exclusivo ICNF ativado.")
+
+        # Separar blocos (cada 30 amostras típicas)
+        blocos = split_if_multiple_requisicoes(full_text)
+        if not blocos:
+            blocos = [full_text]
+
+        results = []
+        for i, bloco in enumerate(blocos, start=1):
+            ctx = extract_context_from_text(bloco)
+            rows = parse_icnf_zonas(bloco, ctx, req_id=i)
+            expected = ctx.get("declared_samples", len(rows))
+            results.append({"rows": rows, "expected": expected})
+
+        # ESTE RETURN GARANTE QUE O DGAV NÃO É AFETADO
+        return results
 
     # Detetar nº de requisições
     count, _ = detect_requisicoes(full_text)
@@ -1036,6 +1064,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
