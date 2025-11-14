@@ -849,45 +849,57 @@ def parse_xylella_tables(
 
     def merge_ref_fragments(row, next_row=None):
         """
-        Junta contador + /XF/... mesmo quando vêm partidos.
-        Exemplos:
-            ["1", "/XF/ICNF-..."]
-            ["1", ""], ["", "/XF/ICNF-..."]
-            ["3"], ["/XF/ICNF-..."]
-        Retorna "1/XF/ICNF-..." ou None se não for referência.
+        Junta contador + /XF/... apenas quando a referência está partida.
+        Não toca em referências já completas (ex: "/XF/ICNFC/...").
         """
+    
+        # 1) Se a própria linha já tem referência completa, NÃO mexemos.
+        for cel in row:
+            if "/XF/" in cel:
+                # Se já começa por número + "/XF", devolve tal como está
+                m_ok = re.match(r"^\d{1,3}/XF/", cel)
+                if m_ok:
+                    return cel.strip()
+                # Se começa apenas por "/XF", devolve direto
+                if cel.strip().startswith("/XF/"):
+                    return cel.strip()
+    
+        # 2) Procurar contador na coluna 0
         contador = None
-        ref_part = None
-
-        # contador na primeira coluna?
         if row and re.fullmatch(r"\d{1,3}", row[0].strip()):
             contador = row[0].strip()
-
-        # ref na mesma linha?
-        if len(row) > col_ref:
-            if "/XF/" in row[col_ref]:
-                ref_part = row[col_ref].strip()
-
-        # ref pode estar na linha seguinte
+    
+        # 3) Procurar referência na mesma linha
+        ref_part = None
+        for cel in row:
+            if "/XF/" in cel:
+                ref_part = cel.strip()
+                break
+    
+        # 4) Se não está aqui, procurar na linha seguinte
         if not ref_part and next_row:
             for cel in next_row:
                 if "/XF/" in cel:
                     ref_part = cel.strip()
                     break
-
+    
         if not ref_part:
-            return None
-
-        # Junta contador + referência
+            return None  # não é referência
+    
+        # 5) Se já é completa, devolver tal como está
+        if ref_part.startswith("/XF/"):
+            return ref_part
+    
+        # 6) juntar contador + referência partida
         if contador:
             merged = f"{contador}/{ref_part.lstrip('/')}"
         else:
             merged = ref_part
-
-        # Normaliza
-        merged = re.sub(r"\s+", "", merged)
+    
         merged = re.sub(r"//+", "/", merged)
+        merged = merged.strip()
         return merged
+
 
     for t in tables:
 
@@ -1525,6 +1537,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
