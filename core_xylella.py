@@ -404,17 +404,39 @@ def extract_context_from_text(full_text: str):
     ctx: Dict[str, Any] = {}
 
     # ───────────────────────────────────────────────
-    # 🟩 1. Zona (ICNF "Zona demarcada:" OU DGAV "(Zona Isenta)")
+    # 🟩 1. Zona (ICNF "Zona demarcada" ENTRE "Zona demarcada" e "Entidade:")
     # ───────────────────────────────────────────────
-    m_zd = re.search(r"Zona\s+demarcada\s*:\s*(.+)", full_text, re.I)
-    if m_zd:
-        ctx["zona"] = m_zd.group(1).strip()
+    zona = None
+
+    # Caso típico OCR: "Zona demarcada: Centro/Covilhã-Fundão Entidade: ICNF ..."
+    m_zd_span = re.search(
+        r"Zona\s+demarcada\s*:?\s*(.+?)(?=\s+Entidade\s*:)",
+        full_text,
+        flags=re.I | re.S,      # DOTALL para apanhar se houver quebra de linha
+    )
+    if m_zd_span:
+        zona = m_zd_span.group(1).strip()
+    else:
+        # Fallback antigo: tudo depois de "Zona demarcada:" até ao fim da linha
+        m_zd_line = re.search(
+            r"Zona\s+demarcada\s*:?\s*(.+)",
+            full_text,
+            flags=re.I,
+        )
+        if m_zd_line:
+            zona = m_zd_line.group(1).strip()
+
+    if zona:
+        # normalizar espaços, mas NÃO mexer em caracteres como "/"
+        zona = re.sub(r"\s+", " ", zona)
+        ctx["zona"] = zona
         ctx["template_tipo"] = "ZONAS_DEMARCADAS"
     else:
         # Ex: "Prospeção de: Xylella fastidiosa (Zona Isenta)"
         m_zona = re.search(r"Xylella\s+fastidiosa\s*\(([^)]+)\)", full_text, re.I)
         ctx["zona"] = m_zona.group(1).strip() if m_zona else "Zona Isenta"
         ctx["template_tipo"] = "PROGRAMA_NACIONAL"
+
 
     # ───────────────────────────────────────────────
     # 🟩 2. Entidade (ICNF / DGAV)
@@ -1415,6 +1437,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
