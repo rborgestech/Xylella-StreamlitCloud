@@ -586,12 +586,21 @@ def extract_context_from_text(full_text: str):
 
 
 def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, Any]]:
-    """Extrai as amostras das tabelas Azure OCR, aplicando o contexto da requisição."""
+    """
+    Extrai as amostras das tabelas Azure OCR, aplicando o contexto da requisição.
+
+    Nova lógica:
+      - deteta dinamicamente a coluna da referência (DGAV antigo, DGAV ZD, etc.).
+      - deteta a coluna do hospedeiro (logo a seguir à referência, que não seja só 'Simples/Composta').
+      - continua a ler o tipo ('Simples', 'Composta', ...) a partir da linha completa.
+    """
     out: List[Dict[str, Any]] = []
     tables = result_json.get("analyzeResult", {}).get("tables", [])
     if not tables:
         print("⚠️ Nenhuma tabela encontrada.")
         return out
+
+    tipo_keywords = ("simples", "composta", "composto", "individual")
 
     for t in tables:
         nc = max(c.get("columnIndex", 0) for c in t.get("cells", [])) + 1
@@ -600,29 +609,86 @@ def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, An
         for c in t.get("cells", []):
             grid[c["rowIndex"]][c["columnIndex"]] = clean_value(c.get("content", ""))
 
+        # ───────────────────────────────────────────────
+        # 1. Descobrir coluna da referência (DGAV /XF..., 01/LVT/DGAV..., etc.)
+        # ───────────────────────────────────────────────
+        ref_scores = [0] * nc
+        for r in range(nr):
+            for c in range(nc):
+                val = grid[r][c]
+                if not val:
+                    continue
+                cand = _clean_ref(val)
+                if not cand:
+                    continue
+                if "/XF/" in cand.upper() or re.search(r"\d{1,3}/[A-Z]{1,3}/", cand):
+                    ref_scores[c] += 1
+        if max(ref_scores) > 0:
+            ref_col = ref_scores.index(max(ref_scores))
+        else:
+            ref_col = 0  # fallback clássico
+
+        # ───────────────────────────────────────────────
+        # 2. Descobrir coluna do hospedeiro
+        #    (primeira coluna à direita da ref que não seja só 'Simples/Composta')
+        # ───────────────────────────────────────────────
+        host_col = None
+        for c in range(ref_col + 1, nc):
+            col_vals = [grid[r][c] for r in range(nr) if grid[r][c]]
+            if not col_vals:
+                continue
+            tipo_like = 0
+            for v in col_vals:
+                first_word = str(v).strip().split()[0].lower()
+                if first_word in tipo_keywords:
+                    tipo_like += 1
+            if tipo_like < len(col_vals):  # há valores que não são só 'Simples/Composta'
+                host_col = c
+                break
+
+        if host_col is None:
+            # fallback razoável
+            if ref_col == 0 and nc > 1:
+                host_col = 1
+            else:
+                host_col = min(ref_col + 1, nc - 1)
+
+        # ───────────────────────────────────────────────
+        # 3. Percorrer linhas e construir amostras
+        # ───────────────────────────────────────────────
         for row in grid:
             if not row or not any(row):
                 continue
-            ref = _clean_ref(row[0]) if len(row) > 0 else ""
+
+            if ref_col >= len(row):
+                continue
+            ref = _clean_ref(row[ref_col])
             if not ref or re.match(r"^\D+$", ref):
                 continue
 
-            hospedeiro = row[2] if len(row) > 2 else ""
-            obs        = row[3] if len(row) > 3 else ""
+            hospedeiro = row[host_col] if host_col < len(row) else ""
+            other_parts = [
+                row[c]
+                for c in range(len(row))
+                if c not in (ref_col, host_col) and isinstance(row[c], str)
+            ]
+            joined = " ".join([ref, hospedeiro] + other_parts)
+            obs = " ".join(other_parts)
 
             if _looks_like_natureza(hospedeiro):
                 hospedeiro = ""
 
+            # Tipo da amostra
             tipo = ""
-            joined = " ".join([x for x in row if isinstance(x, str)])
             m_tipo = re.search(r"\b(Simples|Composta|Composto|Individual)\b", joined, re.I)
             if m_tipo:
                 tipo = m_tipo.group(1).capitalize()
-                # 🔧 Correção do erro comum: "Composto" → "Composta"
                 if tipo.lower() == "composto":
                     tipo = "Composta"
+                # remove o tipo do campo observações
                 obs = re.sub(r"\b(Simples|Composta|Composto|Individual)\b", "", obs, flags=re.I).strip()
 
+            # Data de colheita: mapeamento por asteriscos, se existir
             datacolheita = context.get("default_colheita", "")
             m_ast = re.search(r"\(\s*\*+\s*\)", joined)
             if m_ast:
@@ -640,17 +706,17 @@ def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, An
                 "hospedeiro": hospedeiro,
                 "tipo": tipo,
                 "zona": context["zona"],
-                "responsavelamostra": context["dgav"],
-                "responsavelcolheita": context["responsavel_colheita"],
+                "responsavelamostra": context.get("dgav"),
+                "responsavelcolheita": context.get("responsavel_colheita"),
                 "observacoes": obs.strip(),
                 "procedure": "XYLELLA",
                 "datarequerido": context["data_envio"],
-                "Score": ""
+                "Score": "",
             })
-    # 🧩 Fallback — tentar extrair linhas da tabela via regex se Azure não devolveu cells válidas
+
+    # ┐ Fallback regex antigo, se nada veio das tabelas
     if not out:
         full_text = extract_all_text(result_json)
-        # procura padrões tipo "63020099" ou "01/LVT/DGAV-23/..." etc.
         pattern = re.compile(r"(\d{5,8}|[0-9]{1,3}/[A-Z]{1,3}/DGAV[-/]?\d{0,4})", re.I)
         matches = pattern.findall(full_text)
         if matches:
@@ -663,12 +729,12 @@ def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, An
                     "hospedeiro": "",
                     "tipo": "",
                     "zona": context["zona"],
-                    "responsavelamostra": context["dgav"],
-                    "responsavelcolheita": context["responsavel_colheita"],
+                    "responsavelamostra": context.get("dgav"),
+                    "responsavelcolheita": context.get("responsavel_colheita"),
                     "observacoes": "",
                     "procedure": "XYLELLA",
                     "datarequerido": context["data_envio"],
-                    "Score": ""
+                    "Score": "",
                 })
             print(f"🔍 Fallback regex: {len(matches)} amostras detetadas.")
 
@@ -1239,6 +1305,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
