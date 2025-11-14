@@ -399,9 +399,6 @@ def _to_datetime(value: str):
     except Exception:
         return None
 
-
-
-
 def extract_context_from_text(full_text: str):
     """Extrai informações gerais da requisição (zona, DGAV/ICNF, datas, nº de amostras)."""
     ctx: Dict[str, Any] = {}
@@ -430,7 +427,12 @@ def extract_context_from_text(full_text: str):
     m_ent = re.search(r"Entidade\s*:\s*(.+)", full_text, re.I)
     if m_ent:
         entidade = m_ent.group(1).strip()
-        entidade = re.sub(r"T[ée]cnico\s+respons[aá]vel.*$", "", entidade, flags=re.I).strip()
+        entidade = re.sub(
+            r"T[ée]cnico\s+respons[aá]vel.*$",
+            "",
+            entidade,
+            flags=re.I,
+        ).strip()
 
     # ───────────────────────────────────────────────
     # 🟩 3. Técnico responsável
@@ -516,13 +518,15 @@ def extract_context_from_text(full_text: str):
     if m_envio:
         ctx["data_envio"] = normalize_date_str(m_envio.group(1))
     else:
-        ctx["data_envio"] = ctx.get("default_colheita", "") or datetime.now().strftime("%d/%m/%Y")
+        ctx["data_envio"] = (
+            ctx.get("default_colheita", "") or datetime.now().strftime("%d/%m/%Y")
+        )
 
     # ───────────────────────────────────────────────
     # 🟩 6. Nº de amostras declaradas
     #    Suporta:
     #      • "Total: 27/35 amostras"
-    #      • "Total:\n30"
+    #      • "Total:\n30" ou "Total: 30"
     # ───────────────────────────────────────────────
     ctx["declared_samples"] = 0
 
@@ -560,7 +564,12 @@ def extract_context_from_text(full_text: str):
                 m = re.search(pat, flat, re.I)
                 if m:
                     raw = m.group(1)
-                    raw = raw.replace("O", "0").replace("o", "0").replace("Q", "0").replace("I", "1")
+                    raw = (
+                        raw.replace("O", "0")
+                        .replace("o", "0")
+                        .replace("Q", "0")
+                        .replace("I", "1")
+                    )
                     try:
                         ctx["declared_samples"] = int(raw)
                     except Exception:
@@ -568,6 +577,7 @@ def extract_context_from_text(full_text: str):
                     break
 
     return ctx
+
 
 def parse_xylella_from_text_block(block_text: str, context: Dict[str, Any], req_id: int = 1) -> List[Dict[str, Any]]:
     """
@@ -851,15 +861,14 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
             print(f"❌ Erro no bloco {bi+1}: {e}")
             out[bi] = []
 
-    # Remover blocos vazios no fim (mantém ordenação)
-    out = [req for req in out if req]
-    print(f"\n🏁 Concluído: {len(out)} requisições com amostras extraídas (atribuição exclusiva).")
-
-    # 🔹 Devolve [{rows, expected}] para validação esperadas/processadas
-    results = []
-    for bi, bloco in enumerate(blocos[:len(out)], start=1):
+        # Remover blocos vazios no fim (mantém ordenação)
+        out = [req for req in out if req]
+        print(f"\n🏁 Concluído: {len(out)} requisições com amostras extraídas (atribuição exclusiva).")
+    
+        # 🔹 Devolve [{rows, expected}] para validação esperadas/processadas
+        results = []
+        for bi, bloco in enumerate(blocos[:len(out)], start=1):
             ctx = extract_context_from_text(bloco)
-            # se não houver nº declarado, usa o nº de linhas realmente extraídas
             expected = ctx.get("declared_samples") or len(out[bi - 1])
             results.append({
                 "rows": out[bi - 1],
@@ -1303,6 +1312,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
