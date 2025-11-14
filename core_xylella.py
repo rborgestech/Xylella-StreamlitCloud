@@ -847,22 +847,70 @@ def parse_xylella_tables(
     if not tables:
         return out
 
+    def merge_ref_fragments(row, next_row=None):
+        """
+        Junta contador + /XF/... mesmo quando vêm partidos.
+        Exemplos:
+            ["1", "/XF/ICNF-..."]
+            ["1", ""], ["", "/XF/ICNF-..."]
+            ["3"], ["/XF/ICNF-..."]
+        Retorna "1/XF/ICNF-..." ou None se não for referência.
+        """
+        contador = None
+        ref_part = None
+
+        # contador na primeira coluna?
+        if row and re.fullmatch(r"\d{1,3}", row[0].strip()):
+            contador = row[0].strip()
+
+        # ref na mesma linha?
+        if len(row) > col_ref:
+            if "/XF/" in row[col_ref]:
+                ref_part = row[col_ref].strip()
+
+        # ref pode estar na linha seguinte
+        if not ref_part and next_row:
+            for cel in next_row:
+                if "/XF/" in cel:
+                    ref_part = cel.strip()
+                    break
+
+        if not ref_part:
+            return None
+
+        # Junta contador + referência
+        if contador:
+            merged = f"{contador}/{ref_part.lstrip('/')}"
+        else:
+            merged = ref_part
+
+        # Normaliza
+        merged = re.sub(r"\s+", "", merged)
+        merged = re.sub(r"//+", "/", merged)
+        return merged
+
     for t in tables:
-        # reconstrução da grelha
+
+        # reconstruir grelha
         nc = max(c.get("columnIndex", 0) for c in t.get("cells", [])) + 1
         nr = max(c.get("rowIndex", 0) for c in t.get("cells", [])) + 1
         grid = [[""] * nc for _ in range(nr)]
         for c in t.get("cells", []):
             grid[c["rowIndex"]][c["columnIndex"]] = clean_value(c.get("content", ""))
 
-        for row in grid:
+        # percorre linhas com índice correto
+        for row_index, row in enumerate(grid):
             if not row or not any(row):
                 continue
 
-            # referência
-            ref = merge_counter_and_ref(row, next_row=grid[row_index+1] if row_index+1 < nr else None)
+            # reconstruir referência
+            ref = merge_ref_fragments(
+                row,
+                next_row=grid[row_index + 1] if row_index + 1 < nr else None
+            )
             if not ref:
                 continue
+
             ref = _clean_ref(ref)
 
             # hospedeiro
@@ -870,12 +918,12 @@ def parse_xylella_tables(
             if _looks_like_natureza(hospedeiro):
                 hospedeiro = ""
 
-            # observações (só DGAV antigo)
+            # observações (DGAV)
             obs = ""
             if col_obs >= 0 and len(row) > col_obs:
                 obs = row[col_obs]
 
-            # tipo (extraído por regex)
+            # tipo (Simples / Composta / Individual)
             joined = " ".join(x for x in row if isinstance(x, str))
             tipo = ""
             m_tipo = re.search(r"\b(Simples|Composta|Individual|Composto)\b", joined, re.I)
@@ -884,7 +932,7 @@ def parse_xylella_tables(
                 if tipo.lower() == "composto":
                     tipo = "Composta"
 
-            # data colheita
+            # datas
             datacolheita = context.get("default_colheita", "")
 
             out.append({
@@ -894,7 +942,7 @@ def parse_xylella_tables(
                 "referencia": ref,
                 "hospedeiro": hospedeiro,
                 "tipo": tipo,
-                "zona": context.get("zona", ""),   # sempre do contexto
+                "zona": context.get("zona", ""),
                 "responsavelamostra": context.get("dgav", ""),
                 "responsavelcolheita": context.get("responsavel_colheita", ""),
                 "observacoes": obs.strip(),
@@ -1477,6 +1525,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
