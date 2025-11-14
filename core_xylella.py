@@ -467,12 +467,25 @@ def extract_context_from_text(full_text: str):
             zona = m_zd_line.group(1).strip()
 
     if zona:
+        # normalizar espaços, mas NÃO mexer em caracteres como "/"
         zona = re.sub(r"\s+", " ", zona)
         ctx["zona"] = zona
     else:
-        # Ex: "Xylella fastidiosa (Zona Isenta)"
+        # Ex: "Prospeção de: Xylella fastidiosa (Zona Isenta)"
         m_zona = re.search(r"Xylella\s+fastidiosa\s*\(([^)]+)\)", full_text, re.I)
         ctx["zona"] = m_zona.group(1).strip() if m_zona else "Zona Isenta"
+
+    # ── aqui é que decidimos o tipo de template
+    is_icnf = bool(
+        re.search(r"Entidade\s*:\s*ICNF", full_text, re.I)
+        and re.search(r"/XF/ICNFC/", full_text, re.I)
+    )
+    if is_icnf:
+        ctx["template_tipo"] = "ICNF_ZONAS_DEMARCADAS"
+    elif "Zona demarcada" in full_text:
+        ctx["template_tipo"] = "ZONAS_DEMARCADAS_DGAV"
+    else:
+        ctx["template_tipo"] = "PROGRAMA_NACIONAL"
 
     # ───────────────────────────────────────────────
     # 🟩 2. Entidade (ICNF / DGAV ...)
@@ -856,17 +869,20 @@ def parse_xylella_tables(
     Extrai as amostras das tabelas Azure OCR, aplicando o contexto da requisição.
     Suporta:
       • Template DGAV antigo  → 4 colunas: ref, natureza, hosp, tipo
-      • Template ICNF novo    → 3 colunas: ref, hospedeiro, tipo
-      • ICNF com contador + referência partida (1 /XF/..., 2 /XF/..., etc.)
+      • DGAV Zonas Demarcadas → 3 colunas: ref, hospedeiro, tipo
+      • ICNF novo             → vamos evitar usar tabelas (usa parser vertical)
     """
 
-    # ⚠️ Só tratamos layout especial quando for MESMO ICNF
-    is_icnf_zd = context.get("template_tipo") == "ICNF_ZONAS_DEMARCADAS"
-    if is_icnf_zd:
-        # ICNF: tabela sem coluna de observações / natureza
+    template_tipo = context.get("template_tipo")
+
+    # DGAV Zonas Demarcadas → tabela sem coluna de observações
+    if template_tipo == "ZONAS_DEMARCADAS_DGAV":
         col_ref = 0
         col_hosp = 1
         col_obs = -1   # não existe observações
+
+    # Para ICNF_ZONAS_DEMARCADAS **não** mexemos aqui:
+    # vamos tratá-lo separadamente no parse_all_requisitions, sem usar tabelas.
 
     out: List[Dict[str, Any]] = []
     tables = result_json.get("analyzeResult", {}).get("tables", [])
@@ -1027,11 +1043,28 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
         full_text = extract_all_text(result_json)
 
     # 🔎 DETEÇÃO DO NOVO TEMPLATE ICNF / ZONAS DEMARCADAS (texto livre)
-    icnf_pattern = re.compile(
-        r"prospe[cç][aã]o\s*de:?\s*xylella\s+fastidiosa\s+em\s+zonas\s+demarcadas",
-        re.IGNORECASE,
+    is_icnf = bool(
+        re.search(r"Entidade\s*:\s*ICNF", full_text, re.I)
+        and re.search(r"/XF/ICNFC/", full_text, re.I)
     )
-    is_icnf = icnf_pattern.search(full_text) is not None
+    # ───────────────────────────────────────────────
+    # 🔵 CASO ESPECIAL — ICNF (usa parser vertical, ignora tabelas)
+    # ───────────────────────────────────────────────
+    if is_icnf:
+        print("🟦 Documento ICNF detetado — parser vertical ativado.")
+        blocos = split_if_multiple_requisicoes(full_text)
+        if not blocos:
+            blocos = [full_text]
+    
+        results = []
+        for idx, bloco in enumerate(blocos, start=1):
+            ctx = extract_context_from_text(bloco)
+            rows = parse_icnf_zonas(bloco, ctx, req_id=idx)
+            expected = ctx.get("declared_samples", len(rows))
+            results.append({"rows": rows, "expected": expected})
+    
+        print(f"🟦 ICNF: {len(results)} requisições processadas.")
+        return results
 
     # Detetar nº de requisições (DGAV/ICNF)
     count, _ = detect_requisicoes(full_text)
@@ -1588,6 +1621,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
