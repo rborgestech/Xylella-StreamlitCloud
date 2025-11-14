@@ -769,19 +769,24 @@ def parse_xylella_tables(
 ) -> List[Dict[str, Any]]:
     """
     Extrai as amostras das tabelas Azure OCR, aplicando o contexto da requisição.
-    Suporta ambos templates:
-      • Template antigo DGAV   → colunas 0,2,3
-      • Template novo ICNF     → colunas 0,1,2
-    As colunas podem ser ajustadas por parâmetros.
+    Suporta:
+      • Template DGAV antigo  → 4 colunas: ref, natureza, hosp, tipo
+      • Template ICNF novo    → 3 colunas: ref, hospedeiro, tipo
     """
+
+    # Detectar template ICNF → não tem coluna de observações
+    if context.get("template_tipo") == "ZONAS_DEMARCADAS":
+        col_ref = 0
+        col_hosp = 1
+        col_obs = -1   # não existe observações
+
     out: List[Dict[str, Any]] = []
     tables = result_json.get("analyzeResult", {}).get("tables", [])
     if not tables:
-        print("⚠️ Nenhuma tabela encontrada.")
         return out
 
     for t in tables:
-        # reconstrução da tabela
+        # reconstrução da grelha
         nc = max(c.get("columnIndex", 0) for c in t.get("cells", [])) + 1
         nr = max(c.get("rowIndex", 0) for c in t.get("cells", [])) + 1
         grid = [[""] * nc for _ in range(nr)]
@@ -802,18 +807,19 @@ def parse_xylella_tables(
             if _looks_like_natureza(hospedeiro):
                 hospedeiro = ""
 
-            # observações
-            obs = row[col_obs] if len(row) > col_obs else ""
+            # observações (só DGAV antigo)
+            obs = ""
+            if col_obs >= 0 and len(row) > col_obs:
+                obs = row[col_obs]
 
-            # determinar tipo (simples/composta)
-            joined = " ".join([x for x in row if isinstance(x, str)])
+            # tipo (extraído por regex)
+            joined = " ".join(x for x in row if isinstance(x, str))
             tipo = ""
             m_tipo = re.search(r"\b(Simples|Composta|Individual|Composto)\b", joined, re.I)
             if m_tipo:
                 tipo = m_tipo.group(1).capitalize()
                 if tipo.lower() == "composto":
                     tipo = "Composta"
-                obs = re.sub(r"\b(Simples|Composta|Individual|Composto)\b", "", obs, flags=re.I).strip()
 
             # data colheita
             datacolheita = context.get("default_colheita", "")
@@ -825,7 +831,7 @@ def parse_xylella_tables(
                 "referencia": ref,
                 "hospedeiro": hospedeiro,
                 "tipo": tipo,
-                "zona": context.get("zona", ""),
+                "zona": context.get("zona", ""),   # sempre do contexto
                 "responsavelamostra": context.get("dgav", ""),
                 "responsavelcolheita": context.get("responsavel_colheita", ""),
                 "observacoes": obs.strip(),
@@ -834,8 +840,8 @@ def parse_xylella_tables(
                 "Score": "",
             })
 
-    print(f"✅ {len(out)} amostras extraídas no total (req_id={req_id}).")
     return out
+
 
 # ───────────────────────────────────────────────
 # Dividir em requisições e extrair por bloco
@@ -1408,6 +1414,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
