@@ -45,6 +45,8 @@ st.set_page_config(page_title="Xylella Processor", page_icon="🧪", layout="cen
 st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 ficheiro Excel por requisição.")
 
+if "processed_files" not in st.session_state:
+    st.session_state.processed_files = set()
 # ───────────────────────────────────────────────
 # CSS — estilo azul + animações suaves
 # ───────────────────────────────────────────────
