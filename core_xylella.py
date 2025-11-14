@@ -759,6 +759,84 @@ def parse_icnf_requisition(result_json, full_text, pdf_name, txt_path=None):
     expected = ctx["declared_samples"] or len(rows)
     return [{"rows": rows, "expected": expected}] if rows else []
 
+def parse_xylella_tables(
+    result_json,
+    context,
+    req_id: int | None = None,
+    col_ref: int = 0,
+    col_hosp: int = 1,
+    col_obs: int = 2,
+) -> List[Dict[str, Any]]:
+    """
+    Extrai as amostras das tabelas Azure OCR, aplicando o contexto da requisição.
+    Suporta ambos templates:
+      • Template antigo DGAV   → colunas 0,2,3
+      • Template novo ICNF     → colunas 0,1,2
+    As colunas podem ser ajustadas por parâmetros.
+    """
+    out: List[Dict[str, Any]] = []
+    tables = result_json.get("analyzeResult", {}).get("tables", [])
+    if not tables:
+        print("⚠️ Nenhuma tabela encontrada.")
+        return out
+
+    for t in tables:
+        # reconstrução da tabela
+        nc = max(c.get("columnIndex", 0) for c in t.get("cells", [])) + 1
+        nr = max(c.get("rowIndex", 0) for c in t.get("cells", [])) + 1
+        grid = [[""] * nc for _ in range(nr)]
+        for c in t.get("cells", []):
+            grid[c["rowIndex"]][c["columnIndex"]] = clean_value(c.get("content", ""))
+
+        for row in grid:
+            if not row or not any(row):
+                continue
+
+            # referência
+            ref = _clean_ref(row[col_ref]) if len(row) > col_ref else ""
+            if not ref or re.match(r"^\D+$", ref):
+                continue
+
+            # hospedeiro
+            hospedeiro = row[col_hosp] if len(row) > col_hosp else ""
+            if _looks_like_natureza(hospedeiro):
+                hospedeiro = ""
+
+            # observações
+            obs = row[col_obs] if len(row) > col_obs else ""
+
+            # determinar tipo (simples/composta)
+            joined = " ".join([x for x in row if isinstance(x, str)])
+            tipo = ""
+            m_tipo = re.search(r"\b(Simples|Composta|Individual|Composto)\b", joined, re.I)
+            if m_tipo:
+                tipo = m_tipo.group(1).capitalize()
+                if tipo.lower() == "composto":
+                    tipo = "Composta"
+                obs = re.sub(r"\b(Simples|Composta|Individual|Composto)\b", "", obs, flags=re.I).strip()
+
+            # data colheita
+            datacolheita = context.get("default_colheita", "")
+
+            out.append({
+                "requisicao_id": req_id,
+                "datarececao": context.get("data_envio", ""),
+                "datacolheita": datacolheita,
+                "referencia": ref,
+                "hospedeiro": hospedeiro,
+                "tipo": tipo,
+                "zona": context.get("zona", ""),
+                "responsavelamostra": context.get("dgav", ""),
+                "responsavelcolheita": context.get("responsavel_colheita", ""),
+                "observacoes": obs.strip(),
+                "procedure": "XYLELLA",
+                "datarequerido": context.get("data_envio", ""),
+                "Score": "",
+            })
+
+    print(f"✅ {len(out)} amostras extraídas no total (req_id={req_id}).")
+    return out
+
 # ───────────────────────────────────────────────
 # Dividir em requisições e extrair por bloco
 # ───────────────────────────────────────────────
@@ -1330,6 +1408,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
