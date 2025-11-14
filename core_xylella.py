@@ -281,48 +281,42 @@ def detect_requisicoes(full_text: str):
 
 
 def split_if_multiple_requisicoes(full_text: str) -> List[str]:
-    """Divide o texto OCR em blocos distintos, um por requisição DGAV→SGS."""
-    # Limpeza leve (como no Colab) para juntar tokens partidos por \n
     text = full_text.replace("\r", "")
-    text = re.sub(r"(\w)[\n\s]+(\w)", r"\1 \2", text)              # junta palavras quebradas
-    text = re.sub(r"(\d+)\s*/\s*([Xx][Ff])", r"\1/\2", text)       # "01 /Xf" → "01/Xf"
-    text = re.sub(r"([Dd][Gg][Aa][Vv])[\s\n]*-", r"\1-", text)     # "DGAV -" → "DGAV-"
-    text = re.sub(r"([Ee][Dd][Mm])\s*/\s*(\d+)", r"\1/\2", text)   # "EDM /25" → "EDM/25"
-    text = re.sub(r"[ \t]+", " ", text)                            # espaços múltiplos
+    text = re.sub(r"(\w)[\n\s]+(\w)", r"\1 \2", text)
+    text = re.sub(r"(\d+)\s*/\s*([Xx][Ff])", r"\1/\2", text)
+    text = re.sub(r"([Dd][Gg][Aa][Vv])[\s\n]*-", r"\1-", text)
+    text = re.sub(r"([Ee][Dd][Mm])\s*/\s*(\d+)", r"\1/\2", text)
+    text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{2,}", "\n", text)
 
+    # match ao início de cada requisição
     pattern = re.compile(
-        r"(?:PROGRAMA\s+NACIONAL\s+DE\s+PROSPE[ÇC][AÃ]O\s+DE\s+PRAGAS\s+DE\s+QUARENTENA"
-        r"|PROSPE[ÇC][AÃ]O\s*DE:?\s*XYLELLA\s+FASTIDIOSA\s+EM\s+ZONAS\s+DEMARCADAS)",
-        re.IGNORECASE,
+        r"Prospe[çc][aã]o\s*de:?\s*Xylella\s+fastidiosa\s+em\s+Zonas\s+Demarcadas",
+        re.IGNORECASE
     )
     marks = [m.start() for m in pattern.finditer(text)]
 
     if not marks:
-        print("🔍 Nenhum cabeçalho encontrado — tratado como 1 requisição.")
         return [text]
     if len(marks) == 1:
-        print("🔍 Apenas 1 cabeçalho — 1 requisição detectada.")
         return [text]
 
     marks.append(len(text))
     blocos = []
 
     for i in range(len(marks) - 1):
-        # bloco começa EXACTAMENTE no cabeçalho detectado
         start = marks[i]
-
-        # bloco termina EXACTAMENTE antes do cabeçalho seguinte
         end = marks[i + 1]
 
-        bloco = text[start:end].strip()
+        bloco = text[start:end]
 
-        if len(bloco) > 100:   # ICNF e DGAV têm sempre blocos grandes
-            blocos.append(bloco)
-        else:
-            print(f"⚠️ Bloco {i+1} demasiado pequeno ({len(bloco)} chars).")
+        # cortar tudo a partir de "Refª da amostra" DO BLOCO SEGUINTE
+        cut = re.search(r"Ref[ªa]\s*da\s*amostra", bloco, re.I)
+        if cut:
+            bloco = bloco[cut.start():]  # começa na linha correta
 
-    print(f"🔍 Detetadas {len(blocos)} requisições distintas (por cabeçalho).")
+        blocos.append(bloco.strip())
+
     return blocos
 
 def normalize_ocr_line(ln: str) -> str:
@@ -1605,6 +1599,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
