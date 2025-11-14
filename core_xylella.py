@@ -677,57 +677,77 @@ def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, An
 
 def parse_icnf_zonas(full_text: str, ctx: dict, req_id: int = 1) -> List[Dict[str, Any]]:
     """
-    Parser vertical para ICNF / Zonas Demarcadas.
-    Lê linha a linha e extrai referência / hospedeiro / tipo.
-    Ignora completamente tabelas do Azure.
+    Parser robusto para ICNF / Zonas Demarcadas:
+    - Suporta coluna extra com numeração (1  /XF/...)
+    - Suporta casos partidos em 2 linhas (3 \n /XF/...)
+    - Extrai hospedeiro + tipo corretamente
     """
-    linhas = [l.strip() for l in full_text.splitlines() if l.strip()]
+
+    lines = [l.strip() for l in full_text.splitlines() if l.strip()]
     out = []
+    pending_ref = None
 
-    # referência ICNF típica: 1 /XF/ICNFC/COV-FND/AC/25
-    re_ref = re.compile(r"^\d{1,3}\s*/\s*XF/[A-Z0-9\-/]+", re.I)
-    pend_ref = None
+    for i, ln in enumerate(lines):
+        # ============================
+        # 1) Junta casos “3” + “/XF/…”
+        # ============================
+        if re.fullmatch(r"\d{1,3}", ln) and i + 1 < len(lines):
+            nxt = lines[i + 1].strip()
+            if nxt.startswith(("/XF", "XF")):
+                ln = f"{ln} {nxt}"
 
-    for ln in linhas:
-        # junta casos: "3"   "/XF/ICNF..." → "3 /XF..."
-        ln = re.sub(r"(\d{1,3})\s*/\s*(XF)", r"\1 /XF", ln, flags=re.I)
+        # ====================================================
+        # 2) Linha começa com número + referência? (caso típico)
+        # ====================================================
+        m = re.match(r"^(\d{1,3})\s+(\/?XF\/[A-Z0-9\-/]+)", ln, re.I)
+        if m:
+            numero = m.group(1)
+            ref = m.group(2)
 
-        if re_ref.match(ln):
-            pend_ref = _clean_ref(ln)
+            # Normalize
+            ref = _clean_ref(f"{numero} {ref}")
+            pending_ref = ref
             continue
 
-        if pend_ref:
-            hosp = ln
+        # ====================================================
+        # 3) Caso: linha inteira já é a referência (sem número)
+        # ====================================================
+        if re.match(r"^\d{1,3}\s*/XF/[A-Z0-9\-/]+", ln, re.I):
+            pending_ref = _clean_ref(ln)
+            continue
 
+        # ====================================================
+        # 4) Se temos uma referência pendente → esta linha é hospedeiro + tipo
+        # ====================================================
+        if pending_ref:
+            hosp = ln
             tipo = ""
-            m_tipo = re.search(r"(Simples|Composta|Composto|Individual)", ln, re.I)
+
+            # Extrair tipo
+            m_tipo = re.search(r"\b(Simples|Composta|Composto|Individual)\b", ln, re.I)
             if m_tipo:
                 tipo = m_tipo.group(1).capitalize()
                 hosp = ln[:m_tipo.start()].strip()
 
-            # “composTA 3” ou “Composta (3)”
-            if not tipo:
-                m_n = re.search(r"Compost[ao]?\s*\(?\d+\)?", ln, re.I)
-                if m_n:
-                    tipo = "Composta"
+            # Remover ruído tipo "(3)" ou "(1)"
+            hosp = re.sub(r"\(\s*\d+\s*\)", "", hosp).strip()
 
             out.append({
                 "requisicao_id": req_id,
-                "datarececao": ctx.get("data_envio",""),
-                "datacolheita": ctx.get("default_colheita",""),
-                "referencia": pend_ref,
+                "datarececao": ctx.get("data_envio", ""),
+                "datacolheita": ctx.get("default_colheita", ""),
+                "referencia": pending_ref,
                 "hospedeiro": hosp,
                 "tipo": tipo,
-                "zona": ctx.get("zona",""),
-                "responsavelamostra": ctx.get("entidade","ICNF"),
-                "responsavelcolheita": ctx.get("tecnico",""),
+                "zona": ctx.get("zona", ""),
+                "responsavelamostra": ctx.get("entidade", "ICNF"),
+                "responsavelcolheita": ctx.get("responsavel_colheita", ""),
                 "observacoes": "",
                 "procedure": "XYLELLA",
-                "datarequerido": ctx.get("data_envio",""),
-                "Score": ""
+                "datarequerido": ctx.get("data_envio", "")
             })
 
-            pend_ref = None
+            pending_ref = None
 
     print(f"🟦 parse_icnf_zonas: {len(out)} amostras extraídas (req {req_id})")
     return out
@@ -1219,6 +1239,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
