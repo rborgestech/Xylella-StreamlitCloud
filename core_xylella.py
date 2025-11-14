@@ -1052,6 +1052,7 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
         return [{"rows": amostras, "expected": expected}] if amostras else []
 
 
+
     # ───────────────────────────────────────────────
     # MÚLTIPLAS REQUISIÇÕES — segmentar por cabeçalhos
     # (caso típico DGAV com várias requisições no mesmo PDF)
@@ -1579,6 +1580,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
