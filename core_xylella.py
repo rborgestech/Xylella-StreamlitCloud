@@ -866,7 +866,9 @@ def parse_xylella_tables(
       • Template ICNF novo    → 3 colunas: ref, hospedeiro, tipo
       • ICNF com contador + referência partida (1 /XF/..., 2 /XF/..., etc.)
     """
-
+    # Apenas ICNF/Zonas Demarcadas usam contador + /XF/... e lógica de “linha partida”
+    is_icnf = context.get("template_tipo") == "ZONAS_DEMARCADAS"
+    
     # Detectar template ICNF → não tem coluna de observações
     if context.get("template_tipo") == "ZONAS_DEMARCADAS":
         col_ref = 0
@@ -1592,6 +1594,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
