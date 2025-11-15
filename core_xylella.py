@@ -613,16 +613,27 @@ def extract_context_from_text(full_text: str):
         except ValueError:
             pass
 
+
     # 📌 ICNF — Capturar padrão "Total:\n30" ou "Total:\n20"
-    # (em ICNF vem sempre separado em duas linhas)
-    lines = full_text.splitlines()
-    for i in range(len(lines) - 1):
-        if re.match(r"^\s*Total\s*:?\s*$", lines[i], re.I):
-            nxt = lines[i + 1].strip()
-            if nxt.isdigit():
-                val = int(nxt)
-                if val > declared_samples:
-                    declared_samples = val
+    # (vem em duas linhas e pode haver restos da requisição anterior)
+    if entidade and "ICNF" in entidade.upper() and "DGAV" not in entidade.upper():
+        lines = full_text.splitlines()
+        separated_totals: List[int] = []
+        for i, line in enumerate(lines):
+            if re.match(r"^\s*Total\s*:?\s*$", line, re.I):
+                # procura a próxima linha não vazia com dígitos
+                j = i + 1
+                while j < len(lines) and not lines[j].strip():
+                    j += 1
+                if j < len(lines):
+                    nxt = re.sub(r"[^\d]", "", lines[j])
+                    if nxt.isdigit():
+                        separated_totals.append(int(nxt))
+
+        if separated_totals:
+            # usa SEMPRE o último "Total" do bloco → o que pertence a esta requisição
+            declared_samples = separated_totals[-1]
+
 
 
     ctx["declared_samples"] = declared_samples
@@ -965,7 +976,14 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
             ctx = extract_context_from_text(bloco)
             rows = parse_icnf_zonas(bloco, ctx, req_id=i)
             expected = ctx.get("declared_samples", len(rows))
+
+            # Segurança extra: se extraiu mais linhas do que o declarado, corta ao declarado
+            if expected and len(rows) > expected:
+                print(f"⚠️ ICNF bloco {i}: {len(rows)} amostras extraídas > declaradas {expected}. Cortar para {expected}.")
+                rows = rows[:expected]
+
             results.append({"rows": rows, "expected": expected})
+
 
         # DGAV fica totalmente intocado
         return results
@@ -1403,6 +1421,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
