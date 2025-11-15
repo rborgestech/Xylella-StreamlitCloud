@@ -440,7 +440,20 @@ def extract_context_from_text(full_text: str):
     ctx["responsavel_colheita"] = tecnico or ""
 
     # Inicialmente, o "responsável amostragem" é a entidade se existir
-    ctx["dgav"] = entidade
+    ctx["dgav"] = entidade or ""
+
+    # Correção: remover lixo colado do OCR como "Técnico responsável"
+    ctx["dgav"] = re.sub(
+        r"T[ée]cnico\s+respons[aá]vel.*$", "", 
+        ctx["dgav"], 
+        flags=re.I
+    ).strip()
+    
+    # Remove restos como "responsável" colado ao fim
+    ctx["dgav"] = re.sub(r"respons[aá]vel$", "", ctx["dgav"], flags=re.I).strip()
+    
+    # Remove pontuação residual
+    ctx["dgav"] = re.sub(r"[:;,.\-–—]+$", "", ctx["dgav"]).strip()
 
     # ───────────────────────────────────────────────
     # 2. Fallback DGAV antigo (sem "Entidade:")
@@ -1377,6 +1390,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
