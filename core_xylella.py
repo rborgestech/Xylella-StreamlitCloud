@@ -763,7 +763,7 @@ def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, An
                     "hospedeiro": "",
                     "tipo": "",
                     "zona": context["zona"],
-                    "responsavelamostra": context.get("dgav"),
+                    "responsavelamostra": context.get("entidade") or context.get("dgav") or "",
                     "responsavelcolheita": context.get("responsavel_colheita"),
                     "observacoes": "",
                     "procedure": "XYLELLA",
@@ -1390,6 +1390,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
