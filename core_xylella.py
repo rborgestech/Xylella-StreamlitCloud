@@ -613,7 +613,8 @@ def extract_context_from_text(full_text: str):
         except ValueError:
             pass
 
-    # 📌 ICNF — Capturar padrão "Total:\n30"
+    # 📌 ICNF — Capturar padrão "Total:\n30" ou "Total:\n20"
+    # (em ICNF vem sempre separado em duas linhas)
     lines = full_text.splitlines()
     for i in range(len(lines) - 1):
         if re.match(r"^\s*Total\s*:?\s*$", lines[i], re.I):
@@ -622,6 +623,7 @@ def extract_context_from_text(full_text: str):
                 val = int(nxt)
                 if val > declared_samples:
                     declared_samples = val
+
 
     ctx["declared_samples"] = declared_samples
     print(f"📊 Nº de amostras declaradas detetadas: {ctx['declared_samples']}")
@@ -805,6 +807,7 @@ def parse_icnf_zonas(full_text: str, ctx: dict, req_id: int = 1) -> List[Dict[st
     skip_if_no_ref = (
         "datas de recolha", "data de recolha", "data colheita",
         "total:", "total de amostras", "nº de amostras", "n.o de amostras",
+        "amostras",   # <-- ESSENCIAL para não apanhar o bloco seguinte
     )
 
     pending_ref: Optional[str] = None
@@ -1400,6 +1403,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
