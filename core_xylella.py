@@ -808,6 +808,8 @@ def parse_icnf_zonas(full_text: str, ctx: dict, req_id: int = 1) -> List[Dict[st
         • tipos: Simples, Composta, Composto, Individual (+ "(3)", "3", etc.)
     - Ignora linhas como "Datas de recolha de amostras", "Total: ... amostras", etc.
     """
+
+    # Limpeza inicial
     lines = [l.strip() for l in full_text.splitlines() if l.strip()]
     out: List[Dict[str, Any]] = []
 
@@ -815,6 +817,7 @@ def parse_icnf_zonas(full_text: str, ctx: dict, req_id: int = 1) -> List[Dict[st
     ref_split_re = re.compile(r"^(\d{1,3})\s+(\/?XF\/[A-Z0-9\-/]+)", re.I)
     ref_full_re = re.compile(r"^\d{1,3}\s*/XF/[A-Z0-9\-/]+", re.I)
 
+    # MUITO IMPORTANTE: estas linhas indicam fim do bloco
     skip_if_no_ref = (
         "datas de recolha", "data de recolha", "data colheita",
         "total:", "total de amostras", "nº de amostras", "n.o de amostras",
@@ -856,7 +859,9 @@ def parse_icnf_zonas(full_text: str, ctx: dict, req_id: int = 1) -> List[Dict[st
         pending_host = ""
         pending_tipo = ""
 
-    # Percorrer linhas com acesso ao índice para poder juntar "3" + "/XF/..."
+    # ───────────────────────────────────────────────
+    # LOOP PRINCIPAL
+    # ───────────────────────────────────────────────
     i = 0
     while i < len(lines):
         ln = lines[i].strip()
@@ -866,63 +871,84 @@ def parse_icnf_zonas(full_text: str, ctx: dict, req_id: int = 1) -> List[Dict[st
 
         low = ln.lower()
 
-        # Junta casos: "3"  +  "/XF/ICNF..."
+        # Junta casos: "3" + "/XF/…"
         if re.fullmatch(r"\d{1,3}", ln) and i + 1 < len(lines):
             nxt = lines[i + 1].strip()
             if nxt.upper().startswith(("/XF", "XF")):
                 ln = f"{ln} {nxt}"
-                lines[i + 1] = ""  # já consumido
+                lines[i + 1] = ""  # consumir a próxima
+                low = ln.lower()
 
-        # 1) Linha de referência com número + /XF/...
+        # ───────────────────────────────────────────────
+        # 1) Referência tipo "34 /XF/...".
+        #    Ignorar "0 /XF/..." (resto do bloco anterior)
+        # ───────────────────────────────────────────────
         m_split = ref_split_re.match(ln)
         if m_split:
-            flush_sample(force=True)
             num = m_split.group(1)
+
+            # IGNORAR referências começadas por 0 (ocr ruído)
+            if num == "0":
+                i += 1
+                continue
+
+            flush_sample(force=True)
             ref = m_split.group(2)
             pending_ref = _clean_ref(f"{num} {ref}")
             i += 1
             continue
 
-        # 2) Linha de referência completa "123/XF/ICNF..."
+        # ───────────────────────────────────────────────
+        # 2) Referência completa "34/XF/..."
+        #    Também ignorar linhas começadas por "0/"
+        # ───────────────────────────────────────────────
         if ref_full_re.match(ln):
+            if ln.strip().startswith("0/"):
+                i += 1
+                continue
+
             flush_sample(force=True)
             pending_ref = _clean_ref(ln)
             i += 1
             continue
 
-        # 3) Linhas sem referência mas sem contexto → ignorar
+        # ───────────────────────────────────────────────
+        # 3) Linhas sem referência → ignorar
+        # ───────────────────────────────────────────────
         if not pending_ref:
             if any(k in low for k in skip_if_no_ref):
                 i += 1
                 continue
+
             i += 1
             continue
 
-        # A partir daqui, temos uma referência pendente → hospedeiro / tipo
+        # ───────────────────────────────────────────────
+        # 4) Linhas de controlo "Total:", "Datas…", "Amostras"
+        # ───────────────────────────────────────────────
         if any(k in low for k in skip_if_no_ref):
-            # Linha de "Total", "Datas de recolha", etc → fecha amostra anterior se houver
             flush_sample(force=True)
             i += 1
             continue
 
+        # ───────────────────────────────────────────────
+        # 5) Tipo + hospedeiro
+        # ───────────────────────────────────────────────
         m_tipo = tipo_re.search(ln)
         if m_tipo:
-            # Linha contém o tipo (pode ser só "Composta 3" ou "Individual 3")
             pending_tipo = m_tipo.group(1).capitalize()
+
             host_part = ln[:m_tipo.start()].strip()
             if host_part:
-                if pending_host:
-                    pending_host = f"{pending_host} {host_part}"
-                else:
-                    pending_host = host_part
+                pending_host = f"{pending_host} {host_part}".strip()
 
-            # remove "(3)" ou "3" do fim do tipo
-            pending_tipo = pending_tipo
             flush_sample(force=True)
             i += 1
             continue
 
-        # Sem tipo → parte do hospedeiro (pode ser 1.ª ou continuação)
+        # ───────────────────────────────────────────────
+        # 6) Só hospedeiro (continuação)
+        # ───────────────────────────────────────────────
         if pending_host:
             pending_host = f"{pending_host} {ln}"
         else:
@@ -930,7 +956,7 @@ def parse_icnf_zonas(full_text: str, ctx: dict, req_id: int = 1) -> List[Dict[st
 
         i += 1
 
-    # Última amostra, se ainda houver
+    # Última amostra
     flush_sample(force=False)
 
     print(f"🟦 parse_icnf_zonas: {len(out)} amostras extraídas (req {req_id})")
@@ -1421,6 +1447,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
