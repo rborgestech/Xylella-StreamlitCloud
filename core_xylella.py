@@ -761,31 +761,61 @@ def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, An
 
 def parse_icnf_zonas(full_text: str, ctx: dict, req_id: int = 1) -> List[Dict[str, Any]]:
     """
-    Parser robusto para ICNF / Zonas (Pedido Análise, etc.).
+    Parser robusto para ICNF / Zonas Demarcadas.
 
     - Suporta:
-        • coluna extra com numeração (1  /XF/...)
-        • casos partidos em 2–3 linhas (ref → hospedeiro → tipo)
-        • tipos: Simples, Composta, Composto, Individual (+ "(3)", "3", etc.)
-    - Ignora linhas como "Datas de recolha de amostras", "Total: ... amostras", etc.
+        • linha com número + referência ("1 /XF/.....")
+        • linha partida em duas ("1" + "/XF/....")
+        • evita cabeçalhos ("Refª da amostra", "Hospedeiro", "Tipo...")
+        • evita criação de referências fantasma
+        • extrai tipo, hospedeiro e referencia corretamente
     """
+
+    # -----------------------------------------------
+    # 1) LIMPAR E PRÉ-FILTRAR LINHAS
+    # -----------------------------------------------
     lines = [l.strip() for l in full_text.splitlines() if l.strip()]
+
+    # Linhas de cabeçalho que DEVEM ser removidas
+    header_garbage = (
+        "refª", "refa", "refª da amostra",
+        "hospedeiro",
+        "tipo", "amostra simples", "amostra composta",
+        "tipo (amostra simples", "composta)"
+    )
+
+    filtered = []
+    for ln in lines:
+        low = ln.lower().strip()
+        if any(h in low for h in header_garbage):
+            continue
+        filtered.append(ln)
+
+    lines = filtered
+
     out: List[Dict[str, Any]] = []
 
+    # -----------------------------------------------
+    # 2) EXPRESSÕES REGULARES DE REFERÊNCIA / TIPO
+    # -----------------------------------------------
     tipo_re = re.compile(r"\b(Simples|Composta|Composto|Individual)\b", re.I)
     ref_split_re = re.compile(r"^(\d{1,3})\s+(\/?XF\/[A-Z0-9\-/]+)", re.I)
     ref_full_re = re.compile(r"^\d{1,3}\s*/XF/[A-Z0-9\-/]+", re.I)
 
+    # Linhas que devem encerrar a amostra corrente
     skip_if_no_ref = (
         "datas de recolha", "data de recolha", "data colheita",
-        "total:", "total de amostras", "nº de amostras", "n.o de amostras",
-        "amostras",
+        "total:", "total de amostras", "nº de amostras",
+        "amostras"   # <-- essencial para não agarrar blocos seguintes
     )
 
     pending_ref: Optional[str] = None
     pending_host: str = ""
     pending_tipo: str = ""
 
+    # -----------------------------------------------
+    # 3) FUNÇÃO PARA FECHAR UMA AMOSTRA
+    # -----------------------------------------------
     def flush_sample(force: bool = False):
         nonlocal pending_ref, pending_host, pending_tipo
         if not pending_ref:
@@ -817,27 +847,21 @@ def parse_icnf_zonas(full_text: str, ctx: dict, req_id: int = 1) -> List[Dict[st
         pending_host = ""
         pending_tipo = ""
 
+    # -----------------------------------------------
+    # 4) LOOP PRINCIPAL DAS LINHAS
+    # -----------------------------------------------
     i = 0
     while i < len(lines):
         ln = lines[i].strip()
-        if not ln:
-            i += 1
-            continue
 
-        low = ln.lower()
-
-        # Junta casos: "3" + "/XF/ICNF..."
+        # Junta casos: "3"  +  "/XF/ICNF..."
         if re.fullmatch(r"\d{1,3}", ln) and i + 1 < len(lines):
             nxt = lines[i + 1].strip()
             if nxt.upper().startswith(("/XF", "XF")):
-                # ⚠️ FIX: ignorar numeração fantasma "0" para não criar "0/XF/..."
-                if ln == "0":
-                    i += 1
-                    continue
                 ln = f"{ln} {nxt}"
                 lines[i + 1] = ""  # já consumido
 
-        # 1) Linha de referência com número + /XF/...
+        # Caso 1: "1 /XF/...."
         m_split = ref_split_re.match(ln)
         if m_split:
             flush_sample(force=True)
@@ -847,27 +871,28 @@ def parse_icnf_zonas(full_text: str, ctx: dict, req_id: int = 1) -> List[Dict[st
             i += 1
             continue
 
-        # 2) Linha de referência completa "123/XF/ICNF..."
+        # Caso 2: "1/XF/...."
         if ref_full_re.match(ln):
             flush_sample(force=True)
             pending_ref = _clean_ref(ln)
             i += 1
             continue
 
-        # 3) Linhas sem referência mas sem contexto → ignorar
+        # Se ainda não temos referência, ignorar ruído
         if not pending_ref:
-            if any(k in low for k in skip_if_no_ref):
+            if any(k in ln.lower() for k in skip_if_no_ref):
                 i += 1
                 continue
             i += 1
             continue
 
-        # A partir daqui, temos uma referência pendente → hospedeiro / tipo
-        if any(k in low for k in skip_if_no_ref):
+        # Linha encerradora de bloco
+        if any(k in ln.lower() for k in skip_if_no_ref):
             flush_sample(force=True)
             i += 1
             continue
 
+        # TIPO NA LINHA
         m_tipo = tipo_re.search(ln)
         if m_tipo:
             pending_tipo = m_tipo.group(1).capitalize()
@@ -877,12 +902,11 @@ def parse_icnf_zonas(full_text: str, ctx: dict, req_id: int = 1) -> List[Dict[st
                     pending_host = f"{pending_host} {host_part}"
                 else:
                     pending_host = host_part
-
             flush_sample(force=True)
             i += 1
             continue
 
-        # Sem tipo → parte do hospedeiro
+        # Caso geral → parte do hospedeiro
         if pending_host:
             pending_host = f"{pending_host} {ln}"
         else:
@@ -890,6 +914,9 @@ def parse_icnf_zonas(full_text: str, ctx: dict, req_id: int = 1) -> List[Dict[st
 
         i += 1
 
+    # -----------------------------------------------
+    # 5) ÚLTIMA AMOSTRA
+    # -----------------------------------------------
     flush_sample(force=False)
 
     print(f"🟦 parse_icnf_zonas: {len(out)} amostras extraídas (req {req_id})")
@@ -1380,6 +1407,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
