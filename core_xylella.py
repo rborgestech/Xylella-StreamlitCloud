@@ -853,6 +853,19 @@ def parse_icnf_zonas(full_text: str, ctx: dict, req_id: int = 1) -> List[Dict[st
     i = 0
     while i < len(lines):
         ln = lines[i].strip()
+        # ⚠️ EVITAR DUPLICAÇÃO DA 1ª LINHA (caso "1" sozinho → referência fantasma)
+        # Se a linha for só um número, só deve ser usada se a seguinte começar por /XF
+        if re.fullmatch(r"\d{1,3}", ln):
+            if i + 1 < len(lines):
+                nxt = lines[i+1].strip()
+                if nxt.upper().startswith(("/XF", "XF")):
+                    # junta "1" + "/XF..."
+                    ln = f"{ln} {nxt}"
+                    lines[i+1] = ""   # marca como consumida
+                else:
+                    # número sozinho sem /XF a seguir = ruído do OCR → ignorar
+                    i += 1
+                    continue
 
         # Junta casos: "3"  +  "/XF/ICNF..."
         if re.fullmatch(r"\d{1,3}", ln) and i + 1 < len(lines):
@@ -1407,6 +1420,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
