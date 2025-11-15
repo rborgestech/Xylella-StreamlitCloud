@@ -820,7 +820,7 @@ def parse_icnf_zonas(full_text: str, ctx: dict, req_id: int = 1) -> List[Dict[st
             "hospedeiro": pending_host.strip(),
             "tipo": tipo,
             "zona": ctx.get("zona", ""),
-            "responsavelamostra": ctx.get("entidade", "ICNF"),
+            "responsavelamostra": ctx.get("entidade") or "",
             "responsavelcolheita": ctx.get("responsavel_colheita", ""),
             "observacoes": "",
             "procedure": "XYLELLA",
@@ -1390,6 +1390,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
