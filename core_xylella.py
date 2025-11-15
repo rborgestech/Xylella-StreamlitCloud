@@ -613,6 +613,16 @@ def extract_context_from_text(full_text: str):
         except ValueError:
             pass
 
+    # 📌 ICNF — Capturar padrão "Total:\n30"
+    lines = full_text.splitlines()
+    for i in range(len(lines) - 1):
+        if re.match(r"^\s*Total\s*:?\s*$", lines[i], re.I):
+            nxt = lines[i + 1].strip()
+            if nxt.isdigit():
+                val = int(nxt)
+                if val > declared_samples:
+                    declared_samples = val
+
     ctx["declared_samples"] = declared_samples
     print(f"📊 Nº de amostras declaradas detetadas: {ctx['declared_samples']}")
 
@@ -1390,6 +1400,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
