@@ -644,14 +644,16 @@ def extract_context_from_text(full_text: str):
 
 def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, Any]]:
     """
-    Extrai as amostras das tabelas Azure OCR, aplicando o contexto da requisição.
+    Extrai as amostras das tabelas Azure OCR para DGAV (Programa Nacional).
 
-    Nova lógica:
-      - deteta dinamicamente a coluna da referência (DGAV antigo, DGAV ZD, etc.).
-      - deteta a coluna do hospedeiro (logo a seguir à referência, que não seja só 'Simples/Composta').
-      - continua a ler o tipo ('Simples', 'Composta', ...) a partir da linha completa.
-      - DGAV Zona Isenta: se a coluna imediatamente a seguir à referência for 'Natureza da amostra'
-        (partes de vegetais, insetos, solo, ...), usa a coluna seguinte como hospedeiro.
+    • Usa sempre as colunas fixas do template DGAV:
+        0 = Referência
+        1 = Natureza da amostra  (IGNORADO)
+        2 = Hospedeiro
+        3 = Observações
+        (resto = lixo / notas / etc.)
+
+    • ICNF NÃO passa por aqui — é tratado por parse_icnf_zonas.
     """
     out: List[Dict[str, Any]] = []
     tables = result_json.get("analyzeResult", {}).get("tables", [])
@@ -659,125 +661,43 @@ def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, An
         print("⚠️ Nenhuma tabela encontrada.")
         return out
 
-    tipo_keywords = ("simples", "composta", "composto", "individual")
-
-    # Entidade pode ser None → proteger
-    ent = (context.get("entidade") or "").upper()
-    is_dgav = ent.startswith("DGAV")
-    # DGAV clássico (Zona Isenta) → tem coluna "Natureza da amostra"
-    zona_txt = (context.get("zona") or "").strip().lower()
-    is_zona_isenta = "zona isenta" in zona_txt
-
     for t in tables:
-        # ───────────────────────────────────────────────
-        # Construir grelha
-        # ───────────────────────────────────────────────
+        # construir grelha linha×coluna
         nc = max(c.get("columnIndex", 0) for c in t.get("cells", [])) + 1
         nr = max(c.get("rowIndex", 0) for c in t.get("cells", [])) + 1
         grid = [[""] * nc for _ in range(nr)]
         for c in t.get("cells", []):
             grid[c["rowIndex"]][c["columnIndex"]] = clean_value(c.get("content", ""))
 
-        # ───────────────────────────────────────────────
-        # 1. Descobrir coluna da referência (DGAV /XF..., 01/LVT/DGAV..., etc.)
-        # ───────────────────────────────────────────────
-        ref_scores = [0] * nc
-        for r in range(nr):
-            for c in range(nc):
-                val = grid[r][c]
-                if not val:
-                    continue
-                cand = _clean_ref(val)
-                if not cand:
-                    continue
-                if "/XF/" in cand.upper() or re.search(r"\d{1,3}/[A-Z]{1,3}/", cand):
-                    ref_scores[c] += 1
-        if max(ref_scores) > 0:
-            ref_col = ref_scores.index(max(ref_scores))
-        else:
-            ref_col = 0  # fallback clássico
-
-        # ───────────────────────────────────────────────
-        # 2. Descobrir coluna do hospedeiro (genérico)
-        #    (primeira coluna à direita da ref que não seja só 'Simples/Composta')
-        # ───────────────────────────────────────────────
-        host_col = None
-        for c in range(ref_col + 1, nc):
-            col_vals = [grid[r][c] for r in range(nr) if grid[r][c]]
-            if not col_vals:
-                continue
-            tipo_like = 0
-            for v in col_vals:
-                first_word = str(v).strip().split()[0].lower()
-                if first_word in tipo_keywords:
-                    tipo_like += 1
-            if tipo_like < len(col_vals):  # há valores que não são só 'Simples/Composta'
-                host_col = c
-                break
-
-        if host_col is None:
-            # fallback razoável
-            if ref_col == 0 and nc > 1:
-                host_col = 1
-            else:
-                host_col = min(ref_col + 1, nc - 1)
-
-        # ───────────────────────────────────────────────
-        # 3. Percorrer linhas e construir amostras
-        # ───────────────────────────────────────────────
+        # percorrer linhas
         for row in grid:
             if not row or not any(row):
                 continue
 
-            if ref_col >= len(row):
-                continue
-            ref = _clean_ref(row[ref_col])
+            # Coluna 0 → referência
+            ref = _clean_ref(row[0]) if len(row) > 0 else ""
             if not ref or re.match(r"^\D+$", ref):
                 continue
 
-            # -------------------------
-            # DGAV Zona Isenta:
-            #   Referência | Natureza | Hospedeiro | Obs | Tipo
-            # Se a "coluna de hospedeiro" tiver texto de natureza,
-            # usamos a coluna seguinte como verdadeiro hospedeiro.
-            # -------------------------
-            base_host = row[host_col] if host_col < len(row) else ""
-            natureza_val = ""
-            cols_to_skip = {ref_col, host_col}
+            # Coluna 2 → hospedeiro  (coluna 1 é Natureza da amostra e é ignorada)
+            hospedeiro = row[2] if len(row) > 2 else ""
+            # Coluna 3 → observações
+            obs = row[3] if len(row) > 3 else ""
 
-            if (
-                is_zona_isenta
-                and _looks_like_natureza(base_host)
-                and host_col + 1 < len(row)
-                and row[host_col + 1]
-            ):
-                natureza_val = base_host
-                hospedeiro = row[host_col + 1]
-                cols_to_skip.add(host_col + 1)
-            else:
-                hospedeiro = base_host
-
-            # Para outros contextos (não Zona Isenta), se o campo parecer
-            # natureza, limpamos (mantendo comportamento antigo).
-            if not is_zona_isenta and _looks_like_natureza(hospedeiro):
+            # se por acaso o OCR tiver "Partes de vegetais", "insetos", etc. aqui,
+            # limpamos o hospedeiro
+            if _looks_like_natureza(hospedeiro):
                 hospedeiro = ""
 
-            other_parts = [
-                row[c]
-                for c in range(len(row))
-                if c not in cols_to_skip and isinstance(row[c], str)
-            ]
-            joined = " ".join([ref, hospedeiro] + other_parts)
-            obs = " ".join(other_parts)
-
-            # Tipo da amostra
+            # Tipo da amostra (Simples / Composta / Individual)
             tipo = ""
+            joined = " ".join([x for x in row if isinstance(x, str)])
             m_tipo = re.search(r"\b(Simples|Composta|Composto|Individual)\b", joined, re.I)
             if m_tipo:
                 tipo = m_tipo.group(1).capitalize()
                 if tipo.lower() == "composto":
                     tipo = "Composta"
-                # remove o tipo do campo observações
+                # tira o tipo do campo observações
                 obs = re.sub(
                     r"\b(Simples|Composta|Composto|Individual)\b",
                     "",
@@ -785,7 +705,7 @@ def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, An
                     flags=re.I,
                 ).strip()
 
-            # Data de colheita: mapeamento por asteriscos, se existir
+            # Data de colheita — por defeito / mapeamento de asteriscos
             datacolheita = context.get("default_colheita", "")
             m_ast = re.search(r"\(\s*\*+\s*\)", joined)
             if m_ast:
@@ -797,21 +717,22 @@ def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, An
 
             out.append({
                 "requisicao_id": req_id,
-                "datarececao": context["data_envio"],
+                "datarececao": context.get("data_envio", ""),
                 "datacolheita": datacolheita,
                 "referencia": ref,
                 "hospedeiro": hospedeiro,
                 "tipo": tipo,
-                "zona": context["zona"],
+                "zona": context.get("zona", ""),
+                # compatível com context antigo (só dgav) e novo (entidade + dgav)
                 "responsavelamostra": context.get("entidade") or context.get("dgav") or "",
                 "responsavelcolheita": context.get("responsavel_colheita", ""),
                 "observacoes": obs.strip(),
                 "procedure": "XYLELLA",
-                "datarequerido": context["data_envio"],
+                "datarequerido": context.get("data_envio", ""),
                 "Score": "",
             })
 
-    # ┐ Fallback regex antigo, se nada veio das tabelas
+    # 🧩 Fallback — se Azure não devolveu tabela usável
     if not out:
         full_text = extract_all_text(result_json)
         pattern = re.compile(r"(\d{5,8}|[0-9]{1,3}/[A-Z]{1,3}/DGAV[-/]?\d{0,4})", re.I)
@@ -820,17 +741,17 @@ def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, An
             for ref in matches:
                 out.append({
                     "requisicao_id": req_id,
-                    "datarececao": context["data_envio"],
+                    "datarececao": context.get("data_envio", ""),
                     "datacolheita": context.get("default_colheita", ""),
                     "referencia": ref.strip(),
                     "hospedeiro": "",
                     "tipo": "",
-                    "zona": context["zona"],
-                    "responsavelamostra": context.get("entidade"),
-                    "responsavelcolheita": context.get("responsavel_colheita"),
+                    "zona": context.get("zona", ""),
+                    "responsavelamostra": context.get("entidade") or context.get("dgav") or "",
+                    "responsavelcolheita": context.get("responsavel_colheita", ""),
                     "observacoes": "",
                     "procedure": "XYLELLA",
-                    "datarequerido": context["data_envio"],
+                    "datarequerido": context.get("data_envio", ""),
                     "Score": "",
                 })
             print(f"🔍 Fallback regex: {len(matches)} amostras detetadas.")
@@ -1497,6 +1418,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
