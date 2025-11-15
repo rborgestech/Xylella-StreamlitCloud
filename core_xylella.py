@@ -646,11 +646,12 @@ def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, An
     """
     Extrai as amostras das tabelas Azure OCR, aplicando o contexto da requisição.
 
-    Nova lógica:
-      - deteta dinamicamente a coluna da referência (DGAV antigo, DGAV ZD, etc.).
-      - deteta a coluna do hospedeiro (logo a seguir à referência, que não seja só 'Simples/Composta').
-      - continua a ler o tipo ('Simples', 'Composta', ...) a partir da linha completa.
+    Regras:
+      • DGAV (template clássico: 4 colunas): col0=ref, col1=natureza (ignorar), col2=hospedeiro, col3=tipo
+      • ICNF e DGAV ZD continuam com deteção dinâmica (como já funcionava bem)
+      • Mantém fallback regex original
     """
+
     out: List[Dict[str, Any]] = []
     tables = result_json.get("analyzeResult", {}).get("tables", [])
     if not tables:
@@ -658,102 +659,120 @@ def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, An
         return out
 
     tipo_keywords = ("simples", "composta", "composto", "individual")
+    is_dgav = context.get("entidade", "").upper().startswith("DGAV")
 
     for t in tables:
+        # Construir grelha
         nc = max(c.get("columnIndex", 0) for c in t.get("cells", [])) + 1
         nr = max(c.get("rowIndex", 0) for c in t.get("cells", [])) + 1
         grid = [[""] * nc for _ in range(nr)]
+
         for c in t.get("cells", []):
             grid[c["rowIndex"]][c["columnIndex"]] = clean_value(c.get("content", ""))
 
-        # ───────────────────────────────────────────────
-        # 1. Descobrir coluna da referência (DGAV /XF..., 01/LVT/DGAV..., etc.)
-        # ───────────────────────────────────────────────
-        ref_scores = [0] * nc
-        for r in range(nr):
-            for c in range(nc):
-                val = grid[r][c]
-                if not val:
-                    continue
-                cand = _clean_ref(val)
-                if not cand:
-                    continue
-                if "/XF/" in cand.upper() or re.search(r"\d{1,3}/[A-Z]{1,3}/", cand):
-                    ref_scores[c] += 1
-        if max(ref_scores) > 0:
-            ref_col = ref_scores.index(max(ref_scores))
+        # ---------------------------------------------------------
+        # 🌿 PATCH DGAV — forçar colunas fixas 0-2-3 quando a estrutura é 4 colunas
+        # ---------------------------------------------------------
+        if is_dgav and nc >= 4:
+            ref_col = 0
+            host_col = 2
+            tipo_col = 3
         else:
-            ref_col = 0  # fallback clássico
+            # ---------------------------------------------------------
+            # Modo original (ICNF + DGAV ZD), não alterado
+            # ---------------------------------------------------------
+            ref_scores = [0] * nc
+            for r in range(nr):
+                for c in range(nc):
+                    val = grid[r][c]
+                    if not val:
+                        continue
+                    cand = _clean_ref(val)
+                    if not cand:
+                        continue
+                    if "/XF/" in cand.upper() or re.search(r"\d{1,3}/[A-Z]{1,3}/", cand):
+                        ref_scores[c] += 1
 
-        # ───────────────────────────────────────────────
-        # 2. Descobrir coluna do hospedeiro
-        #    (primeira coluna à direita da ref que não seja só 'Simples/Composta')
-        # ───────────────────────────────────────────────
-        host_col = None
-        for c in range(ref_col + 1, nc):
-            col_vals = [grid[r][c] for r in range(nr) if grid[r][c]]
-            if not col_vals:
-                continue
-            tipo_like = 0
-            for v in col_vals:
-                first_word = str(v).strip().split()[0].lower()
-                if first_word in tipo_keywords:
-                    tipo_like += 1
-            if tipo_like < len(col_vals):  # há valores que não são só 'Simples/Composta'
-                host_col = c
-                break
+            ref_col = ref_scores.index(max(ref_scores)) if max(ref_scores) > 0 else 0
 
-        if host_col is None:
-            # fallback razoável
-            if ref_col == 0 and nc > 1:
-                host_col = 1
-            else:
+            # detectar hospedeiro
+            host_col = None
+            for c in range(ref_col + 1, nc):
+                col_vals = [grid[r][c] for r in range(nr) if grid[r][c]]
+                if not col_vals:
+                    continue
+                tipo_like = sum(
+                    1 for v in col_vals
+                    if str(v).strip().split()[0].lower() in tipo_keywords
+                )
+                if tipo_like < len(col_vals):
+                    host_col = c
+                    break
+
+            if host_col is None:
                 host_col = min(ref_col + 1, nc - 1)
 
-        # ───────────────────────────────────────────────
-        # 3. Percorrer linhas e construir amostras
-        # ───────────────────────────────────────────────
+            # Tipo detectado dinamicamente
+            tipo_col = None
+
+        # ---------------------------------------------------------
+        # Percorrer linhas da grelha
+        # ---------------------------------------------------------
         for row in grid:
             if not row or not any(row):
                 continue
 
             if ref_col >= len(row):
                 continue
+
             ref = _clean_ref(row[ref_col])
             if not ref or re.match(r"^\D+$", ref):
                 continue
 
-            hospedeiro = row[host_col] if host_col < len(row) else ""
-            other_parts = [
-                row[c]
-                for c in range(len(row))
-                if c not in (ref_col, host_col) and isinstance(row[c], str)
-            ]
-            joined = " ".join([ref, hospedeiro] + other_parts)
-            obs = " ".join(other_parts)
+            # ---------------------------------------------------------
+            # DGAV — extrair diretamente
+            # ---------------------------------------------------------
+            if is_dgav and nc >= 4:
+                hospedeiro = row[host_col]
+                tipo = row[tipo_col] if tipo_col < len(row) else ""
+                obs = ""
+                joined = f"{ref} {hospedeiro} {tipo}"
 
+            else:
+                # ---------------------------------------------------------
+                # Modo original (ICNF/DGAV-ZD)
+                # ---------------------------------------------------------
+                hospedeiro = row[host_col] if host_col < len(row) else ""
+
+                other_parts = [
+                    row[c]
+                    for c in range(len(row))
+                    if c not in (ref_col, host_col) and isinstance(row[c], str)
+                ]
+                joined = " ".join([ref, hospedeiro] + other_parts)
+                obs = " ".join(other_parts)
+
+                # Tipo
+                tipo = ""
+                m_tipo = re.search(r"\b(Simples|Composta|Composto|Individual)\b", joined, re.I)
+                if m_tipo:
+                    tipo = m_tipo.group(1).capitalize()
+                    if tipo.lower() == "composto":
+                        tipo = "Composta"
+                    obs = re.sub(
+                        r"\b(Simples|Composta|Composto|Individual)\b", "", obs, flags=re.I
+                    ).strip()
+
+            # Natureza não é hospedeiro
             if _looks_like_natureza(hospedeiro):
                 hospedeiro = ""
 
-            # Tipo da amostra
-            tipo = ""
-            m_tipo = re.search(r"\b(Simples|Composta|Composto|Individual)\b", joined, re.I)
-            if m_tipo:
-                tipo = m_tipo.group(1).capitalize()
-                if tipo.lower() == "composto":
-                    tipo = "Composta"
-                # remove o tipo do campo observações
-                obs = re.sub(r"\b(Simples|Composta|Composto|Individual)\b", "", obs, flags=re.I).strip()
-
-            # Data de colheita: mapeamento por asteriscos, se existir
+            # Data colheita (asteriscos)
             datacolheita = context.get("default_colheita", "")
             m_ast = re.search(r"\(\s*\*+\s*\)", joined)
             if m_ast:
                 mark = re.sub(r"\s+", "", m_ast.group(0))
                 datacolheita = context.get("colheita_map", {}).get(mark, datacolheita)
-
-            if obs.strip().lower() in ("simples", "composta", "composto", "individual"):
-                obs = ""
 
             out.append({
                 "requisicao_id": req_id,
@@ -771,7 +790,7 @@ def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, An
                 "Score": "",
             })
 
-    # ┐ Fallback regex antigo, se nada veio das tabelas
+    # Fallback regex original
     if not out:
         full_text = extract_all_text(result_json)
         pattern = re.compile(r"(\d{5,8}|[0-9]{1,3}/[A-Z]{1,3}/DGAV[-/]?\d{0,4})", re.I)
@@ -1457,6 +1476,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
