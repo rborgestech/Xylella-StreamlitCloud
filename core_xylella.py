@@ -659,7 +659,8 @@ def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, An
         return out
 
     tipo_keywords = ("simples", "composta", "composto", "individual")
-    is_dgav = context.get("entidade", "").upper().startswith("DGAV")
+    ent = (context.get("entidade") or "").upper()
+    is_dgav = ent.startswith("DGAV")
 
     for t in tables:
         # Construir grelha
@@ -1491,6 +1492,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
