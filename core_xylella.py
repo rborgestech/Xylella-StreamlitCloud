@@ -799,8 +799,8 @@ def parse_icnf_zonas(full_text: str, ctx: dict, req_id: int = 1) -> List[Dict[st
     # 2) EXPRESSÕES REGULARES DE REFERÊNCIA / TIPO
     # -----------------------------------------------
     tipo_re = re.compile(r"\b(Simples|Composta|Composto|Individual)\b", re.I)
-    ref_split_re = re.compile(r"^(\d{1,3})\s+(\/?XF\/[A-Z0-9\-/]+)", re.I)
-    ref_full_re = re.compile(r"^\d{1,3}\s*/XF/[A-Z0-9\-/]+", re.I)
+    ref_split_re = re.compile(r"^([1-9]\d{0,2})\s+(\/?XF\/[A-Z0-9\-/]+)", re.I)
+    ref_full_re = re.compile(r"^[1-9]\d{0,2}\s*/XF/[A-Z0-9\-/]+", re.I)
 
     # Linhas que devem encerrar a amostra corrente
     skip_if_no_ref = (
@@ -855,7 +855,7 @@ def parse_icnf_zonas(full_text: str, ctx: dict, req_id: int = 1) -> List[Dict[st
         ln = lines[i].strip()
         # ⚠️ EVITAR DUPLICAÇÃO DA 1ª LINHA (caso "1" sozinho → referência fantasma)
         # Se a linha for só um número, só deve ser usada se a seguinte começar por /XF
-        if re.fullmatch(r"\d{1,3}", ln):
+        if re.fullmatch(r"[1-9]\d{0,2}", ln):
             if i + 1 < len(lines):
                 nxt = lines[i+1].strip()
                 if nxt.upper().startswith(("/XF", "XF")):
@@ -868,7 +868,7 @@ def parse_icnf_zonas(full_text: str, ctx: dict, req_id: int = 1) -> List[Dict[st
                     continue
 
         # Junta casos: "3"  +  "/XF/ICNF..."
-        if re.fullmatch(r"\d{1,3}", ln) and i + 1 < len(lines):
+        if re.fullmatch(r"[1-9]\d{0,2}", ln) and i + 1 < len(lines):
             nxt = lines[i + 1].strip()
             if nxt.upper().startswith(("/XF", "XF")):
                 ln = f"{ln} {nxt}"
@@ -1420,6 +1420,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
