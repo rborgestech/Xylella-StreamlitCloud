@@ -696,18 +696,33 @@ def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, An
             ref_col = ref_scores.index(max(ref_scores)) if max(ref_scores) > 0 else 0
 
             # detectar hospedeiro
+            # ───────────────────────────────────────────────
+            # 2. Descobrir coluna do hospedeiro
+            #    (primeira coluna à direita da ref que não seja só 'Simples/Composta')
+            #    ⚠️ Mas nunca usar a coluna "Natureza da amostra" como hospedeiro (DGAV clássico)
+            # ───────────────────────────────────────────────
             host_col = None
             for c in range(ref_col + 1, nc):
+                # Se o cabeçalho desta coluna for "Natureza da amostra", ignorar
+                header_val = (grid[0][c] or "").lower()
+                if "natureza" in header_val and "amostra" in header_val:
+                    continue
+    
                 col_vals = [grid[r][c] for r in range(nr) if grid[r][c]]
                 if not col_vals:
                     continue
-                tipo_like = sum(
-                    1 for v in col_vals
-                    if str(v).strip().split()[0].lower() in tipo_keywords
-                )
+    
+                tipo_like = 0
+                for v in col_vals:
+                    first_word = str(v).strip().split()[0].lower()
+                    if first_word in tipo_keywords:
+                        tipo_like += 1
+    
+                # há valores que não são só 'Simples/Composta' → boa candidata a hospedeiro
                 if tipo_like < len(col_vals):
                     host_col = c
                     break
+
 
             if host_col is None:
                 host_col = min(ref_col + 1, nc - 1)
@@ -1476,6 +1491,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
