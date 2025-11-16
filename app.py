@@ -37,11 +37,41 @@ def clean_temp_folder(path: str | Path):
         print("🧹 Pasta temporária apagada com sucesso.")
     except Exception as e:
         print(f"❌ Erro ao apagar a pasta temporária: {e}")
+import tempfile
+
+def clean_old_tmp_artifacts():
+    """
+    Limpa ficheiros antigos em /tmp gerados por versões anteriores da app
+    (xylella_session_*, *_ocr_debug.txt, process_log.csv, process_summary_*.txt).
+    Corre no arranque da app.
+    """
+    base_tmp = Path(tempfile.gettempdir())
+
+    # Limpa pastas de sessão antigas
+    for d in base_tmp.glob("xylella_session_*"):
+        try:
+            shutil.rmtree(d, ignore_errors=True)
+            print(f"🧹 Apagada pasta de sessão antiga: {d}")
+        except Exception as e:
+            print(f"⚠️ Não foi possível apagar {d}: {e}")
+
+    # Limpa ficheiros de debug soltos no /tmp (apenas os que nos dizem respeito)
+    for pattern in ["*_ocr_debug.txt", "process_log.csv", "process_summary_*.txt"]:
+        for f in base_tmp.glob(pattern):
+            try:
+                f.unlink()
+                print(f"🧹 Apagado artefacto antigo: {f}")
+            except Exception as e:
+                print(f"⚠️ Não foi possível apagar {f}: {e}")
 
 # ───────────────────────────────────────────────
 # Configuração base
 # ───────────────────────────────────────────────
 st.set_page_config(page_title="Xylella Processor", page_icon="🧪", layout="centered")
+
+# Limpeza global de /tmp (artefactos antigos de execuções anteriores)
+clean_old_tmp_artifacts()
+
 st.title("🧪 Xylella Processor")
 st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 ficheiro Excel por requisição.")
 
@@ -193,16 +223,16 @@ elif st.session_state.stage == "processing":
         outdirs.append(tmpdir)
 
         created = process_pdf(str(tmp_pdf))
-        # DEBUG — mostrar conteúdo do ficheiro OCR
-        import glob
-        
-        debug_files = glob.glob("/tmp/*_ocr_debug.txt")
+
+        # DEBUG — mostrar apenas os OCR desta sessão / deste PDF
+        debug_files = list(tmpdir.glob("*_ocr_debug.txt"))
         if debug_files:
-            st.subheader("Ficheiros OCR Debug encontrados")
+            st.subheader(f"Ficheiros OCR Debug ({up.name})")
             for fpath in debug_files:
                 st.write(f"📄 {fpath}")
                 with open(fpath, "r", encoding="utf-8") as f:
                     st.text(f.read())
+
         st.session_state.processed_files.add(up.name)
 
         if not created:
