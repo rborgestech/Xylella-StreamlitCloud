@@ -148,6 +148,25 @@ def clean_value(s: str) -> str:
            .replace("\n", " ")
            .replace("  ", " "))
     return s.strip()
+    
+# ───────────────────────────────────────────────
+# Diretório de saída seguro (session-aware)
+# ───────────────────────────────────────────────
+def get_output_dir() -> Path:
+    """
+    Devolve o diretório de output atual com base na variável
+    de ambiente OUTPUT_DIR (definida no app.py por sessão).
+    Se falhar, cai para o tmp do sistema.
+    """
+    base = os.getenv("OUTPUT_DIR", tempfile.gettempdir())
+    try:
+        d = Path(base)
+        d.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        d = Path(tempfile.gettempdir())
+        d.mkdir(parents=True, exist_ok=True)
+        print(f"[WARN] Não foi possível criar diretório de output ({base}): {e}. Usando {d}")
+    return d
 
 def extract_all_text(result_json: Dict[str, Any]) -> str:
     """Concatena todo o texto linha a linha de todas as páginas."""
@@ -1262,7 +1281,7 @@ def write_to_template (ocr_rows, out_name, expected_count=None, source_pdf=None)
     # Novo nome → YYYYMMDD_restante.xlsx
     new_name = f"{data_util}_{base_name}.xlsx"
     
-    out_path = Path(OUTPUT_DIR) / new_name
+    out_path = get_output_dir() / new_name
     wb.save(out_path)
     
     print(f"📁 Ficheiro gravado: {out_path}")
@@ -1276,9 +1295,11 @@ def write_to_template (ocr_rows, out_name, expected_count=None, source_pdf=None)
 # Log opcional (compatível com o teu Colab)
 # ───────────────────────────────────────────────
 def append_process_log(pdf_name, req_id, processed, expected, out_path=None, status="OK", error_msg=None):
-    log_path = os.path.join(OUTPUT_DIR, "process_log.csv")
+    out_dir = get_output_dir()
+    log_path = out_dir / "process_log.csv"
     today_str = datetime.now().strftime("%Y-%m-%d")
-    summary_path = os.path.join(OUTPUT_DIR, f"process_summary_{today_str}.txt")
+    summary_path = out_dir / f"process_summary_{today_str}.txt"
+
 
     exists = os.path.exists(log_path)
     with open(log_path, "a", newline="", encoding="utf-8") as f:
@@ -1312,7 +1333,7 @@ def process_pdf_sync(pdf_path: str) -> list[str]:
     result_json = azure_analyze_pdf(pdf_path)
 
     # 2️⃣ Guardar texto OCR para debug
-    txt_path = OUTPUT_DIR / f"{Path(base).stem}_ocr_debug.txt"
+    txt_path = get_output_dir() / f"{Path(base).stem}_ocr_debug.txt"
     txt_path.write_text(extract_all_text(result_json), encoding="utf-8")
     print(f"📝 Texto OCR bruto guardado em: {txt_path}")
 
@@ -1420,6 +1441,7 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
 
     return str(zip_path)
+
 
 
 
