@@ -35,7 +35,6 @@ def clean_old_tmp_artifacts():
             except Exception as e:
                 print(f"⚠️ Não foi possível apagar {f}: {e}")
 
-    # ✔️ ESTA PARTE TEM DE ESTAR FORA DO LOOP ACIMA
     # Limpa PDFs temporários soltos
     for f in base_tmp.glob("*.pdf"):
         try:
@@ -53,11 +52,9 @@ def clean_old_tmp_artifacts():
         except Exception:
             pass
 
-                
+
 def clean_temp_folder(path: str | Path):
     """Apaga a pasta temporária indicada, com debug opcional."""
-    import shutil
-
     path = Path(path)
     if not path.exists():
         print(f"ℹ️ Pasta {path} já não existe.")
@@ -80,8 +77,6 @@ def clean_temp_folder(path: str | Path):
         print("🧹 Pasta temporária apagada com sucesso.")
     except Exception as e:
         print(f"❌ Erro ao apagar a pasta temporária: {e}")
-import tempfile
-
 
 
 # ───────────────────────────────────────────────
@@ -97,6 +92,7 @@ st.caption("Processa PDFs de requisições Xylella e gera automaticamente 1 fich
 
 if "processed_files" not in st.session_state:
     st.session_state.processed_files = set()
+
 # ───────────────────────────────────────────────
 # CSS — estilo azul + animações suaves
 # ───────────────────────────────────────────────
@@ -153,10 +149,12 @@ if "uploads" not in st.session_state:
 if "processed_files" not in st.session_state:
     st.session_state.processed_files = set()
 
+
 def reset_app():
     st.session_state.stage = "idle"
     st.session_state.uploads = None
     st.session_state.processed_files = set()
+
 
 # ───────────────────────────────────────────────
 # Auxiliares
@@ -173,31 +171,34 @@ def read_e1_counts(xlsx_path: str) -> Tuple[int | None, int | None]:
         pass
     return None, None
 
-def collect_debug_files(output_dirs: list[Path]) -> list[str]:
-    debug_files = []
-    for pattern in ["*_ocr_debug.txt", "process_log.csv", "process_summary_*.txt"]:
-        for d in output_dirs:
-            debug_files += [str(f) for f in d.glob(pattern)]
-    return debug_files
 
-def build_zip_with_summary(excel_files: list[str], debug_files: list[str], summary_text: str) -> bytes:
+def build_zip_with_summary(excel_files: list[str], summary_text: str) -> bytes:
+    """
+    Cria um ZIP apenas com:
+      • ficheiros Excel gerados
+      • summary.txt com o resumo do processamento
+    (sem incluir ficheiros de debug OCR).
+    """
     mem = io.BytesIO()
     with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as z:
         for p in excel_files:
             if os.path.exists(p):
                 z.write(p, arcname=os.path.basename(p))
-        for d in debug_files:
-            if os.path.exists(d):
-                z.write(d, arcname=f"debug/{os.path.basename(d)}")
         z.writestr("summary.txt", summary_text)
     mem.seek(0)
     return mem.read()
+
 
 # ───────────────────────────────────────────────
 # Interface principal
 # ───────────────────────────────────────────────
 if st.session_state.stage == "idle":
-    uploads = st.file_uploader("📂 Carrega um ou vários PDFs", type=["pdf"], accept_multiple_files=True, key="file_uploader")
+    uploads = st.file_uploader(
+        "📂 Carrega um ou vários PDFs",
+        type=["pdf"],
+        accept_multiple_files=True,
+        key="file_uploader",
+    )
     if uploads:
         if st.button("📄 Processar ficheiros de Input", type="primary"):
             st.session_state.uploads = uploads
@@ -214,7 +215,8 @@ elif st.session_state.stage == "processing":
     final_dir.mkdir(exist_ok=True)
     start_ts = time.time()
 
-    all_excel, outdirs, summary_lines = [], [], []
+    all_excel = []
+    summary_lines = []
     error_count = 0
     warning_count = 0
     total = len(uploads)
@@ -232,32 +234,41 @@ elif st.session_state.stage == "processing":
               <div class='file-title'>📄 {up.name}</div>
               <div class='file-sub'>Ficheiro {i} de {total} — a processar<span class="dots"></span></div>
             </div>
-            """, unsafe_allow_html=True
+            """,
+            unsafe_allow_html=True,
         )
 
         tmpdir = Path(tempfile.mkdtemp(dir=session_dir))
         tmp_pdf = tmpdir / up.name
         with open(tmp_pdf, "wb") as f:
             f.write(up.getbuffer())
+
+        # OUTPUT_DIR por sessão / por PDF
         os.environ["OUTPUT_DIR"] = str(tmpdir)
-        outdirs.append(tmpdir)
 
         created = process_pdf(str(tmp_pdf))
 
-        # DEBUG — mostrar apenas os OCR desta sessão / deste PDF
-        debug_files = list(tmpdir.glob("*_ocr_debug.txt"))
-        if debug_files:
-            st.subheader(f"Ficheiros OCR Debug ({up.name})")
-            for fpath in debug_files:
-                st.write(f"📄 {fpath}")
-                with open(fpath, "r", encoding="utf-8") as f:
-                    st.text(f.read())
+        # ───────────────────────────────────────────────
+        # DEBUG NO ECRÃ (DESATIVADO, MAS PRONTO A USAR)
+        # ───────────────────────────────────────────────
+        # debug_files = list(tmpdir.glob("*_ocr_debug.txt"))
+        # if debug_files:
+        #     st.subheader(f"Ficheiros OCR Debug ({up.name})")
+        #     for fpath in debug_files:
+        #         st.write(f"📄 {fpath.name}")
+        #         with open(fpath, "r", encoding="utf-8") as f:
+        #             st.text(f.read())
 
         st.session_state.processed_files.add(up.name)
 
         if not created:
             error_count += 1
-            html = f"<div class='file-box error'><div class='file-title'>📄 {up.name}</div><div class='file-sub'>❌ Erro: nenhum ficheiro gerado.</div></div>"
+            html = (
+                "<div class='file-box error'>"
+                f"<div class='file-title'>📄 {up.name}</div>"
+                "<div class='file-sub'>❌ Erro: nenhum ficheiro gerado.</div>"
+                "</div>"
+            )
             placeholder.markdown(html, unsafe_allow_html=True)
             summary_lines.append(f"{up.name}: erro - nenhum ficheiro gerado.")
         else:
@@ -270,28 +281,36 @@ elif st.session_state.stage == "processing":
                 shutil.copy(fp, dest)
                 all_excel.append(str(dest))
                 exp, proc = read_e1_counts(str(dest))
-              
+
                 # Substitui None ou string vazia por 0
-                exp = int(exp) if exp not in (None, '', ' ') else 0
-                proc = int(proc) if proc not in (None, '', ' ') else 0
-                
-                # Agora podes usar a condição sem receio
+                exp = int(exp) if exp not in (None, "", " ") else 0
+                proc = int(proc) if proc not in (None, "", " ") else 0
+
                 if proc:
                     sample_count_total += proc
                     if exp != proc:
-                        discrepancies.append(f"⚠️ {Path(fp).name} (processadas: {proc} / declaradas: {exp})")
+                        discrepancies.append(
+                            f"⚠️ {Path(fp).name} (processadas: {proc} / declaradas: {exp})"
+                        )
 
             box_class = "warning" if discrepancies else "success"
             if discrepancies:
                 warning_count += 1
-                discrep_html = "<div class='file-sub'>⚠️ <b>" + str(len(discrepancies)) + "</b> discrepância(s):<br>" + "<br>".join(discrepancies) + "</div>"
+                discrep_html = (
+                    "<div class='file-sub'>⚠️ <b>"
+                    + str(len(discrepancies))
+                    + "</b> discrepância(s):<br>"
+                    + "<br>".join(discrepancies)
+                    + "</div>"
+                )
             else:
                 discrep_html = ""
 
             html = (
                 f"<div class='file-box {box_class}'>"
                 f"<div class='file-title'>📄 {up.name}</div>"
-                f"<div class='file-sub'><b>{req_count}</b> requisição(ões), <b>{sample_count_total}</b> amostras.</div>"
+                f"<div class='file-sub'><b>{req_count}</b> requisição(ões), "
+                f"<b>{sample_count_total}</b> amostras.</div>"
                 f"{discrep_html}</div>"
             )
             placeholder.markdown(html, unsafe_allow_html=True)
@@ -301,25 +320,29 @@ elif st.session_state.stage == "processing":
                 f"{up.name}: {req_count} requisições, {sample_count_total} amostras"
                 + (f" ⚠️ {len(discrepancies)} discrepância(s)." if discrepancies else "")
             )
+
             for fp in created:
                 name = Path(fp).name
                 exp, proc = read_e1_counts(str(fp))
-            
-                # Normaliza valores
+
                 try:
-                    exp = int(exp) if exp not in (None, '', ' ') else 0
+                    exp = int(exp) if exp not in (None, "", " ") else 0
                 except Exception:
                     exp = 0
                 try:
-                    proc = int(proc) if proc not in (None, '', ' ') else 0
+                    proc = int(proc) if proc not in (None, "", " ") else 0
                 except Exception:
                     proc = 0
-            
+
                 if proc > 0 and exp != proc:
                     if exp == 0:
-                        summary_lines.append(f"   ↳ ⚠️ {name} (processadas: {proc} / declaradas: ausente ou 0)")
+                        summary_lines.append(
+                            f"   ↳ ⚠️ {name} (processadas: {proc} / declaradas: ausente ou 0)"
+                        )
                     else:
-                        summary_lines.append(f"   ↳ ⚠️ {name} (processadas: {proc} / declaradas: {exp})")
+                        summary_lines.append(
+                            f"   ↳ ⚠️ {name} (processadas: {proc} / declaradas: {exp})"
+                        )
                 else:
                     summary_lines.append(f"   ↳ {name}")
 
@@ -327,31 +350,26 @@ elif st.session_state.stage == "processing":
         time.sleep(0.5)
 
     total_time = time.time() - start_ts
-    debug_files = collect_debug_files(outdirs)
     lisbon_tz = pytz.timezone("Europe/Lisbon")
     now_local = datetime.now(lisbon_tz)
     total_reqs = len(all_excel)
-    # 🧪 cálculo exato do total de amostras (usa “processadas:” se existir, senão “amostras”)
 
     # 🧪 cálculo rigoroso — soma só 1 valor por PDF
     total_amostras = 0
     pdf_seen = set()
-    
+
     for l in summary_lines:
-        # ignora sublinhas (↳ …)
         if l.strip().startswith("↳"):
             continue
-    
-        # nome do ficheiro PDF
+
         pdf_name = l.split(":")[0].strip()
         if pdf_name in pdf_seen:
             continue
         pdf_seen.add(pdf_name)
-    
-        # se existir "processadas" usa esse valor, senão usa "amostras"
+
         m_proc = re.search(r"processadas:\s*(\d+)", l)
         m_amos = re.search(r"(\d+)\s+amostra", l)
-    
+
         if m_proc:
             total_amostras += int(m_proc.group(1))
         elif m_amos:
@@ -362,36 +380,49 @@ elif st.session_state.stage == "processing":
     summary_text += f"\n🧪 Total de amostras: {total_amostras}"
     summary_text += f"\n⏱️ Tempo total: {total_time:.1f} segundos"
     summary_text += f"\n📅 Executado em: {now_local:%d/%m/%Y às %H:%M:%S}"
-    
-    # 🧹 Tentativa segura de limpeza da pasta temporária
+
+    # 🧹 Limpeza da pasta temporária de sessão (inclui OCR debug)
     try:
         clean_temp_folder(session_dir)
         summary_text += "\n🧹 Pasta temporária apagada com sucesso."
     except Exception as e:
         summary_text += f"\n⚠️ Falha ao apagar pasta temporária: {e}"
-    
-    # ⚠️ Adiciona contagem de avisos e erros
+
     if warning_count:
         summary_text += f"\n⚠️ {warning_count} ficheiro(s) com discrepâncias"
     if error_count:
         summary_text += f"\n❌ {error_count} ficheiro(s) com erro (sem ficheiros Excel gerados)"
 
-    zip_bytes = build_zip_with_summary(all_excel, debug_files, summary_text)
+    # ZIP só com Excel + summary.txt
+    zip_bytes = build_zip_with_summary(all_excel, summary_text)
     zip_name = f"xylella_output_{now_local:%Y%m%d_%H%M%S}.zip"
 
-    st.markdown(f"""
+    st.markdown(
+        f"""
     <div style='text-align:center;margin-top:1.5rem;'>
       <h3>🏁 Processamento concluído!</h3>
       <p>Foram gerados <b>{total_reqs}</b> ficheiro(s) Excel,
       com um total de <b>{total_amostras}</b> amostras processadas.<br>
       Tempo total de execução: <b>{total_time:.1f} segundos</b>.<br>
       Executado em: <b>{now_local:%d/%m/%Y às %H:%M:%S}</b>.</p>
-    </div>""", unsafe_allow_html=True)
+    </div>""",
+        unsafe_allow_html=True,
+    )
 
     zip_b64 = base64.b64encode(zip_bytes).decode()
-  
+
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown(f"<a href='data:application/zip;base64,{zip_b64}' download='{zip_name}'><button class='clean-btn' style='width:100%;'>⬇️ Descarregar resultados (ZIP)</button></a>", unsafe_allow_html=True)
+        st.markdown(
+            f"<a href='data:application/zip;base64,{zip_b64}' download='{zip_name}'>"
+            "<button class='clean-btn' style='width:100%;'>⬇️ Descarregar resultados (ZIP)</button>"
+            "</a>",
+            unsafe_allow_html=True,
+        )
     with col2:
-        st.button("🔁 Novo processamento", type="secondary", use_container_width=True, on_click=reset_app)
+        st.button(
+            "🔁 Novo processamento",
+            type="secondary",
+            use_container_width=True,
+            on_click=reset_app,
+        )
