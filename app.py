@@ -10,7 +10,50 @@ from xylella_processor import process_pdf
 # ───────────────────────────────────────────────
 # Limpa ficheiros temporários
 # ───────────────────────────────────────────────
+def clean_old_tmp_artifacts():
+    """
+    Limpa ficheiros antigos em /tmp gerados por versões anteriores da app
+    (xylella_session_*, *_ocr_debug.txt, process_log.csv, process_summary_*.txt).
+    Corre no arranque da app.
+    """
+    base_tmp = Path(tempfile.gettempdir())
 
+    # Limpa pastas de sessão antigas
+    for d in base_tmp.glob("xylella_session_*"):
+        try:
+            shutil.rmtree(d, ignore_errors=True)
+            print(f"🧹 Apagada pasta de sessão antiga: {d}")
+        except Exception as e:
+            print(f"⚠️ Não foi possível apagar {d}: {e}")
+
+    # Limpa ficheiros de debug soltos no /tmp
+    for pattern in ["*_ocr_debug.txt", "process_log.csv", "process_summary_*.txt"]:
+        for f in base_tmp.glob(pattern):
+            try:
+                f.unlink()
+                print(f"🧹 Apagado artefacto antigo: {f}")
+            except Exception as e:
+                print(f"⚠️ Não foi possível apagar {f}: {e}")
+
+    # ✔️ ESTA PARTE TEM DE ESTAR FORA DO LOOP ACIMA
+    # Limpa PDFs temporários soltos
+    for f in base_tmp.glob("*.pdf"):
+        try:
+            f.unlink()
+            print(f"🧹 PDF temporário antigo removido: {f}")
+        except Exception as e:
+            print(f"⚠️ Não foi possível remover {f}: {e}")
+
+    # Limpa diretórios vazios restantes
+    for d in base_tmp.iterdir():
+        try:
+            if d.is_dir() and not any(d.iterdir()):
+                d.rmdir()
+                print(f"🧹 Diretório vazio removido: {d}")
+        except Exception:
+            pass
+
+                
 def clean_temp_folder(path: str | Path):
     """Apaga a pasta temporária indicada, com debug opcional."""
     import shutil
@@ -39,30 +82,7 @@ def clean_temp_folder(path: str | Path):
         print(f"❌ Erro ao apagar a pasta temporária: {e}")
 import tempfile
 
-def clean_old_tmp_artifacts():
-    """
-    Limpa ficheiros antigos em /tmp gerados por versões anteriores da app
-    (xylella_session_*, *_ocr_debug.txt, process_log.csv, process_summary_*.txt).
-    Corre no arranque da app.
-    """
-    base_tmp = Path(tempfile.gettempdir())
 
-    # Limpa pastas de sessão antigas
-    for d in base_tmp.glob("xylella_session_*"):
-        try:
-            shutil.rmtree(d, ignore_errors=True)
-            print(f"🧹 Apagada pasta de sessão antiga: {d}")
-        except Exception as e:
-            print(f"⚠️ Não foi possível apagar {d}: {e}")
-
-    # Limpa ficheiros de debug soltos no /tmp (apenas os que nos dizem respeito)
-    for pattern in ["*_ocr_debug.txt", "process_log.csv", "process_summary_*.txt"]:
-        for f in base_tmp.glob(pattern):
-            try:
-                f.unlink()
-                print(f"🧹 Apagado artefacto antigo: {f}")
-            except Exception as e:
-                print(f"⚠️ Não foi possível apagar {f}: {e}")
 
 # ───────────────────────────────────────────────
 # Configuração base
