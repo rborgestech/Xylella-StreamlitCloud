@@ -1053,6 +1053,14 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
     ws["G1"].font = Font(italic=True, color="555555")
     ws["G1"].alignment = Alignment(horizontal="left", vertical="center")
     ws["G1"].fill = gray_fill
+    # ───────────────────────────────────────────────
+    # 🕒 Data/hora do processamento (Excel)
+    # ───────────────────────────────────────────────
+    ws.merge_cells("K1:L1")
+    ws["K1"].value = f"Processado em: {datetime.now():%d/%m/%Y %H:%M}"
+    ws["K1"].font = Font(italic=True, color="333333")
+    ws["K1"].alignment = Alignment(horizontal="right", vertical="center")
+    ws["K1"].fill = gray_fill
 
     if last_next_bd:
         data_envio = last_next_bd
@@ -1217,3 +1225,4 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
