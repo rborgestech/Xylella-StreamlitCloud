@@ -34,16 +34,6 @@ from datetime import datetime, timedelta
 from workalendar.europe import Portugal
 from openpyxl.formula.translate import Translator
 
-# ───────────────────────────────────────────────
-# Diretório de saída seguro
-# ───────────────────────────────────────────────
-try:
-    OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", tempfile.gettempdir()))
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-except Exception as e:
-    OUTPUT_DIR = Path(tempfile.gettempdir())
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"[WARN] Não foi possível criar diretório de output definido: {e}. Usando {OUTPUT_DIR}")
 
 # ───────────────────────────────────────────────
 # Diretório base e template
@@ -150,23 +140,25 @@ def clean_value(s: str) -> str:
     return s.strip()
     
 # ───────────────────────────────────────────────
-# Diretório de saída seguro (session-aware)
+# Diretório de saída seguro — OBRIGATÓRIO
+# (A app Streamlit define OUTPUT_DIR por sessão)
 # ───────────────────────────────────────────────
 def get_output_dir() -> Path:
-    """
-    Devolve o diretório de output atual com base na variável
-    de ambiente OUTPUT_DIR (definida no app.py por sessão).
-    Se falhar, cai para o tmp do sistema.
-    """
-    base = os.getenv("OUTPUT_DIR", tempfile.gettempdir())
+    base = os.getenv("OUTPUT_DIR")
+    if not base:
+        raise RuntimeError(
+            "OUTPUT_DIR não definido pela app. "
+            "O core_xylella não pode cair em /tmp global por razões de segurança."
+        )
+
+    d = Path(base)
     try:
-        d = Path(base)
         d.mkdir(parents=True, exist_ok=True)
     except Exception as e:
-        d = Path(tempfile.gettempdir())
-        d.mkdir(parents=True, exist_ok=True)
-        print(f"[WARN] Não foi possível criar diretório de output ({base}): {e}. Usando {d}")
+        raise RuntimeError(f"Não foi possível criar OUTPUT_DIR '{base}': {e}")
+
     return d
+
 
 def extract_all_text(result_json: Dict[str, Any]) -> str:
     """Concatena todo o texto linha a linha de todas as páginas."""
@@ -1367,15 +1359,20 @@ def process_pdf_sync(pdf_path: str) -> list[str]:
 # API pública usada pela app Streamlit
 # ───────────────────────────────────────────────
 
-def process_folder_async(input_dir: str = "/tmp") -> str:
+def process_folder_async(input_dir: str) -> str:
     """
     Processa todos os PDFs em `input_dir` chamando `process_pdf_sync(pdf_path)`.
+    Usa SEMPRE o OUTPUT_DIR da sessão.
     Cria:
       - ficheiros Excel (um por requisição)
       - summary.txt
       - ZIP final apenas com XLSX + summary.txt
     Retorna o caminho completo do ZIP criado.
     """
+
+    # 🔐 Obriga OUTPUT_DIR definido pelo app
+    out_dir = get_output_dir()
+
     start_time = time.time()
     input_path = Path(input_dir)
     pdf_files = sorted(input_path.glob("*.pdf"))
@@ -1402,14 +1399,14 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
 
     elapsed_time = time.time() - start_time
 
-    # Criar summary.txt
-    summary_path = input_path / "summary.txt"
+    # Criar summary.txt dentro do OUTPUT_DIR
+    summary_path = out_dir / "summary.txt"
     with open(summary_path, "w", encoding="utf-8") as f:
         for pdf_path in pdf_files:
             base = pdf_path.name
-            related_excels = [e for e in all_excels if Path(base).stem in Path(e).stem]
-            f.write(f"{base}: {len(related_excels)} requisição(ões)\n")
-            for e in related_excels:
+            related = [e for e in all_excels if Path(base).stem in Path(e).stem]
+            f.write(f"{base}: {len(related)} requisição(ões)\n")
+            for e in related:
                 f.write(f"   ↳ {Path(e).name}\n")
             f.write("\n")
 
@@ -1420,27 +1417,25 @@ def process_folder_async(input_dir: str = "/tmp") -> str:
 
     print(f"🧾 Summary criado: {summary_path}")
 
-    # Criar ZIP apenas com XLSX e summary.txt
+    # Criar ZIP final — SEMPRE dentro do OUTPUT_DIR (seguro)
     first_pdf = pdf_files[0]
     base_name = Path(first_pdf).stem
     zip_name = f"{base_name}_output.zip"
-    zip_path = Path("/tmp") / zip_name  # usa o /tmp global (não apagado pela sessão)
+    zip_path = out_dir / zip_name
 
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-        # Adiciona todos os Excel
         for e in all_excels:
             e_path = Path(e)
             if e_path.exists():
                 zipf.write(e_path, e_path.name)
-
-        # Adiciona summary.txt
         if summary_path.exists():
             zipf.write(summary_path, summary_path.name)
 
     print(f"📦 ZIP final criado: {zip_path}")
-    print(f"✅ Processamento completo ({elapsed_time:.1f}s). ZIP contém {len(all_excels)} Excel(s) + summary.txt")
+    print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
 
 
