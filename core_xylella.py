@@ -1362,16 +1362,16 @@ def process_pdf_sync(pdf_path: str) -> list[str]:
 def process_folder_async(input_dir: str) -> str:
     """
     Processa todos os PDFs em `input_dir` chamando `process_pdf_sync(pdf_path)`.
-    Usa SEMPRE o OUTPUT_DIR da sessão.
-    Cria:
-      - ficheiros Excel (um por requisição)
-      - summary.txt
-      - ZIP final apenas com XLSX + summary.txt
-    Retorna o caminho completo do ZIP criado.
+    Usa SEMPRE o OUTPUT_DIR da sessão (definido pelo app.py).
+    Cria ZIP final com:
+      • todos os XLSX gerados
+      • summary.txt
+    Retorna o caminho completo do ZIP criado dentro do OUTPUT_DIR da sessão.
     """
 
-    # 🔐 Obriga OUTPUT_DIR definido pelo app
+    # Diretório de output definido pela sessão Streamlit
     out_dir = get_output_dir()
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     start_time = time.time()
     input_path = Path(input_dir)
@@ -1385,13 +1385,14 @@ def process_folder_async(input_dir: str) -> str:
 
     all_excels = []
 
-    # Processar cada PDF → gerar Excels
+    # Processar cada PDF → gerar Excel
     for pdf_path in pdf_files:
         base = pdf_path.name
         print(f"\n🔹 A processar: {base}")
+
         try:
             created = process_pdf_sync(str(pdf_path))
-            excels = [f for f in created if str(f).lower().endswith(".xlsx")]
+            excels = [f for f in created if f.lower().endswith(".xlsx")]
             all_excels.extend(excels)
             print(f"✅ {base}: {len(excels)} ficheiro(s) Excel.")
         except Exception as e:
@@ -1399,35 +1400,38 @@ def process_folder_async(input_dir: str) -> str:
 
     elapsed_time = time.time() - start_time
 
-    # Criar summary.txt dentro do OUTPUT_DIR
+    # Criar summary.txt dentro do OUTPUT_DIR da sessão
     summary_path = out_dir / "summary.txt"
     with open(summary_path, "w", encoding="utf-8") as f:
         for pdf_path in pdf_files:
             base = pdf_path.name
-            related = [e for e in all_excels if Path(base).stem in Path(e).stem]
-            f.write(f"{base}: {len(related)} requisição(ões)\n")
-            for e in related:
+            related_excels = [e for e in all_excels if Path(base).stem in Path(e).stem]
+            f.write(f"{base}: {len(related_excels)} requisição(ões)\n")
+            for e in related_excels:
                 f.write(f"   ↳ {Path(e).name}\n")
             f.write("\n")
 
-        f.write("──────────────────────────────\n")
+        f.write("───────────────────────────\n")
         f.write(f"📊 Total de ficheiros Excel: {len(all_excels)}\n")
         f.write(f"⏱️ Tempo total: {elapsed_time:.1f} segundos\n")
         f.write(f"📅 Executado em: {datetime.now():%d/%m/%Y às %H:%M:%S}\n")
 
     print(f"🧾 Summary criado: {summary_path}")
 
-    # Criar ZIP final — SEMPRE dentro do OUTPUT_DIR (seguro)
-    first_pdf = pdf_files[0]
-    base_name = Path(first_pdf).stem
+    # Criar ZIP final dentro do OUTPUT_DIR da sessão
+    # Nome baseado no primeiro PDF processado
+    base_name = Path(pdf_files[0]).stem
     zip_name = f"{base_name}_output.zip"
     zip_path = out_dir / zip_name
 
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+        # adicionar todos os excels
         for e in all_excels:
             e_path = Path(e)
             if e_path.exists():
                 zipf.write(e_path, e_path.name)
+
+        # adicionar summary
         if summary_path.exists():
             zipf.write(summary_path, summary_path.name)
 
@@ -1435,6 +1439,8 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
+
 
 
 
