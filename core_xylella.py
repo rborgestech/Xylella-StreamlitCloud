@@ -502,27 +502,29 @@ def extract_context_from_text(full_text: str):
     if m_col:
         default_colheita = normalize_date_str(m_col.group(1))
     
-    # 2) Se falhou, tentar reconstrução multi-linha
-    #    MAS só se **não houver palavras como "Total" no meio**
+        # 2) Se falhou, tentar reconstrução multi-linha
     if not default_colheita:
         m_block = re.search(
-            r"Data\s+(?:de\s+)?colheita(?:\s+das?\s+amostras?)?\s*[:\-\s]*([\s\S]{0,60})",
+            r"Data\s+(?:de\s+)?colheita(?:\s+das?\s+amostras?)?\s*[:\-\s]*([\s\S]{0,80})",
             full_text,
             re.I,
         )
         if m_block:
             raw = m_block.group(1)
-    
-            # se houver "total" no meio → ruído → forçar inválido
-            if re.search(r"\btotal\b", raw, re.I):
-                default_colheita = ""    # ← força Excel a marcar a vermelho
+            raw = raw.replace("\n", " ").replace("\r", " ")
+
+            # 2a) primeiro tenta encontrar diretamente um padrão dd/mm/aaaa
+            m_date = re.search(r"(\d{1,2}\s*/\s*\d{1,2}\s*/\s*\d{2,4})", raw)
+            if m_date:
+                default_colheita = normalize_date_str(m_date.group(1))
             else:
-                raw = raw.replace("\n", " ").replace("\r", " ")
-                digits = re.sub(r"[^\d]", "", raw)
-    
-                if len(digits) >= 8:
-                    candidate = f"{digits[:2]}/{digits[2:4]}/{digits[4:8]}"
-                    default_colheita = normalize_date_str(candidate) or ""
+                # 2b) só usa o fallback por dígitos se não houver "Total" no meio
+                if not re.search(r"\btotal\b", raw, re.I):
+                    digits = re.sub(r"[^\d]", "", raw)
+                    if len(digits) >= 8:
+                        candidate = f"{digits[:2]}/{digits[2:4]}/{digits[4:8]}"
+                        default_colheita = normalize_date_str(candidate) or ""
+
     
     # 3) Se existirem marcações (*), (**)
     if not colheita_map and default_colheita:
@@ -1412,6 +1414,7 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
 
 
