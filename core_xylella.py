@@ -197,6 +197,30 @@ def detect_requisicoes(full_text: str):
         print(f"🔍 Detetadas {count} requisições no ficheiro (posições: {positions})")
     return count, positions
 
+def detect_document_type(full_text: str) -> str:
+    """
+    Decide se o PDF é ICNF ou DGAV com base nos cabeçalhos oficiais.
+
+    - ICNF → 'Prospeção de: Xylella fastidiosa em Zonas Demarcadas'
+    - DGAV → 'PROGRAMA NACIONAL DE PROSPEÇÃO DE PRAGAS DE QUARENTENA'
+    """
+    txt = full_text.upper()
+
+    # ICNF – cabeçalho oficial: Prospeção de Xylella fastidiosa em Zonas Demarcadas
+    if "XYLELLA FASTIDIOSA" in txt and "ZONAS DEMARC" in txt and "PROSPEC" in txt:
+        return "ICNF"
+
+    # DGAV – cabeçalho oficial do programa nacional
+    if "PROGRAMA NACIONAL DE PROSPEC" in txt:
+        return "DGAV"
+
+    # Fallback ICNF: referências /XF/ICNF sem menção a DGAV
+    if "/XF/ICNF" in txt and "DGAV" not in txt:
+        return "ICNF"
+
+    # Fallback por omissão → DGAV
+    return "DGAV"
+
 def split_if_multiple_requisicoes(full_text: str) -> List[str]:
     """Divide o texto OCR em blocos distintos, um por requisição DGAV→SGS."""
     text = full_text.replace("\r", "")
@@ -789,35 +813,28 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
     """
     Divide o documento em blocos (requisições) e devolve lista de dict:
         { "rows": [...amostras...], "expected": nº_declarado }
+
+    Lógica:
+      1) Lê o texto OCR completo (do ficheiro _ocr_debug.txt se existir).
+      2) Decide se é ICNF ou DGAV com base nos cabeçalhos oficiais.
+      3) ICNF  → split_icnf_requisicoes  + parse_icnf_zonas
+         DGAV  → split_if_multiple_requisicoes + parse_xylella_tables
     """
+    # 1. Texto completo
     if txt_path and os.path.exists(txt_path):
         full_text = Path(txt_path).read_text(encoding="utf-8")
         print(f"📝 Contexto extraído de {os.path.basename(txt_path)}")
     else:
         full_text = extract_all_text(result_json)
 
-    full = full_text.upper()
-    
-    # 1️⃣ Cabeçalho DGAV (mais forte)
-    if "PROGRAMA NACIONAL DE PROSPEC" in full:
-        is_icnf = False
-    
-    # 2️⃣ Cabeçalho ICNF (segundo mais forte)
-    elif "XYLELLA FASTIDIOSA" in full and "ZONAS DEMAR" in full:
-        is_icnf = True
-    
-    # 3️⃣ Fallbacks
-    elif "/XF/ICNF" in full:
-        is_icnf = True
-    elif "/XF/DGAV" in full or "DGAV" in full:
-        is_icnf = False
-    
-    # 4️⃣ Último fallback — assume DGAV
-    else:
-        is_icnf = False
+    # 2. Tipo de documento
+    doc_type = detect_document_type(full_text)
+    full_upper = full_text.upper()
 
-
-    if is_icnf:
+    # ───────────────────────────────────────────────
+    # 🟦 ICNF – Zonas Demarcadas
+    # ───────────────────────────────────────────────
+    if doc_type == "ICNF":
         print("🟦 Documento ICNF detetado — parser exclusivo ICNF ativado.")
         blocos = split_icnf_requisicoes(full_text) or [full_text]
 
@@ -827,27 +844,38 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
             rows = parse_icnf_zonas(bloco, ctx, req_id=i)
             expected = ctx.get("declared_samples", len(rows))
 
+            # Se o número extraído for maior que o declarado, corta
             if expected and len(rows) > expected:
                 print(f"⚠️ ICNF bloco {i}: {len(rows)} amostras extraídas > declaradas {expected}. Cortar para {expected}.")
                 rows = rows[:expected]
 
             results.append({"rows": rows, "expected": expected})
+
         return results
 
-    # DGAV
-    count, _ = detect_requisicoes(full_text)
-    all_tables = result_json.get("analyzeResult", {}).get("tables", []) or []
+    # ───────────────────────────────────────────────
+    # 🟩 DGAV – Programa Nacional de Prospecção
+    # ───────────────────────────────────────────────
+    print("🟩 Documento DGAV detetado — parser DGAV ativado.")
 
-    if count <= 1:
-        context = extract_context_from_text(full_text)
-        amostras = parse_xylella_tables(result_json, context, req_id=1)
-        expected = context.get("declared_samples", len(amostras))
-        return [{"rows": amostras, "expected": expected}]
-
+    # Divide o texto em blocos por cabeçalho DGAV
     blocos = split_if_multiple_requisicoes(full_text)
     num_blocos = len(blocos)
+    print(f"🟢 DGAV: {num_blocos} bloco(s) de requisição após split.")
+
+    all_tables = result_json.get("analyzeResult", {}).get("tables", []) or []
+
+    # Caso simples: 0 ou 1 cabeçalho → trata como uma única requisição
+    if num_blocos <= 1:
+        ctx = extract_context_from_text(full_text)
+        amostras = parse_xylella_tables(result_json, ctx, req_id=1)
+        expected = ctx.get("declared_samples", len(amostras))
+        return [{"rows": amostras, "expected": expected}]
+
+    # Caso múltiplo: tentar atribuir tabelas a cada bloco
     out: List[List[Dict[str, Any]]] = [[] for _ in range(num_blocos)]
 
+    # Extrai referências por bloco para ajudar a atribuir tabelas (heurística)
     refs_por_bloco: List[List[str]] = []
     for i, bloco in enumerate(blocos, start=1):
         refs_bloco = re.findall(
@@ -858,8 +886,10 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
         print(f"   ↳ Bloco {i}: {len(refs_bloco)} referências detectadas")
         refs_por_bloco.append(refs_bloco)
 
+    # Texto de cada tabela concatenado
     table_texts = [" ".join(c.get("content", "") for c in t.get("cells", [])) for t in all_tables]
 
+    # Atribuição de cada tabela a um bloco (pelo nº de refs que coincidem)
     assigned_to: List[int] = [-1] * len(all_tables)
     for ti, ttxt in enumerate(table_texts):
         scores = []
@@ -874,29 +904,33 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
             bi = scores.index(best)
             assigned_to[ti] = bi
 
+    # Tabelas sem bloco atribuído são distribuídas round-robin
     unassigned = [i for i, b in enumerate(assigned_to) if b < 0]
     if unassigned:
         for k, ti in enumerate(unassigned):
             assigned_to[ti] = k % num_blocos
 
+    # Parsing bloco a bloco
     for bi in range(num_blocos):
         try:
-            context = extract_context_from_text(blocos[bi])
+            ctx = extract_context_from_text(blocos[bi])
             tables_filtradas = [all_tables[ti] for ti in range(len(all_tables)) if assigned_to[ti] == bi]
             if not tables_filtradas:
                 print(f"⚠️ Bloco {bi+1}: sem tabelas atribuídas (usar todas como fallback).")
                 tables_filtradas = all_tables
 
             local = {"analyzeResult": {"tables": tables_filtradas}}
-            amostras = parse_xylella_tables(local, context, req_id=bi+1)
+            amostras = parse_xylella_tables(local, ctx, req_id=bi+1)
             out[bi] = amostras or []
         except Exception as e:
             print(f"❌ Erro no bloco {bi+1}: {e}")
             out[bi] = []
 
+    # Filtra blocos vazios
     out = [req for req in out if req]
     print(f"\n🏁 Concluído: {len(out)} requisições com amostras extraídas (atribuição exclusiva).")
 
+    # Constrói estrutura final com expected por bloco
     results: List[Dict[str, Any]] = []
     for bi, bloco in enumerate(blocos[:len(out)], start=1):
         ctx = extract_context_from_text(bloco)
@@ -905,7 +939,9 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
             "rows": out[bi - 1],
             "expected": expected
         })
+
     return results
+
 
 # ───────────────────────────────────────────────
 # Datas úteis e nomes de ficheiro
@@ -1242,5 +1278,6 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
 
