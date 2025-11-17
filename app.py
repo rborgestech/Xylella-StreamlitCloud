@@ -251,7 +251,7 @@ elif st.session_state.stage == "processing":
         # ───────────────────────────────────────────────
         # DEBUG NO ECRÃ (DESATIVADO, MAS PRONTO A USAR)
         # ───────────────────────────────────────────────
-         debug_files = list(tmpdir.glob("*_ocr_debug.txt"))
+        debug_files = list(tmpdir.glob("*_ocr_debug.txt"))
          if debug_files:
              st.subheader(f"Ficheiros OCR Debug ({up.name})")
              for fpath in debug_files:
