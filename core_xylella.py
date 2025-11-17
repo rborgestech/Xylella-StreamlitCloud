@@ -466,40 +466,50 @@ def extract_context_from_text(full_text: str):
     if ctx["dgav"] is None:
         ctx["dgav"] = ""
 
-    # Datas de colheita
+    # -----------------------------
+    # Datas de colheita (robusto)
+    # -----------------------------
     colheita_map: dict[str, str] = {}
+
+    # 1) Datas com asteriscos (ex: "11/11/2025 (*)")
     for m in re.finditer(r"(\d{1,2}/\d{1,2}/\d{4})\s*\(\s*(\*+)\s*\)", full_text):
         colheita_map[f"({m.group(2).replace(' ', '')})"] = m.group(1)
 
-        # Tentar formato normal
-        m_col = re.search(
-            r"Datas?\s+de\s+recolha\s+de\s+amostras\s*[:\-\s]*([0-9/\-\s]+)",
+    # 2) Padrão principal
+    m_col = re.search(
+        r"Datas?\s+de\s+recolha\s+de\s+amostras\s*[:\-\s]*([0-9/\-\s]+)",
+        full_text,
+        re.I
+    )
+
+    default_colheita = ""
+
+    if m_col:
+        default_colheita = normalize_date_str(m_col.group(1))
+    else:
+        # 3) Padrão alternativo mais permissivo
+        m_alt = re.search(
+            r"Data\s+(?:de\s+)?colheita(?:\s+das?\s+amostras?)?[:\-\s]*([\s\S]{0,40})",
             full_text,
-            re.I,
+            re.I
         )
-        
-        default_colheita = ""
-        
-        if m_col:
-            default_colheita = normalize_date_str(m_col.group(1))
-        else:
-            # Tentar datas partidas (OCR em várias linhas)
-            m_block = re.search(
-                r"Data\s+(?:de\s+)?colheita(?:\s+das?\s+amostras?)?\s*[:\-\s]*([\s\S]{0,80})",
-                full_text,
-                re.I,
-            )
-            if m_block:
-                raw = m_block.group(1)
-                raw = raw.replace("\n", " ").replace("\r", " ")
-                digits = re.sub(r"[^\d]", "", raw)
-                if len(digits) >= 8:
-                    default_colheita = f"{digits[:2]}/{digits[2:4]}/{digits[4:8]}"
+        if m_alt:
+            raw = m_alt.group(1)
+            raw = raw.replace("\n", " ").replace("\r", " ")
+            digits = re.sub(r"[^\d]", "", raw)
+            if len(digits) >= 8:
+                default_colheita = f"{digits[:2]}/{digits[2:4]}/{digits[4:8]}"
 
+    # 4) Normalizar
+    default_colheita = normalize_date_str(default_colheita)
 
-    if not colheita_map and default_colheita:
+    # 5) Se não houver mapa de asteriscos, usar a data única
+    if default_colheita and not colheita_map:
         for key in ("(*)", "(**)", "(***)"):
             colheita_map[key] = default_colheita
+
+    ctx["colheita_map"] = colheita_map
+    ctx["default_colheita"] = default_colheita
 
     ctx["colheita_map"] = colheita_map
     ctx["default_colheita"] = default_colheita
@@ -1388,6 +1398,7 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
 
 
