@@ -55,6 +55,19 @@ BOLD  = Font(bold=True, color="000000")
 ITALIC= Font(italic=True, color="555555")
 
 # ───────────────────────────────────────────────
+# Cabeçalhos para distinguir templates
+# ───────────────────────────────────────────────
+HEADER_DGAV_PNPQ_RE = re.compile(
+    r"Programa\s+nacional\s+de\s+Prospec[çc][aã]o\s+de\s+pragas\s+de\s+quarentena",
+    re.I,
+)
+
+HEADER_ZONAS_DEM_RE = re.compile(
+    r"Prospe[cç][aã]o\s+de\s*:\s*Xylella\s+fastidiosa\s+em\s+Zonas\s+Demarcadas",
+    re.I,
+)
+
+# ───────────────────────────────────────────────
 # Utilitários genéricos
 # ───────────────────────────────────────────────
 def integrate_logic_and_generate_name(source_pdf: str) -> tuple[str, str]:
@@ -668,8 +681,20 @@ def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, An
 
 def parse_icnf_zonas(full_text: str, ctx: dict, req_id: int = 1) -> List[Dict[str, Any]]:
     """
-    Parser robusto para ICNF / Zonas Demarcadas.
+    Parser robusto para formulários de Zonas Demarcadas (DGAV ou ICNF).
+
+    - Suporta:
+        • linha com número + referência ("1 /XF/.....")
+        • linha partida em duas ("1" + "/XF/....")
+        • referência direta tipo "64/Xf/DGAVN/AMP/25"
+        • evita cabeçalhos ("Refª da amostra", "Hospedeiro", "Tipo...")
+        • extrai tipo, hospedeiro e referência corretamente
+        • mapeia C3/C 3/C5/C 5 → "Composta"
     """
+
+    # -----------------------------------------------
+    # 1) LIMPAR E PRÉ-FILTRAR LINHAS
+    # -----------------------------------------------
     lines = [l.strip() for l in full_text.splitlines() if l.strip()]
 
     header_garbage = (
@@ -681,7 +706,7 @@ def parse_icnf_zonas(full_text: str, ctx: dict, req_id: int = 1) -> List[Dict[st
 
     filtered = []
     for ln in lines:
-        low = ln.lower().strip()
+        low = ln.lower()
         if any(h in low for h in header_garbage):
             continue
         filtered.append(ln)
@@ -689,9 +714,19 @@ def parse_icnf_zonas(full_text: str, ctx: dict, req_id: int = 1) -> List[Dict[st
     lines = filtered
     out: List[Dict[str, Any]] = []
 
-    tipo_re = re.compile(r"\b(Simples|Composta|Composto|Individual)\b", re.I)
+    # -----------------------------------------------
+    # 2) EXPRESSÕES REGULARES DE REFERÊNCIA / TIPO
+    # -----------------------------------------------
+    tipo_text_re = re.compile(r"\b(Simples|Composta|Composto|Individual)\b", re.I)
+    # "1 /XF/..." ou "1 XF/..."
     ref_split_re = re.compile(r"^([1-9]\d{0,2})\s+(\/?XF\/[A-Z0-9\-/]+)", re.I)
+    # "1/XF/..."
     ref_full_re = re.compile(r"^[1-9]\d{0,2}\s*/XF/[A-Z0-9\-/]+", re.I)
+    # "64/Xf/..." (sem número de ordem)
+    ref_direct_re = re.compile(r"^\d{1,3}\s*/?\s*[Xx][Ff]/[A-Z0-9\-/]+", re.I)
+
+    # C3 / C 3 / C5 / C 5 → Composta
+    tipo_c_re = re.compile(r"\bC\s*([35])\b", re.I)
 
     skip_if_no_ref = (
         "datas de recolha", "data de recolha", "data colheita",
@@ -703,6 +738,9 @@ def parse_icnf_zonas(full_text: str, ctx: dict, req_id: int = 1) -> List[Dict[st
     pending_host: str = ""
     pending_tipo: str = ""
 
+    # -----------------------------------------------
+    # 3) FUNÇÃO PARA FECHAR UMA AMOSTRA
+    # -----------------------------------------------
     def flush_sample(force: bool = False):
         nonlocal pending_ref, pending_host, pending_tipo
         if not pending_ref:
@@ -734,26 +772,33 @@ def parse_icnf_zonas(full_text: str, ctx: dict, req_id: int = 1) -> List[Dict[st
         pending_host = ""
         pending_tipo = ""
 
+    # -----------------------------------------------
+    # 4) LOOP PRINCIPAL DAS LINHAS
+    # -----------------------------------------------
     i = 0
     while i < len(lines):
         ln = lines[i].strip()
+        low = ln.lower()
 
+        # Números soltos "1" + linha seguinte "/XF/..." (caso antigo)
         if re.fullmatch(r"[1-9]\d{0,2}", ln):
             if i + 1 < len(lines):
-                nxt = lines[i+1].strip()
+                nxt = lines[i + 1].strip()
                 if nxt.upper().startswith(("/XF", "XF")):
                     ln = f"{ln} {nxt}"
-                    lines[i+1] = ""
+                    lines[i + 1] = ""
                 else:
                     i += 1
                     continue
 
-        if re.fullmatch(r"[1-9]\d{0,2}", ln) and i + 1 < len(lines):
-            nxt = lines[i + 1].strip()
-            if nxt.upper().startswith(("/XF", "XF")):
-                ln = f"{ln} {nxt}"
-                lines[i + 1] = ""
+        # 4.1 Referência direta "64/Xf/..."
+        if ref_direct_re.match(ln):
+            flush_sample(force=True)
+            pending_ref = _clean_ref(ln)
+            i += 1
+            continue
 
+        # 4.2 "1 /XF/..." com número de ordem + ref
         m_split = ref_split_re.match(ln)
         if m_split:
             flush_sample(force=True)
@@ -763,44 +808,57 @@ def parse_icnf_zonas(full_text: str, ctx: dict, req_id: int = 1) -> List[Dict[st
             i += 1
             continue
 
+        # 4.3 "1/XF/..."
         if ref_full_re.match(ln):
             flush_sample(force=True)
             pending_ref = _clean_ref(ln)
             i += 1
             continue
 
+        # Se ainda não temos referência, ignorar ruído
         if not pending_ref:
-            if any(k in ln.lower() for k in skip_if_no_ref):
+            if any(k in low for k in skip_if_no_ref):
                 i += 1
                 continue
             i += 1
             continue
 
-        if any(k in ln.lower() for k in skip_if_no_ref):
+        # Linhas de fecho de bloco ("Total...", "Data colheita...", etc.)
+        if any(k in low for k in skip_if_no_ref):
             flush_sample(force=True)
             i += 1
             continue
 
-        m_tipo = tipo_re.search(ln)
-        if m_tipo:
-            pending_tipo = m_tipo.group(1).capitalize()
-            host_part = ln[:m_tipo.start()].strip()
+        # 4.4 Tipo textual (Simples / Composta / Individual)
+        m_tipo_txt = tipo_text_re.search(ln)
+        if m_tipo_txt:
+            pending_tipo = m_tipo_txt.group(1).capitalize()
+            host_part = ln[:m_tipo_txt.start()].strip()
             if host_part:
-                if pending_host:
-                    pending_host = f"{pending_host} {host_part}"
-                else:
-                    pending_host = host_part
+                pending_host = (pending_host + " " + host_part).strip() if pending_host else host_part
             flush_sample(force=True)
             i += 1
             continue
 
-        if pending_host:
-            pending_host = f"{pending_host} {ln}"
-        else:
-            pending_host = ln
+        # 4.5 Tipo "C 3" / "C3" / "C 5" / "C5" → Composta
+        m_tipo_c = tipo_c_re.search(ln)
+        if m_tipo_c:
+            pending_tipo = "Composta"
+            # tudo antes de "C 3"/"C 5" faz parte do hospedeiro (se existir)
+            host_part = ln[:m_tipo_c.start()].strip()
+            if host_part:
+                pending_host = (pending_host + " " + host_part).strip() if pending_host else host_part
+            flush_sample(force=True)
+            i += 1
+            continue
 
+        # 4.6 Caso geral → parte do hospedeiro (pode vir em várias linhas)
+        pending_host = (pending_host + " " + ln).strip() if pending_host else ln
         i += 1
 
+    # -----------------------------------------------
+    # 5) ÚLTIMA AMOSTRA
+    # -----------------------------------------------
     flush_sample(force=False)
 
     print(f"🟦 parse_icnf_zonas: {len(out)} amostras extraídas (req {req_id})")
@@ -811,32 +869,40 @@ def parse_icnf_zonas(full_text: str, ctx: dict, req_id: int = 1) -> List[Dict[st
 # ───────────────────────────────────────────────
 def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path: str | None) -> List[Dict[str, Any]]:
     """
-    Divide o documento em blocos (requisições) e devolve lista de dict:
-        { "rows": [...amostras...], "expected": nº_declarado }
+    Divide o documento em blocos (requisições) e devolve uma lista onde cada elemento
+    é um dicionário: { "rows": [...amostras...], "expected": nº_declarado }.
 
-    Lógica:
-      1) Lê o texto OCR completo (do ficheiro _ocr_debug.txt se existir).
-      2) Decide se é ICNF ou DGAV com base nos cabeçalhos oficiais.
-      3) ICNF  → split_icnf_requisicoes  + parse_icnf_zonas
-         DGAV  → split_if_multiple_requisicoes + parse_xylella_tables
+    🔹 DGAV-PNPQ   → cabeçalho "Programa nacional de Prospecção de pragas de quarentena"
+                     (pode ter 1 ou várias requisições no mesmo PDF, detetadas por esse cabeçalho)
+
+    🔹 Zonas Demarcadas (DGAV ou ICNF) → cabeçalho
+                     "Prospeção de: Xylella fastidiosa em Zonas Demarcadas"
+                     (pode ter 1 ou várias requisições; cada cabeçalho = nova requisição)
+
+    A ENTIDADE **NÃO** é usada para distinguir o modelo.
+    O texto "CAIXA 1 / 2 / 3 / 4" é ignorado na lógica e apenas entra em `ctx["entidade"]`.
     """
-    # 1. Texto completo
+    # Texto global OCR
     if txt_path and os.path.exists(txt_path):
         full_text = Path(txt_path).read_text(encoding="utf-8")
         print(f"📝 Contexto extraído de {os.path.basename(txt_path)}")
     else:
         full_text = extract_all_text(result_json)
 
-    # 2. Tipo de documento
-    doc_type = detect_document_type(full_text)
-    full_upper = full_text.upper()
+    # ------------------------------------------------------------
+    # 1) Detetar template pelo cabeçalho (NUNCA pela 'Entidade')
+    # ------------------------------------------------------------
+    is_dgav_pnpq = bool(HEADER_DGAV_PNPQ_RE.search(full_text))
+    is_zonas_dem = bool(HEADER_ZONAS_DEM_RE.search(full_text))
 
-    # ───────────────────────────────────────────────
-    # 🟦 ICNF – Zonas Demarcadas
-    # ───────────────────────────────────────────────
-    if doc_type == "ICNF":
-        print("🟦 Documento ICNF detetado — parser exclusivo ICNF ativado.")
-        blocos = split_icnf_requisicoes(full_text) or [full_text]
+    # ------------------------------------------------------------
+    # 🟦 ZONAS DEMARCADAS (DGAV ou ICNF) — parser de linhas
+    # ------------------------------------------------------------
+    if is_zonas_dem and not is_dgav_pnpq:
+        print("🟦 Documento 'Zonas Demarcadas' detetado — parser exclusivo de linhas ativado.")
+        blocos = split_icnf_requisicoes(full_text)
+        if not blocos:
+            blocos = [full_text]
 
         results: List[Dict[str, Any]] = []
         for i, bloco in enumerate(blocos, start=1):
@@ -844,38 +910,39 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
             rows = parse_icnf_zonas(bloco, ctx, req_id=i)
             expected = ctx.get("declared_samples", len(rows))
 
-            # Se o número extraído for maior que o declarado, corta
+            # Segurança extra: se extraiu mais linhas do que o declarado, corta ao declarado
             if expected and len(rows) > expected:
-                print(f"⚠️ ICNF bloco {i}: {len(rows)} amostras extraídas > declaradas {expected}. Cortar para {expected}.")
+                print(
+                    f"⚠️ Zonas Demarcadas bloco {i}: {len(rows)} amostras extraídas > declaradas {expected}. "
+                    "Cortar para o nº declarado."
+                )
                 rows = rows[:expected]
 
             results.append({"rows": rows, "expected": expected})
 
         return results
 
-    # ───────────────────────────────────────────────
-    # 🟩 DGAV – Programa Nacional de Prospecção
-    # ───────────────────────────────────────────────
-    print("🟩 Documento DGAV detetado — parser DGAV ativado.")
-
-    # Divide o texto em blocos por cabeçalho DGAV
-    blocos = split_if_multiple_requisicoes(full_text)
-    num_blocos = len(blocos)
-    print(f"🟢 DGAV: {num_blocos} bloco(s) de requisição após split.")
-
+    # ------------------------------------------------------------
+    # 🟧 DGAV PNPQ (Programa nacional de Prospecção de pragas de quarentena)
+    #     – lógica original baseada em tabelas Azure
+    # ------------------------------------------------------------
+    print("🟧 Documento tratado como DGAV PNPQ (Programa nacional).")
+    count, _ = detect_requisicoes(full_text)
     all_tables = result_json.get("analyzeResult", {}).get("tables", []) or []
 
-    # Caso simples: 0 ou 1 cabeçalho → trata como uma única requisição
-    if num_blocos <= 1:
-        ctx = extract_context_from_text(full_text)
-        amostras = parse_xylella_tables(result_json, ctx, req_id=1)
-        expected = ctx.get("declared_samples", len(amostras))
+    # Caso simples (1 requisição DGAV)
+    if count <= 1:
+        context = extract_context_from_text(full_text)
+        amostras = parse_xylella_tables(result_json, context, req_id=1)
+        expected = context.get("declared_samples", len(amostras))
         return [{"rows": amostras, "expected": expected}]
 
-    # Caso múltiplo: tentar atribuir tabelas a cada bloco
+    # Múltiplas requisições DGAV — segmentar por cabeçalhos
+    blocos = split_if_multiple_requisicoes(full_text)
+    num_blocos = len(blocos)
     out: List[List[Dict[str, Any]]] = [[] for _ in range(num_blocos)]
 
-    # Extrai referências por bloco para ajudar a atribuir tabelas (heurística)
+    # Extrair referências por bloco
     refs_por_bloco: List[List[str]] = []
     for i, bloco in enumerate(blocos, start=1):
         refs_bloco = re.findall(
@@ -886,10 +953,13 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
         print(f"   ↳ Bloco {i}: {len(refs_bloco)} referências detectadas")
         refs_por_bloco.append(refs_bloco)
 
-    # Texto de cada tabela concatenado
-    table_texts = [" ".join(c.get("content", "") for c in t.get("cells", [])) for t in all_tables]
+    # Texto de cada tabela
+    table_texts = [
+        " ".join(c.get("content", "") for c in t.get("cells", []))
+        for t in all_tables
+    ]
 
-    # Atribuição de cada tabela a um bloco (pelo nº de refs que coincidem)
+    # Atribuição exclusiva de tabelas por bloco
     assigned_to: List[int] = [-1] * len(all_tables)
     for ti, ttxt in enumerate(table_texts):
         scores = []
@@ -904,33 +974,35 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
             bi = scores.index(best)
             assigned_to[ti] = bi
 
-    # Tabelas sem bloco atribuído são distribuídas round-robin
+    # fallback: tabelas não atribuídas → distribuição uniforme
     unassigned = [i for i, b in enumerate(assigned_to) if b < 0]
     if unassigned:
         for k, ti in enumerate(unassigned):
             assigned_to[ti] = k % num_blocos
 
-    # Parsing bloco a bloco
+    # Construir amostras por bloco com base na atribuição
     for bi in range(num_blocos):
         try:
-            ctx = extract_context_from_text(blocos[bi])
-            tables_filtradas = [all_tables[ti] for ti in range(len(all_tables)) if assigned_to[ti] == bi]
+            context = extract_context_from_text(blocos[bi])
+            tables_filtradas = [
+                all_tables[ti]
+                for ti in range(len(all_tables))
+                if assigned_to[ti] == bi
+            ]
             if not tables_filtradas:
                 print(f"⚠️ Bloco {bi+1}: sem tabelas atribuídas (usar todas como fallback).")
                 tables_filtradas = all_tables
 
             local = {"analyzeResult": {"tables": tables_filtradas}}
-            amostras = parse_xylella_tables(local, ctx, req_id=bi+1)
+            amostras = parse_xylella_tables(local, context, req_id=bi+1)
             out[bi] = amostras or []
         except Exception as e:
             print(f"❌ Erro no bloco {bi+1}: {e}")
             out[bi] = []
 
-    # Filtra blocos vazios
     out = [req for req in out if req]
     print(f"\n🏁 Concluído: {len(out)} requisições com amostras extraídas (atribuição exclusiva).")
 
-    # Constrói estrutura final com expected por bloco
     results: List[Dict[str, Any]] = []
     for bi, bloco in enumerate(blocos[:len(out)], start=1):
         ctx = extract_context_from_text(bloco)
@@ -939,8 +1011,8 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
             "rows": out[bi - 1],
             "expected": expected
         })
-
     return results
+
 
 
 # ───────────────────────────────────────────────
@@ -1278,6 +1350,7 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
 
 
