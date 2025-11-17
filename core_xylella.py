@@ -421,7 +421,9 @@ def extract_context_from_text(full_text: str):
     else:
         ctx["entidade"] = ""
 
-
+    if entidade:
+        entidade = re.sub(r"_+", "", entidade).strip()
+    ctx["entidade"] = entidade
 
     # Técnico responsável
     tecnico = None
@@ -489,7 +491,7 @@ def extract_context_from_text(full_text: str):
     for m in re.finditer(r"(\d{1,2}/\d{1,2}/\d{4})\s*\(\s*(\*+)\s*\)", full_text):
         colheita_map[f"({m.group(2).replace(' ', '')})"] = m.group(1)
     
-    # Tentativa 1 — padrão clássico
+    # 1) Tentativa clássica (funciona na maioria dos PDFs)
     m_col = re.search(
         r"Datas?\s+de\s+recolha\s+de\s+amostras\s*[:\-\s]*([0-9/\-\s]+)",
         full_text,
@@ -500,35 +502,36 @@ def extract_context_from_text(full_text: str):
     if m_col:
         default_colheita = normalize_date_str(m_col.group(1))
     
-    # Tentativa 2 — OCR truncado: "11" + "1" + "/2025"
-    # Procura até 40 caracteres após a expressão
+    # 2) Se falhou, tentar reconstrução multi-linha
+    #    MAS só se **não houver palavras como "Total" no meio**
     if not default_colheita:
-        m_col_block = re.search(
-            r"Data\s+(?:de\s+)?colheita(?:\s+das?\s+amostras?)?\s*[:\-\s]*([\s\S]{0,40})",
+        m_block = re.search(
+            r"Data\s+(?:de\s+)?colheita(?:\s+das?\s+amostras?)?\s*[:\-\s]*([\s\S]{0,60})",
             full_text,
             re.I,
         )
-        if m_col_block:
-            raw = m_col_block.group(1)
+        if m_block:
+            raw = m_block.group(1)
     
-            # Junta linhas quebradas pelo OCR
-            raw = raw.replace("\n", " ").replace("\r", " ")
+            # se houver "total" no meio → ruído → forçar inválido
+            if re.search(r"\btotal\b", raw, re.I):
+                default_colheita = ""    # ← força Excel a marcar a vermelho
+            else:
+                raw = raw.replace("\n", " ").replace("\r", " ")
+                digits = re.sub(r"[^\d]", "", raw)
     
-            # Extrai apenas os dígitos
-            digits = re.sub(r"[^\d]", "", raw)
+                if len(digits) >= 8:
+                    candidate = f"{digits[:2]}/{digits[2:4]}/{digits[4:8]}"
+                    default_colheita = normalize_date_str(candidate) or ""
     
-            # Exige pelo menos 8 dígitos (ddmmYYYY)
-            if len(digits) >= 8:
-                candidate = f"{digits[:2]}/{digits[2:4]}/{digits[4:8]}"
-                default_colheita = normalize_date_str(candidate) or candidate
-    
-    # Mapear (*) (**) (***) → mesma data
+    # 3) Se existirem marcações (*), (**)
     if not colheita_map and default_colheita:
         for key in ("(*)", "(**)", "(***)"):
             colheita_map[key] = default_colheita
     
     ctx["colheita_map"] = colheita_map
     ctx["default_colheita"] = default_colheita
+
 
 
 
@@ -1409,6 +1412,7 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
 
 
