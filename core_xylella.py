@@ -489,12 +489,21 @@ def extract_context_from_text(full_text: str):
         full_text,
         re.I,
     )
+    if not m_envio:
+        # ✅ Novo: formas sem "do/de"
+        m_envio = re.search(
+            r"Data\s+envio\s+amostras?(?:\s+ao\s+laborat[oó]rio)?[:\-\s]*([0-9/\-\s]+)",
+            full_text,
+            re.I,
+        )
+
     if m_envio:
         ctx["data_envio"] = normalize_date_str(m_envio.group(1))
     elif default_colheita:
         ctx["data_envio"] = default_colheita
     else:
         ctx["data_envio"] = datetime.now().strftime("%d/%m/%Y")
+
 
     # Nº de amostras declaradas
     print("\n──────── OCR RAW EXCERPT ────────")
@@ -1350,6 +1359,7 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
 
 
