@@ -257,7 +257,7 @@ elif st.session_state.stage == "processing":
             for fpath in debug_files:
                 st.write(f"📄 {fpath.name}")
                 with open(fpath, "r", encoding="utf-8") as f:
-                st.text(f.read())
+                    st.text(f.read())
 
         st.session_state.processed_files.add(up.name)
 
