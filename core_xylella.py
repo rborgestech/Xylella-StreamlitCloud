@@ -920,12 +920,12 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
             expected = ctx.get("declared_samples", len(rows))
 
             # Segurança extra: se extraiu mais linhas do que o declarado, corta ao declarado
-            if expected and len(rows) > expected:
-                print(
-                    f"⚠️ Zonas Demarcadas bloco {i}: {len(rows)} amostras extraídas > declaradas {expected}. "
-                    "Cortar para o nº declarado."
-                )
-                rows = rows[:expected]
+            #if expected and len(rows) > expected:
+            #    print(
+            #        f"⚠️ Zonas Demarcadas bloco {i}: {len(rows)} amostras extraídas > declaradas {expected}. "
+            #        "Cortar para o nº declarado."
+            #    )
+            #    rows = rows[:expected]
 
             results.append({"rows": rows, "expected": expected})
 
@@ -1359,6 +1359,7 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
 
 
