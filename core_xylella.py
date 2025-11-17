@@ -537,8 +537,6 @@ def extract_context_from_text(full_text: str):
  
     # Nº DE AMOSTRAS DECLARADAS — versão ultra segura
     # ---------------------------------------------
-   print("\n──────── OCR RAW EXCERPT ────────")
-    # ---------------------------------------------
     declared_samples = 0
 
     lines = full_text.splitlines()
@@ -1393,6 +1391,7 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
 
 
