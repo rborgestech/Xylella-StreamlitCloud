@@ -292,10 +292,19 @@ def split_icnf_requisicoes(full_text: str) -> List[str]:
     blocos: List[str] = []
     for i in range(len(marks) - 1):
         start = marks[i]
-        end = marks[i+1]
+    
+        # incluir também algum texto após o cabeçalho seguinte
+        end = marks[i+1] + 300
+    
+        # não ultrapassar o texto total
+        if end > len(text):
+            end = len(text)
+    
         bloco = text[start:end].strip()
+    
         if len(bloco) > 200:
             blocos.append(bloco)
+
 
     print(f"🟦 Detetadas {len(blocos)} requisições ICNF distintas.")
     return blocos or [text]
@@ -462,26 +471,31 @@ def extract_context_from_text(full_text: str):
     for m in re.finditer(r"(\d{1,2}/\d{1,2}/\d{4})\s*\(\s*(\*+)\s*\)", full_text):
         colheita_map[f"({m.group(2).replace(' ', '')})"] = m.group(1)
 
-    m_col = re.search(
-        r"Datas?\s+de\s+recolha\s+de\s+amostras\s*[:\-\s]*([0-9/\-\s]+)",
-        full_text,
-        re.I,
-    )
-    if not m_col:
-        m_col_block = re.search(
-            r"Data\s+(?:de\s+)?colheita(?:\s+das?\s+amostras?)?\s*[:\-\s]*([\s\S]{0,40})",
+        # Tentar formato normal
+        m_col = re.search(
+            r"Datas?\s+de\s+recolha\s+de\s+amostras\s*[:\-\s]*([0-9/\-\s]+)",
             full_text,
             re.I,
         )
+        
         default_colheita = ""
-        if m_col_block:
-            raw = m_col_block.group(1)
-            raw = raw.replace("\n", " ").replace("\r", " ")
-            digits = re.sub(r"[^\d]", "", raw)
-            if len(digits) >= 8:
-                default_colheita = f"{digits[:2]}/{digits[2:4]}/{digits[4:8]}"
+        
+        if m_col:
+            default_colheita = normalize_date_str(m_col.group(1))
+        else:
+            # Tentar datas partidas (OCR em várias linhas)
+            m_block = re.search(
+                r"Data\s+(?:de\s+)?colheita(?:\s+das?\s+amostras?)?\s*[:\-\s]*([\s\S]{0,80})",
+                full_text,
+                re.I,
+            )
+            if m_block:
+                raw = m_block.group(1)
+                raw = raw.replace("\n", " ").replace("\r", " ")
+                digits = re.sub(r"[^\d]", "", raw)
+                if len(digits) >= 8:
+                    default_colheita = f"{digits[:2]}/{digits[2:4]}/{digits[4:8]}"
 
-    default_colheita = normalize_date_str(m_col.group(1)) if m_col else ""
 
     if not colheita_map and default_colheita:
         for key in ("(*)", "(**)", "(***)"):
@@ -1374,6 +1388,7 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
 
 
