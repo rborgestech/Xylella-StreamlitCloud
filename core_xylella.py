@@ -388,7 +388,9 @@ def extract_context_from_text(full_text: str):
     """
     ctx: dict = {}
 
+    # -----------------------------
     # Zona demarcada
+    # -----------------------------
     m_zona = re.search(
         r"Zona\s+demarcada\s*:?\s*(.+?)(?=\s+Entidade\s*:|\s+T[ée]cnico\s+respons[aá]vel|\s+Data\s+de|\s+Datas?\s+de\s+recolha|$)",
         full_text,
@@ -401,31 +403,33 @@ def extract_context_from_text(full_text: str):
         m_old = re.search(r"Xylella\s+fastidiosa\s*\(([^)]+)\)", full_text, re.I)
         ctx["zona"] = m_old.group(1).strip() if m_old else "Zona Isenta"
 
+    # -----------------------------
     # Entidade
-    entidade = None
+    # -----------------------------
+    entidade = ""
     m_ent = re.search(r"Entidade\s*:\s*(.+)", full_text, re.I)
     if m_ent:
-        entidade = m_ent.group(1).strip()
-    
-        # ❌ Remover underscores, repetições e lixo gráfico
-        entidade = re.sub(r"[_\-–—]{2,}", "", entidade)  # remove traços/underscores repetidos
-        entidade = re.sub(r"\s+", " ", entidade).strip()  # normaliza espaços
-    
-        # ❌ Remove fragmentos após quebra brusca de linha
-        entidade = entidade.split("\n")[0].strip()
-    
-        # ❌ Remove pontuação terminal desnecessária
-        entidade = re.sub(r"[;,.\-]+$", "", entidade).strip()
-    
-        ctx["entidade"] = entidade
-    else:
-        ctx["entidade"] = ""
+        entidade = m_ent.group(1)
 
+        # só a primeira linha
+        entidade = entidade.split("\n")[0]
+
+        # remover underscores, traços repetidos, lixo gráfico
+        entidade = re.sub(r"[_\-–—]{2,}", " ", entidade)
+        entidade = re.sub(r"\s+", " ", entidade).strip()
+
+        # remover pontuação terminal desnecessária
+        entidade = re.sub(r"[;,.\-]+$", "", entidade).strip()
+
+    # limpar underscores soltos
     if entidade:
         entidade = re.sub(r"_+", "", entidade).strip()
+
     ctx["entidade"] = entidade
 
+    # -----------------------------
     # Técnico responsável
+    # -----------------------------
     tecnico = None
     m_tecnico = re.search(
         r"T[ée]cnico\s+respons[aá]vel\s*:\s*(.+?)(?:\n|$|Data\s+(?:do|de)\s+envio|Data\s+(?:de\s+)?colheita|Datas?\s+de\s+recolha)",
@@ -436,10 +440,14 @@ def extract_context_from_text(full_text: str):
         tecnico = re.sub(r"(Data\s+.*)$", "", m_tecnico.group(1), flags=re.I).strip()
     ctx["responsavel_colheita"] = tecnico or ""
 
+    # -----------------------------
+    # DGAV (texto base para coluna "responsável amostra")
+    # -----------------------------
     ctx["dgav"] = entidade or ""
 
     ctx["dgav"] = re.sub(
-        r"T[ée]cnico\s+respons[aá]vel.*$", "",
+        r"T[ée]cnico\s+respons[aá]vel.*$",
+        "",
         ctx["dgav"],
         flags=re.I
     ).strip()
@@ -486,65 +494,62 @@ def extract_context_from_text(full_text: str):
     # Datas de colheita (robusto)
     # -----------------------------
     colheita_map: dict[str, str] = {}
-    
+
     # Ex: "11/11/2025 (*)"
     for m in re.finditer(r"(\d{1,2}/\d{1,2}/\d{4})\s*\(\s*(\*+)\s*\)", full_text):
         colheita_map[f"({m.group(2).replace(' ', '')})"] = m.group(1)
-    
+
     # 1) Tentativa clássica (funciona na maioria dos PDFs)
     m_col = re.search(
         r"Datas?\s+de\s+recolha\s+de\s+amostras\s*[:\-\s]*([0-9/\-\s]+)",
         full_text,
         re.I,
     )
-    
+
     default_colheita = ""
     if m_col:
         default_colheita = normalize_date_str(m_col.group(1))
-    
-        # 2) Se falhou, tentar reconstrução multi-linha
+
+    # 2) Se falhou, tentar reconstrução multi-linha
+    #    MAS só se **não houver palavras como "Total" no meio**
     if not default_colheita:
         m_block = re.search(
-            r"Data\s+(?:de\s+)?colheita(?:\s+das?\s+amostras?)?\s*[:\-\s]*([\s\S]{0,80})",
+            r"Data\s+(?:de\s+)?colheita(?:\s+das?\s+amostras?)?\s*[:\-\s]*([\s\S]{0,60})",
             full_text,
             re.I,
         )
         if m_block:
             raw = m_block.group(1)
-            raw = raw.replace("\n", " ").replace("\r", " ")
 
-            # 2a) primeiro tenta encontrar diretamente um padrão dd/mm/aaaa
-            m_date = re.search(r"(\d{1,2}\s*/\s*\d{1,2}\s*/\s*\d{2,4})", raw)
-            if m_date:
-                default_colheita = normalize_date_str(m_date.group(1))
+            # se houver "total" no meio → ruído → forçar inválido
+            if re.search(r"\btotal\b", raw, re.I):
+                default_colheita = ""    # Excel marca a vermelho
             else:
-                # 2b) só usa o fallback por dígitos se não houver "Total" no meio
-                if not re.search(r"\btotal\b", raw, re.I):
-                    digits = re.sub(r"[^\d]", "", raw)
-                    if len(digits) >= 8:
-                        candidate = f"{digits[:2]}/{digits[2:4]}/{digits[4:8]}"
-                        default_colheita = normalize_date_str(candidate) or ""
+                raw = raw.replace("\n", " ").replace("\r", " ")
+                digits = re.sub(r"[^\d]", "", raw)
 
-    
+                if len(digits) >= 8:
+                    candidate = f"{digits[:2]}/{digits[2:4]}/{digits[4:8]}"
+                    default_colheita = normalize_date_str(candidate) or ""
+
     # 3) Se existirem marcações (*), (**)
     if not colheita_map and default_colheita:
         for key in ("(*)", "(**)", "(***)"):
             colheita_map[key] = default_colheita
-    
+
     ctx["colheita_map"] = colheita_map
     ctx["default_colheita"] = default_colheita
 
-
-
-
+    # -----------------------------
     # Data de envio
+    # -----------------------------
     m_envio = re.search(
         r"Data\s+(?:do|de)\s+envio(?:\s+das\s+amostras)?(?:\s+ao\s+laborat[oó]rio)?[:\-\s]*([0-9/\-\s]+)",
         full_text,
         re.I,
     )
     if not m_envio:
-        # ✅ Novo: formas sem "do/de"
+        # formas sem "do/de"
         m_envio = re.search(
             r"Data\s+envio\s+amostras?(?:\s+ao\s+laborat[oó]rio)?[:\-\s]*([0-9/\-\s]+)",
             full_text,
@@ -557,87 +562,104 @@ def extract_context_from_text(full_text: str):
         ctx["data_envio"] = default_colheita
     else:
         ctx["data_envio"] = datetime.now().strftime("%d/%m/%Y")
- 
-    # Nº DE AMOSTRAS DECLARADAS — versão ultra segura
-    # ---------------------------------------------
+
+    # -----------------------------
+    # Nº de amostras declaradas (lógica original + ICNF)
+    # -----------------------------
+    print("\n──────── OCR RAW EXCERPT ────────")
+    sample_zone = re.findall(r"(N.?amostras?.{0,40})", full_text, flags=re.I)
+    for s in sample_zone:
+        print("👉", s)
+    print("────────────────────────────────\n")
+
+    flat = re.sub(r"[\u00A0_\s]+", " ", full_text)
+    flat = flat.replace("–", "-").replace("—", "-")
+
+    # 1) Padrões DGAV (Nº de amostras neste envio, etc.)
+    patterns = [
+        r"N[º°o]?\s*de\s*amostras(?:\s+neste\s+env[i1]o)?[\s:.\-]*([0-9OoQIl]{1,4})\b",
+        r"N[º°o]?\s*amostras.*?([0-9OoQIl]{1,4})\b",
+        r"amostras\s*(?:neste\s+env[i1]o)?\s*[:\-]?\s*([0-9OoQIl]{1,4})\b",
+        r"n\s*[º°o]?\s*de\s*amostras.*?([0-9OoQIl]{1,4})\b",
+        r"N\s*amostras.*?([0-9OoQIl]{1,4})\b",
+        r"N.*?amostras.*?([0-9OoQIl]{1,4})\b",
+    ]
+
+    found = None
+    for pat in patterns:
+        m_decl = re.search(pat, flat, re.I)
+        if m_decl:
+            found = m_decl.group(1)
+            break
+
     declared_samples = 0
+    if found:
+        raw = found.strip()
+        raw = (
+            raw.replace("O", "0").replace("o", "0")
+               .replace("Q", "0").replace("q", "0")
+               .replace("I", "1").replace("l", "1")
+               .replace("|", "1").replace("B", "8")
+        )
+        try:
+            declared_samples = int(raw)
+        except ValueError:
+            declared_samples = 0
 
-    lines = full_text.splitlines()
-    flat = re.sub(r"[ \t\r\n]+", " ", full_text)
+    # 2) "Total: 27/35 amostras" etc. → usar o maior número
+    matches_total = re.findall(
+        r"Total\s*[:\-]?\s*(\d{1,4})(?:\s*/\s*(\d{1,4}))?\s*amostras?",
+        flat,
+        re.I,
+    )
+    if matches_total:
+        nums = []
+        for a, b in matches_total:
+            if a.isdigit():
+                nums.append(int(a))
+            if b and b.isdigit():
+                nums.append(int(b))
+        if nums:
+            max_total = max(nums)
+            if max_total > declared_samples:
+                declared_samples = max_total
 
-    # ---------------------------------------------------
-    # 1) Formatos compostos tipo "Total: 27/35 amostras"
-    #    → usar SEMPRE o MAIOR número
-    # ---------------------------------------------------
-    m = re.search(r"\bTotal\s*[:\-]?\s*(\d{1,3})\s*/\s*(\d{1,3})\s*amostras?", flat, re.I)
-    if not m:
-        m = re.search(r"\bTotal\s*[:\-]?\s*(\d{1,3})\s*/\s*(\d{1,3})\b", flat, re.I)
-    if m:
-        a = int(m.group(1))
-        b = int(m.group(2))
-        if 0 < max(a, b) < 500:
-            declared_samples = max(a, b)
+    # 3) Variante sem repetir "amostras" no segundo número
+    matches_total = re.findall(
+        r"Total\s*[:\-]?\s*(\d{1,4})(?:\s*/\s*\d{1,4})?\s*amostras?",
+        flat,
+        re.I,
+    )
+    if matches_total:
+        try:
+            nums = [int(x) for x in matches_total]
+            max_total = max(nums)
+            if max_total > declared_samples:
+                declared_samples = max_total
+        except ValueError:
+            pass
 
-    # ---------------------------------------------------
-    # 2) "Total: xx amostras 13"  → extrair o ÚLTIMO número
-    # ---------------------------------------------------
-    if declared_samples == 0:
-        m = re.search(r"\bTotal\s*[:\-]?\s*[Xx]{1,3}\s*amostras?\s*(\d{1,3})\b", flat, re.I)
-        if m:
-            n = int(m.group(1))
-            if 0 < n < 500:
-                declared_samples = n
-
-    # ---------------------------------------------------
-    # 3) "Total: 13 amostras" ou "Total 13 amostras"
-    # ---------------------------------------------------
-    if declared_samples == 0:
-        m = re.search(r"\bTotal\s*[:\-]?\s*(\d{1,3})\s*amostras?\b", flat, re.I)
-        if m:
-            n = int(m.group(1))
-            if 0 < n < 500:
-                declared_samples = n
-
-    # ---------------------------------------------------
-    # 4) "Total: 20"
-    # ---------------------------------------------------
-    if declared_samples == 0:
-        m = re.search(r"\bTotal\s*[:\-]?\s*(\d{1,3})\b", flat, re.I)
-        if m:
-            n = int(m.group(1))
-            if 0 < n < 500:
-                declared_samples = n
-
-    # ---------------------------------------------------
-    # 5) Formato dividido:
-    #     Total:
-    #     13
-    # ---------------------------------------------------
-    if declared_samples == 0:
-        for i, ln in enumerate(lines):
-            if re.match(r"^\s*Total\s*:?\s*$", ln.strip(), re.I):
-                if i+1 < len(lines):
-                    nxt = re.sub(r"[^\d]", "", lines[i+1])
+    # 4) ICNF – "Total:" na linha de cima e número na linha seguinte
+    if entidade and "ICNF" in (entidade or "").upper() and "DGAV" not in (entidade or "").upper():
+        lines = full_text.splitlines()
+        separated_totals: List[int] = []
+        for i, line in enumerate(lines):
+            if re.match(r"^\s*Total\s*:?\s*$", line, re.I):
+                j = i + 1
+                while j < len(lines) and not lines[j].strip():
+                    j += 1
+                if j < len(lines):
+                    nxt = re.sub(r"[^\d]", "", lines[j])
                     if nxt.isdigit():
-                        n = int(nxt)
-                        if 0 < n < 500:
-                            declared_samples = n
-                break
+                        separated_totals.append(int(nxt))
 
-    # ---------------------------------------------------
-    # 6) Fallback absolutamente seguro:
-    #     "Nº de amostras: 13"
-    # ---------------------------------------------------
-    if declared_samples == 0:
-        m = re.search(r"\bN[º°o]?\s*de\s*amostras\s*[:\-]?\s*(\d{1,3})\b", flat, re.I)
-        if m:
-            n = int(m.group(1))
-            if 0 < n < 500:
-                declared_samples = n
+        if separated_totals:
+            declared_samples = separated_totals[-1]
 
     ctx["declared_samples"] = declared_samples
-    print(f"📊 Nº de amostras declaradas detetadas (seguro): {declared_samples}")
+    print(f"📊 Nº de amostras declaradas detetadas: {ctx['declared_samples']}")
     return ctx
+
 
 def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, Any]]:
     """
@@ -1414,6 +1436,7 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
 
 
