@@ -405,9 +405,14 @@ def extract_context_from_text(full_text: str):
     entidade = None
     m_ent = re.search(r"Entidade\s*:\s*(.+)", full_text, re.I)
     if m_ent:
-        entidade = m_ent.group(1).strip()
-        entidade = re.sub(r"[\r\n]+.*", "", entidade)
+        entidade = m_ent.group(1)
+        # remove sublinhados tipo "_______" e espaços duplicados
+        entidade = entidade.replace("_", " ")
+        entidade = re.sub(r"\s{2,}", " ", entidade)
+        # só corta se houver uma quebra de linha explícita
+        entidade = entidade.splitlines()[0].strip()
     ctx["entidade"] = entidade
+
 
     # Técnico responsável
     tecnico = None
@@ -470,49 +475,42 @@ def extract_context_from_text(full_text: str):
     # Datas de colheita (robusto)
     # -----------------------------
     colheita_map: dict[str, str] = {}
-
-    # 1) Datas com asteriscos (ex: "11/11/2025 (*)")
     for m in re.finditer(r"(\d{1,2}/\d{1,2}/\d{4})\s*\(\s*(\*+)\s*\)", full_text):
         colheita_map[f"({m.group(2).replace(' ', '')})"] = m.group(1)
 
-    # 2) Padrão principal
+    # 1ª tentativa: padrão clássico, mas pode apanhar só "11 1"
     m_col = re.search(
         r"Datas?\s+de\s+recolha\s+de\s+amostras\s*[:\-\s]*([0-9/\-\s]+)",
         full_text,
-        re.I
+        re.I,
     )
 
     default_colheita = ""
-
     if m_col:
         default_colheita = normalize_date_str(m_col.group(1))
-    else:
-        # 3) Padrão alternativo mais permissivo
-        m_alt = re.search(
-            r"Data\s+(?:de\s+)?colheita(?:\s+das?\s+amostras?)?[:\-\s]*([\s\S]{0,40})",
+
+    # Se falhar ou ficar vazia, tenta bloco mais “largo” (até 40 chars, incluindo quebras)
+    if not default_colheita:
+        m_col_block = re.search(
+            r"Data\s+(?:de\s+)?colheita(?:\s+das?\s+amostras?)?\s*[:\-\s]*([\s\S]{0,40})",
             full_text,
-            re.I
+            re.I,
         )
-        if m_alt:
-            raw = m_alt.group(1)
+        if m_col_block:
+            raw = m_col_block.group(1)
             raw = raw.replace("\n", " ").replace("\r", " ")
             digits = re.sub(r"[^\d]", "", raw)
             if len(digits) >= 8:
-                default_colheita = f"{digits[:2]}/{digits[2:4]}/{digits[4:8]}"
+                candidate = f"{digits[:2]}/{digits[2:4]}/{digits[4:8]}"
+                default_colheita = normalize_date_str(candidate) or candidate
 
-    # 4) Normalizar
-    default_colheita = normalize_date_str(default_colheita)
-
-    # 5) Se não houver mapa de asteriscos, usar a data única
-    if default_colheita and not colheita_map:
+    if not colheita_map and default_colheita:
         for key in ("(*)", "(**)", "(***)"):
             colheita_map[key] = default_colheita
 
     ctx["colheita_map"] = colheita_map
     ctx["default_colheita"] = default_colheita
 
-    ctx["colheita_map"] = colheita_map
-    ctx["default_colheita"] = default_colheita
 
     # Data de envio
     m_envio = re.search(
@@ -1391,6 +1389,7 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
 
 
