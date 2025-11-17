@@ -405,13 +405,22 @@ def extract_context_from_text(full_text: str):
     entidade = None
     m_ent = re.search(r"Entidade\s*:\s*(.+)", full_text, re.I)
     if m_ent:
-        entidade = m_ent.group(1)
-        # remove sublinhados tipo "_______" e espaços duplicados
-        entidade = entidade.replace("_", " ")
-        entidade = re.sub(r"\s{2,}", " ", entidade)
-        # só corta se houver uma quebra de linha explícita
-        entidade = entidade.splitlines()[0].strip()
-    ctx["entidade"] = entidade
+        entidade = m_ent.group(1).strip()
+    
+        # ❌ Remover underscores, repetições e lixo gráfico
+        entidade = re.sub(r"[_\-–—]{2,}", "", entidade)  # remove traços/underscores repetidos
+        entidade = re.sub(r"\s+", " ", entidade).strip()  # normaliza espaços
+    
+        # ❌ Remove fragmentos após quebra brusca de linha
+        entidade = entidade.split("\n")[0].strip()
+    
+        # ❌ Remove pontuação terminal desnecessária
+        entidade = re.sub(r"[;,.\-]+$", "", entidade).strip()
+    
+        ctx["entidade"] = entidade
+    else:
+        ctx["entidade"] = ""
+
 
 
     # Técnico responsável
@@ -475,21 +484,24 @@ def extract_context_from_text(full_text: str):
     # Datas de colheita (robusto)
     # -----------------------------
     colheita_map: dict[str, str] = {}
+    
+    # Ex: "11/11/2025 (*)"
     for m in re.finditer(r"(\d{1,2}/\d{1,2}/\d{4})\s*\(\s*(\*+)\s*\)", full_text):
         colheita_map[f"({m.group(2).replace(' ', '')})"] = m.group(1)
-
-    # 1ª tentativa: padrão clássico, mas pode apanhar só "11 1"
+    
+    # Tentativa 1 — padrão clássico
     m_col = re.search(
         r"Datas?\s+de\s+recolha\s+de\s+amostras\s*[:\-\s]*([0-9/\-\s]+)",
         full_text,
         re.I,
     )
-
+    
     default_colheita = ""
     if m_col:
         default_colheita = normalize_date_str(m_col.group(1))
-
-    # Se falhar ou ficar vazia, tenta bloco mais “largo” (até 40 chars, incluindo quebras)
+    
+    # Tentativa 2 — OCR truncado: "11" + "1" + "/2025"
+    # Procura até 40 caracteres após a expressão
     if not default_colheita:
         m_col_block = re.search(
             r"Data\s+(?:de\s+)?colheita(?:\s+das?\s+amostras?)?\s*[:\-\s]*([\s\S]{0,40})",
@@ -498,18 +510,26 @@ def extract_context_from_text(full_text: str):
         )
         if m_col_block:
             raw = m_col_block.group(1)
+    
+            # Junta linhas quebradas pelo OCR
             raw = raw.replace("\n", " ").replace("\r", " ")
+    
+            # Extrai apenas os dígitos
             digits = re.sub(r"[^\d]", "", raw)
+    
+            # Exige pelo menos 8 dígitos (ddmmYYYY)
             if len(digits) >= 8:
                 candidate = f"{digits[:2]}/{digits[2:4]}/{digits[4:8]}"
                 default_colheita = normalize_date_str(candidate) or candidate
-
+    
+    # Mapear (*) (**) (***) → mesma data
     if not colheita_map and default_colheita:
         for key in ("(*)", "(**)", "(***)"):
             colheita_map[key] = default_colheita
-
+    
     ctx["colheita_map"] = colheita_map
     ctx["default_colheita"] = default_colheita
+
 
 
     # Data de envio
@@ -1389,6 +1409,7 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
 
 
