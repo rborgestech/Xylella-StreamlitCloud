@@ -796,9 +796,26 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
     else:
         full_text = extract_all_text(result_json)
 
-    m_entidade = re.search(r"Entidade\s*:\s*(.+)", full_text, re.I)
-    entidade_txt = m_entidade.group(1).strip() if m_entidade else ""
-    is_icnf = "ICNF" in entidade_txt.upper() and "DGAV" not in entidade_txt.upper()
+    full = full_text.upper()
+    
+    # 1️⃣ Cabeçalho DGAV (mais forte)
+    if "PROGRAMA NACIONAL DE PROSPEC" in full:
+        is_icnf = False
+    
+    # 2️⃣ Cabeçalho ICNF (segundo mais forte)
+    elif "XYLELLA FASTIDIOSA" in full and "ZONAS DEMAR" in full:
+        is_icnf = True
+    
+    # 3️⃣ Fallbacks
+    elif "/XF/ICNF" in full:
+        is_icnf = True
+    elif "/XF/DGAV" in full or "DGAV" in full:
+        is_icnf = False
+    
+    # 4️⃣ Último fallback — assume DGAV
+    else:
+        is_icnf = False
+
 
     if is_icnf:
         print("🟦 Documento ICNF detetado — parser exclusivo ICNF ativado.")
@@ -1225,4 +1242,5 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
