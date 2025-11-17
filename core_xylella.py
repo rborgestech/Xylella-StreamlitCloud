@@ -291,8 +291,8 @@ def split_icnf_requisicoes(full_text: str) -> List[str]:
     marks.append(len(text))
     blocos: List[str] = []
     for i in range(len(marks) - 1):
-        start = max(0, marks[i] - 200)
-        end = marks[i + 1]
+        start = marks[i]
+        end = marks[i+1]
         bloco = text[start:end].strip()
         if len(bloco) > 200:
             blocos.append(bloco)
@@ -468,11 +468,18 @@ def extract_context_from_text(full_text: str):
         re.I,
     )
     if not m_col:
-        m_col = re.search(
-            r"Data\s+(?:de\s+)?colheita(?:\s+das?\s+amostras?)?\s*[:\-\s]*([0-9/\-\s]+)",
+        m_col_block = re.search(
+            r"Data\s+(?:de\s+)?colheita(?:\s+das?\s+amostras?)?\s*[:\-\s]*([\s\S]{0,40})",
             full_text,
             re.I,
         )
+        default_colheita = ""
+        if m_col_block:
+            raw = m_col_block.group(1)
+            raw = raw.replace("\n", " ").replace("\r", " ")
+            digits = re.sub(r"[^\d]", "", raw)
+            if len(digits) >= 8:
+                default_colheita = f"{digits[:2]}/{digits[2:4]}/{digits[4:8]}"
 
     default_colheita = normalize_date_str(m_col.group(1)) if m_col else ""
 
@@ -833,10 +840,18 @@ def parse_icnf_zonas(full_text: str, ctx: dict, req_id: int = 1) -> List[Dict[st
             continue
 
         # Linhas de fecho de bloco ("Total...", "Data colheita...", etc.)
+        # Não fechar bloco se a próxima linha começar com referência
         if any(k in low for k in skip_if_no_ref):
+            if i + 1 < len(lines):
+                nxt = lines[i+1].strip()
+                # EXCEPÇÃO: se a próxima linha parecer uma referência → NÃO FECHAR
+                if re.match(r"^\d{1,3}\s*/?\s*[Xx][Ff]/", nxt):
+                    i += 1
+                    continue
             flush_sample(force=True)
             i += 1
             continue
+
 
         # 4.4 Tipo textual (Simples / Composta / Individual)
         m_tipo_txt = tipo_text_re.search(ln)
@@ -1359,6 +1374,7 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
 
 
