@@ -392,7 +392,7 @@ def extract_context_from_text(full_text: str):
     # Zona demarcada
     # -----------------------------
     m_zona = re.search(
-        r"Zona\s+demarcada\s*:?\s*(.+?)(?=\s+Entidade\s*:|\s+T[ée]cnico\s+respons[aá]vel|\s+Data\s+de|\s+Datas?\s+de\s+recolha|$)",
+        r"Zona\s+demarcada\s*:?\s*(.+?)(?=\s+Entidade\b|\s+T[ée]cnico\s+respons[aá]vel|\s+Data\s+de|\s+Datas?\s+de\s+recolha|$)",
         full_text,
         re.I | re.S,
     )
@@ -1436,6 +1436,7 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
 
 
