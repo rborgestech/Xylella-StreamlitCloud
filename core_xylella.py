@@ -502,6 +502,15 @@ def extract_context_from_text(full_text: str):
     )
 
     default_colheita = ""
+    # ICNF simples: "Data colheita das amostras: 3/11/2025"
+    m_icnf_simple = re.search(
+        r"Data\s+colheita\s+das?\s+amostras?\s*[:\-]?\s*(\d{1,2}/\d{1,2}/\d{4})",
+        full_text,
+        re.I,
+    )
+    if m_icnf_simple:
+        default_colheita = normalize_date_str(m_icnf_simple.group(1))
+
     if m_col:
         default_colheita = normalize_date_str(m_col.group(1))
 
@@ -1411,6 +1420,7 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
 
 
