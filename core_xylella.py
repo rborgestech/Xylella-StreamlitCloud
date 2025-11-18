@@ -568,69 +568,69 @@ def extract_context_from_text(full_text: str):
     # -----------------------------
     print("\n──────── OCR RAW EXCERPT ────────")
     # ---------------------------------------------------------
-# Nº DE AMOSTRAS DECLARADAS — versão ultra robusta
-# ---------------------------------------------------------
-lines = full_text.splitlines()
-flat  = re.sub(r"[ \t\r\n]+", " ", full_text)
-
-declared_samples = 0
-
-# DETETAR GLITCH DA DATA PARTIDA
-date_glitch_index = None
-for i, ln in enumerate(lines):
-    if re.fullmatch(r"\d{1,2}", ln.strip()):
-        if i+1 < len(lines) and re.fullmatch(r"\d{1,2}", lines[i+1].strip()):
-            date_glitch_index = i
-            break
-
-def is_inside_date_glitch(idx):
-    if date_glitch_index is None:
-        return False
-    return abs(idx - date_glitch_index) <= 5
-
-# 1) TOTAL: 27/35 amostras
-m = re.search(r"Total\s*[:\-]?\s*(\d{1,3})\s*/\s*(\d{1,3})", flat, re.I)
-if m:
-    declared_samples = max(int(m.group(1)), int(m.group(2)))
-
-# 2) TOTAL: xx amostras 13  (mas ignorar números perto do glitch)
-if declared_samples == 0:
+    # Nº DE AMOSTRAS DECLARADAS — versão ultra robusta
+    # ---------------------------------------------------------
+    lines = full_text.splitlines()
+    flat  = re.sub(r"[ \t\r\n]+", " ", full_text)
+    
+    declared_samples = 0
+    
+    # DETETAR GLITCH DA DATA PARTIDA
+    date_glitch_index = None
     for i, ln in enumerate(lines):
-        if is_inside_date_glitch(i):
-            continue
-        m = re.search(r"Total.*?amostras.*?(\d{1,3})", ln, re.I)
-        if m:
-            declared_samples = int(m.group(1))
-            break
-
-# 3) TOTAL: 13 amostras
-if declared_samples == 0:
-    m = re.search(r"Total\s*[:\-]?\s*(\d{1,3})\s*amostras", flat, re.I)
+        if re.fullmatch(r"\d{1,2}", ln.strip()):
+            if i+1 < len(lines) and re.fullmatch(r"\d{1,2}", lines[i+1].strip()):
+                date_glitch_index = i
+                break
+    
+    def is_inside_date_glitch(idx):
+        if date_glitch_index is None:
+            return False
+        return abs(idx - date_glitch_index) <= 5
+    
+    # 1) TOTAL: 27/35 amostras
+    m = re.search(r"Total\s*[:\-]?\s*(\d{1,3})\s*/\s*(\d{1,3})", flat, re.I)
     if m:
-        declared_samples = int(m.group(1))
-
-# 4) TOTAL: 20   (mas ignorar perto do glitch)
-if declared_samples == 0:
-    for i, ln in enumerate(lines):
-        if is_inside_date_glitch(i):
-            continue
-        m = re.search(r"Total\s*[:\-]?\s*(\d{1,3})\b", ln, re.I)
+        declared_samples = max(int(m.group(1)), int(m.group(2)))
+    
+    # 2) TOTAL: xx amostras 13  (mas ignorar números perto do glitch)
+    if declared_samples == 0:
+        for i, ln in enumerate(lines):
+            if is_inside_date_glitch(i):
+                continue
+            m = re.search(r"Total.*?amostras.*?(\d{1,3})", ln, re.I)
+            if m:
+                declared_samples = int(m.group(1))
+                break
+    
+    # 3) TOTAL: 13 amostras
+    if declared_samples == 0:
+        m = re.search(r"Total\s*[:\-]?\s*(\d{1,3})\s*amostras", flat, re.I)
         if m:
             declared_samples = int(m.group(1))
-            break
-
-# 5) TOTAL:  (linha seguinte tem número)
-if declared_samples == 0:
-    for i, ln in enumerate(lines):
-        if re.fullmatch(r"\s*Total\s*:?\s*", ln, re.I):
-            if i+1 < len(lines):
-                nxt = re.sub(r"[^\d]", "", lines[i+1])
-                if nxt.isdigit() and not is_inside_date_glitch(i+1):
-                    declared_samples = int(nxt)
-            break
-
-ctx["declared_samples"] = declared_samples
-print(f"📊 Nº amostras declaradas (robusto): {declared_samples}")
+    
+    # 4) TOTAL: 20   (mas ignorar perto do glitch)
+    if declared_samples == 0:
+        for i, ln in enumerate(lines):
+            if is_inside_date_glitch(i):
+                continue
+            m = re.search(r"Total\s*[:\-]?\s*(\d{1,3})\b", ln, re.I)
+            if m:
+                declared_samples = int(m.group(1))
+                break
+    
+    # 5) TOTAL:  (linha seguinte tem número)
+    if declared_samples == 0:
+        for i, ln in enumerate(lines):
+            if re.fullmatch(r"\s*Total\s*:?\s*", ln, re.I):
+                if i+1 < len(lines):
+                    nxt = re.sub(r"[^\d]", "", lines[i+1])
+                    if nxt.isdigit() and not is_inside_date_glitch(i+1):
+                        declared_samples = int(nxt)
+                break
+    
+    ctx["declared_samples"] = declared_samples
+    print(f"📊 Nº amostras declaradas (robusto): {declared_samples}")
 
 
 def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, Any]]:
@@ -1408,6 +1408,7 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
 
 
