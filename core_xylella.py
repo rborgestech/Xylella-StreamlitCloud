@@ -523,14 +523,13 @@ def extract_context_from_text(full_text: str):
         )
         if m_block:
             raw = m_block.group(1)
-            if re.search(r"\btotal\b", raw, re.I):
-                default_colheita = ""
-            else:
-                raw = raw.replace("\n", " ").replace("\r", " ")
-                digits = re.sub(r"[^\d]", "", raw)
-                if len(digits) >= 8:
-                    candidate = f"{digits[:2]}/{digits[2:4]}/{digits[4:8]}"
-                    default_colheita = normalize_date_str(candidate) or ""
+            raw = raw.replace("\n", " ").replace("\r", " ")
+            digits = re.sub(r"[^\d]", "", raw)
+
+            if len(digits) >= 8:
+                candidate = f"{digits[:2]}/{digits[2:4]}/{digits[4:8]}"
+                default_colheita = normalize_date_str(candidate) or ""
+
 
     # 3) Se existirem marcações (*), (**)
     if not colheita_map and default_colheita:
@@ -1420,6 +1419,7 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
 
 
