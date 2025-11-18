@@ -559,7 +559,8 @@ def extract_context_from_text(full_text: str):
     elif default_colheita:
         ctx["data_envio"] = default_colheita
     else:
-        ctx["data_envio"] = datetime.now().strftime("%d/%m/%Y")
+        # fallback robusto → deixa vazio, o writer fará fallback seguro
+        ctx["data_envio"] = ""
 
     # -----------------------------
     # Nº DE AMOSTRAS DECLARADAS — ultra robusto
@@ -1174,7 +1175,23 @@ def write_to_template(ocr_rows, out_name, expected_count=None, source_pdf=None):
     last_next_bd = None
 
     for idx, row in enumerate(ocr_rows, start=start_row):
-        rececao_val = row.get("datarececao", "")
+        rececao_val = row.get("datarececao", "").strip()
+
+        # Se o parser não forneceu uma data válida → usar fallback seguro
+        if not normalize_date_str_local(rececao_val):
+            # extrair data do nome do PDF
+            base_pdf = Path(source_pdf).stem
+            mdate = re.match(r"(\d{8})_", base_pdf)
+            if mdate:
+                ymd = mdate.group(1)
+                try:
+                    dt_tmp = datetime.strptime(ymd, "%Y%m%d").date()
+                    cal = Portugal()
+                    rececao_dt = cal.add_working_days(dt_tmp, 1)
+                    rececao_val = rececao_dt.strftime("%d/%m/%Y")
+                except:
+                    pass
+
         colheita_val = row.get("datacolheita", "")
 
         base_date = normalize_date_str_local(rececao_val)
@@ -1419,6 +1436,7 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
 
 
