@@ -567,98 +567,70 @@ def extract_context_from_text(full_text: str):
     # Nº de amostras declaradas (lógica original + ICNF)
     # -----------------------------
     print("\n──────── OCR RAW EXCERPT ────────")
-    sample_zone = re.findall(r"(N.?amostras?.{0,40})", full_text, flags=re.I)
-    for s in sample_zone:
-        print("👉", s)
-    print("────────────────────────────────\n")
+    # ---------------------------------------------------------
+# Nº DE AMOSTRAS DECLARADAS — versão ultra robusta
+# ---------------------------------------------------------
+lines = full_text.splitlines()
+flat  = re.sub(r"[ \t\r\n]+", " ", full_text)
 
-    flat = re.sub(r"[\u00A0_\s]+", " ", full_text)
-    flat = flat.replace("–", "-").replace("—", "-")
+declared_samples = 0
 
-    # 1) Padrões DGAV (Nº de amostras neste envio, etc.)
-    patterns = [
-        r"N[º°o]?\s*de\s*amostras(?:\s+neste\s+env[i1]o)?[\s:.\-]*([0-9OoQIl]{1,4})\b",
-        r"N[º°o]?\s*amostras.*?([0-9OoQIl]{1,4})\b",
-        r"amostras\s*(?:neste\s+env[i1]o)?\s*[:\-]?\s*([0-9OoQIl]{1,4})\b",
-        r"n\s*[º°o]?\s*de\s*amostras.*?([0-9OoQIl]{1,4})\b",
-        r"N\s*amostras.*?([0-9OoQIl]{1,4})\b",
-        r"N.*?amostras.*?([0-9OoQIl]{1,4})\b",
-    ]
-
-    found = None
-    for pat in patterns:
-        m_decl = re.search(pat, flat, re.I)
-        if m_decl:
-            found = m_decl.group(1)
+# DETETAR GLITCH DA DATA PARTIDA
+date_glitch_index = None
+for i, ln in enumerate(lines):
+    if re.fullmatch(r"\d{1,2}", ln.strip()):
+        if i+1 < len(lines) and re.fullmatch(r"\d{1,2}", lines[i+1].strip()):
+            date_glitch_index = i
             break
 
-    declared_samples = 0
-    if found:
-        raw = found.strip()
-        raw = (
-            raw.replace("O", "0").replace("o", "0")
-               .replace("Q", "0").replace("q", "0")
-               .replace("I", "1").replace("l", "1")
-               .replace("|", "1").replace("B", "8")
-        )
-        try:
-            declared_samples = int(raw)
-        except ValueError:
-            declared_samples = 0
+def is_inside_date_glitch(idx):
+    if date_glitch_index is None:
+        return False
+    return abs(idx - date_glitch_index) <= 5
 
-    # 2) "Total: 27/35 amostras" etc. → usar o maior número
-    matches_total = re.findall(
-        r"Total\s*[:\-]?\s*(\d{1,4})(?:\s*/\s*(\d{1,4}))?\s*amostras?",
-        flat,
-        re.I,
-    )
-    if matches_total:
-        nums = []
-        for a, b in matches_total:
-            if a.isdigit():
-                nums.append(int(a))
-            if b and b.isdigit():
-                nums.append(int(b))
-        if nums:
-            max_total = max(nums)
-            if max_total > declared_samples:
-                declared_samples = max_total
+# 1) TOTAL: 27/35 amostras
+m = re.search(r"Total\s*[:\-]?\s*(\d{1,3})\s*/\s*(\d{1,3})", flat, re.I)
+if m:
+    declared_samples = max(int(m.group(1)), int(m.group(2)))
 
-    # 3) Variante sem repetir "amostras" no segundo número
-    matches_total = re.findall(
-        r"Total\s*[:\-]?\s*(\d{1,4})(?:\s*/\s*\d{1,4})?\s*amostras?",
-        flat,
-        re.I,
-    )
-    if matches_total:
-        try:
-            nums = [int(x) for x in matches_total]
-            max_total = max(nums)
-            if max_total > declared_samples:
-                declared_samples = max_total
-        except ValueError:
-            pass
+# 2) TOTAL: xx amostras 13  (mas ignorar números perto do glitch)
+if declared_samples == 0:
+    for i, ln in enumerate(lines):
+        if is_inside_date_glitch(i):
+            continue
+        m = re.search(r"Total.*?amostras.*?(\d{1,3})", ln, re.I)
+        if m:
+            declared_samples = int(m.group(1))
+            break
 
-    # 4) ICNF – "Total:" na linha de cima e número na linha seguinte
-    if entidade and "ICNF" in (entidade or "").upper() and "DGAV" not in (entidade or "").upper():
-        lines = full_text.splitlines()
-        separated_totals: List[int] = []
-        for i, line in enumerate(lines):
-            if re.match(r"^\s*Total\s*:?\s*$", line, re.I):
-                j = i + 1
-                while j < len(lines) and not lines[j].strip():
-                    j += 1
-                if j < len(lines):
-                    nxt = re.sub(r"[^\d]", "", lines[j])
-                    if nxt.isdigit():
-                        separated_totals.append(int(nxt))
+# 3) TOTAL: 13 amostras
+if declared_samples == 0:
+    m = re.search(r"Total\s*[:\-]?\s*(\d{1,3})\s*amostras", flat, re.I)
+    if m:
+        declared_samples = int(m.group(1))
 
-        if separated_totals:
-            declared_samples = separated_totals[-1]
+# 4) TOTAL: 20   (mas ignorar perto do glitch)
+if declared_samples == 0:
+    for i, ln in enumerate(lines):
+        if is_inside_date_glitch(i):
+            continue
+        m = re.search(r"Total\s*[:\-]?\s*(\d{1,3})\b", ln, re.I)
+        if m:
+            declared_samples = int(m.group(1))
+            break
 
-    ctx["declared_samples"] = declared_samples
-    print(f"📊 Nº de amostras declaradas detetadas: {ctx['declared_samples']}")
-    return ctx
+# 5) TOTAL:  (linha seguinte tem número)
+if declared_samples == 0:
+    for i, ln in enumerate(lines):
+        if re.fullmatch(r"\s*Total\s*:?\s*", ln, re.I):
+            if i+1 < len(lines):
+                nxt = re.sub(r"[^\d]", "", lines[i+1])
+                if nxt.isdigit() and not is_inside_date_glitch(i+1):
+                    declared_samples = int(nxt)
+            break
+
+ctx["declared_samples"] = declared_samples
+print(f"📊 Nº amostras declaradas (robusto): {declared_samples}")
 
 
 def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, Any]]:
@@ -1436,6 +1408,7 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
 
 
