@@ -556,10 +556,20 @@ def extract_context_from_text(full_text: str):
     # -----------------------------
     # Nº DE AMOSTRAS DECLARADAS — ultra robusto
     # -----------------------------
-    lines = full_text.splitlines()
-    flat  = re.sub(r"[ \t\r\n]+", " ", full_text)
-
     declared_samples = 0
+
+    # Exemplo DGAV:
+    # "Nº de amostras neste envio: 31"
+    m_dgav = re.search(
+        r"N[º°o]?\s*de\s*amostras\s*neste\s*env[ií]o\s*[:\-]?\s*(\d{1,3})",
+        full_text,
+        re.I,
+    )
+    if m_dgav:
+        try:
+            declared_samples = int(m_dgav.group(1))
+        except:
+            declared_samples = 0
 
     # 1) "Total: 27/35 amostras" → usa o MAIOR
     m = re.search(r"\bTotal\s*[:\-]?\s*(\d{1,3})\s*/\s*(\d{1,3})\s*amostras?", flat, re.I)
@@ -1399,6 +1409,7 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
 
 
