@@ -556,6 +556,9 @@ def extract_context_from_text(full_text: str):
     # -----------------------------
     # Nº DE AMOSTRAS DECLARADAS — ultra robusto
     # -----------------------------
+    lines = full_text.splitlines()
+    flat  = re.sub(r"[ \t\r\n]+", " ", full_text)
+
     declared_samples = 0
 
     # Exemplo DGAV:
@@ -1409,6 +1412,7 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
 
 
