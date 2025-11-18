@@ -429,7 +429,7 @@ def extract_context_from_text(full_text: str):
     tecnico = None
     m_tecnico = re.search(
         #r"T[ée]cnico\s+respons[aá]vel\s*:\s*(.+?)(?:\n|$|Data\s+(?:do|de)\s+envio|Data\s+(?:de\s+)?colheita|Datas?\s+de\s+recolha)",
-        T[ée]cnico\s+respons[aá]vel\s*(?::|-)\s*(.+?)(?:\n|$|Data\s+(?:do|de)\s+envio|Data\s+(?:de\s+)?colheita|Datas?\s+de\s+recolha)
+        T[ée]cnico\s+respons[aá]vel\s*(?::|-)\s*(.+?)(?:\n|$|Data\s+(?:do|de)\s+envio|Data\s+(?:de\s+)?colheita|Datas?\s+de\s+recolha),
         full_text,
         re.I | re.S,
     )
@@ -1438,6 +1438,7 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
 
 
