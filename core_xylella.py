@@ -404,24 +404,19 @@ def extract_context_from_text(full_text: str):
         ctx["zona"] = m_old.group(1).strip() if m_old else "Zona Isenta"
 
     # -----------------------------
-    # Entidade
+    # Entidade (limpa, sem ______, CAIXA X, etc.)
     # -----------------------------
     entidade = ""
     m_ent = re.search(r"Entidade\s*:\s*(.+)", full_text, re.I)
     if m_ent:
         entidade = m_ent.group(1)
-
-        # só a primeira linha
-        entidade = entidade.split("\n")[0]
-
-        # remover underscores, traços repetidos, lixo gráfico
-        entidade = re.sub(r"[_\-–—]{2,}", " ", entidade)
+        entidade = entidade.split("\n")[0]              # só 1ª linha
+        entidade = re.sub(r"[_\-–—]{2,}", " ", entidade)  # tira “______”, “-----”
+        entidade = re.sub(r"CAIXA\s*\d+", "", entidade, flags=re.I)
+        entidade = re.sub(r"\bCaixa\s*\d+\b", "", entidade, flags=re.I)
         entidade = re.sub(r"\s+", " ", entidade).strip()
-
-        # remover pontuação terminal desnecessária
         entidade = re.sub(r"[;,.\-]+$", "", entidade).strip()
 
-    # limpar underscores soltos
     if entidade:
         entidade = re.sub(r"_+", "", entidade).strip()
 
@@ -499,7 +494,7 @@ def extract_context_from_text(full_text: str):
     for m in re.finditer(r"(\d{1,2}/\d{1,2}/\d{4})\s*\(\s*(\*+)\s*\)", full_text):
         colheita_map[f"({m.group(2).replace(' ', '')})"] = m.group(1)
 
-    # 1) Tentativa clássica (funciona na maioria dos PDFs)
+    # 1) Tentativa clássica
     m_col = re.search(
         r"Datas?\s+de\s+recolha\s+de\s+amostras\s*[:\-\s]*([0-9/\-\s]+)",
         full_text,
@@ -510,8 +505,7 @@ def extract_context_from_text(full_text: str):
     if m_col:
         default_colheita = normalize_date_str(m_col.group(1))
 
-    # 2) Se falhou, tentar reconstrução multi-linha
-    #    MAS só se **não houver palavras como "Total" no meio**
+    # 2) Reconstrução multi-linha (evitando linhas com "Total")
     if not default_colheita:
         m_block = re.search(
             r"Data\s+(?:de\s+)?colheita(?:\s+das?\s+amostras?)?\s*[:\-\s]*([\s\S]{0,60})",
@@ -520,14 +514,11 @@ def extract_context_from_text(full_text: str):
         )
         if m_block:
             raw = m_block.group(1)
-
-            # se houver "total" no meio → ruído → forçar inválido
             if re.search(r"\btotal\b", raw, re.I):
-                default_colheita = ""    # Excel marca a vermelho
+                default_colheita = ""
             else:
                 raw = raw.replace("\n", " ").replace("\r", " ")
                 digits = re.sub(r"[^\d]", "", raw)
-
                 if len(digits) >= 8:
                     candidate = f"{digits[:2]}/{digits[2:4]}/{digits[4:8]}"
                     default_colheita = normalize_date_str(candidate) or ""
@@ -549,7 +540,6 @@ def extract_context_from_text(full_text: str):
         re.I,
     )
     if not m_envio:
-        # formas sem "do/de"
         m_envio = re.search(
             r"Data\s+envio\s+amostras?(?:\s+ao\s+laborat[oó]rio)?[:\-\s]*([0-9/\-\s]+)",
             full_text,
@@ -564,73 +554,74 @@ def extract_context_from_text(full_text: str):
         ctx["data_envio"] = datetime.now().strftime("%d/%m/%Y")
 
     # -----------------------------
-    # Nº de amostras declaradas (lógica original + ICNF)
+    # Nº DE AMOSTRAS DECLARADAS — ultra robusto
     # -----------------------------
-    print("\n──────── OCR RAW EXCERPT ────────")
-    # ---------------------------------------------------------
-    # Nº DE AMOSTRAS DECLARADAS — versão ultra robusta
-    # ---------------------------------------------------------
     lines = full_text.splitlines()
     flat  = re.sub(r"[ \t\r\n]+", " ", full_text)
-    
+
     declared_samples = 0
-    
-    # DETETAR GLITCH DA DATA PARTIDA
-    date_glitch_index = None
-    for i, ln in enumerate(lines):
-        if re.fullmatch(r"\d{1,2}", ln.strip()):
-            if i+1 < len(lines) and re.fullmatch(r"\d{1,2}", lines[i+1].strip()):
-                date_glitch_index = i
-                break
-    
-    def is_inside_date_glitch(idx):
-        if date_glitch_index is None:
-            return False
-        return abs(idx - date_glitch_index) <= 5
-    
-    # 1) TOTAL: 27/35 amostras
-    m = re.search(r"Total\s*[:\-]?\s*(\d{1,3})\s*/\s*(\d{1,3})", flat, re.I)
+
+    # 1) "Total: 27/35 amostras" → usa o MAIOR
+    m = re.search(r"\bTotal\s*[:\-]?\s*(\d{1,3})\s*/\s*(\d{1,3})\s*amostras?", flat, re.I)
+    if not m:
+        m = re.search(r"\bTotal\s*[:\-]?\s*(\d{1,3})\s*/\s*(\d{1,3})\b", flat, re.I)
     if m:
-        declared_samples = max(int(m.group(1)), int(m.group(2)))
-    
-    # 2) TOTAL: xx amostras 13  (mas ignorar números perto do glitch)
+        a = int(m.group(1))
+        b = int(m.group(2))
+        if 0 < max(a, b) < 500:
+            declared_samples = max(a, b)
+
+    # 2) "Total: xx amostras 13"
     if declared_samples == 0:
-        for i, ln in enumerate(lines):
-            if is_inside_date_glitch(i):
-                continue
-            m = re.search(r"Total.*?amostras.*?(\d{1,3})", ln, re.I)
-            if m:
-                declared_samples = int(m.group(1))
-                break
-    
-    # 3) TOTAL: 13 amostras
-    if declared_samples == 0:
-        m = re.search(r"Total\s*[:\-]?\s*(\d{1,3})\s*amostras", flat, re.I)
+        m = re.search(r"\bTotal\s*[:\-]?\s*[Xx]{1,3}\s*amostras?\s*(\d{1,3})\b", flat, re.I)
         if m:
-            declared_samples = int(m.group(1))
-    
-    # 4) TOTAL: 20   (mas ignorar perto do glitch)
+            n = int(m.group(1))
+            if 0 < n < 500:
+                declared_samples = n
+
+    # 3) "Total: 13 amostras" / "Total 13 amostras"
+    if declared_samples == 0:
+        m = re.search(r"\bTotal\s*[:\-]?\s*(\d{1,3})\s*amostras?\b", flat, re.I)
+        if m:
+            n = int(m.group(1))
+            if 0 < n < 500:
+                declared_samples = n
+
+    # 4) "Total: 20"
+    if declared_samples == 0:
+        m = re.search(r"\bTotal\s*[:\-]?\s*(\d{1,3})\b", flat, re.I)
+        if m:
+            n = int(m.group(1))
+            if 0 < n < 500:
+                declared_samples = n
+
+    # 5) Formato dividido:
+    #       Total:
+    #       13
     if declared_samples == 0:
         for i, ln in enumerate(lines):
-            if is_inside_date_glitch(i):
-                continue
-            m = re.search(r"Total\s*[:\-]?\s*(\d{1,3})\b", ln, re.I)
-            if m:
-                declared_samples = int(m.group(1))
-                break
-    
-    # 5) TOTAL:  (linha seguinte tem número)
-    if declared_samples == 0:
-        for i, ln in enumerate(lines):
-            if re.fullmatch(r"\s*Total\s*:?\s*", ln, re.I):
-                if i+1 < len(lines):
+            if re.match(r"^\s*Total\s*:?\s*$", ln.strip(), re.I):
+                if i + 1 < len(lines):
                     nxt = re.sub(r"[^\d]", "", lines[i+1])
-                    if nxt.isdigit() and not is_inside_date_glitch(i+1):
-                        declared_samples = int(nxt)
+                    if nxt.isdigit():
+                        n = int(nxt)
+                        if 0 < n < 500:
+                            declared_samples = n
                 break
-    
+
+    # 6) Fallback DGAV clássico: "Nº de amostras: 2"
+    if declared_samples == 0:
+        m = re.search(r"\bN[º°o]?\s*de\s*amostras\s*[:\-]?\s*(\d{1,3})\b", flat, re.I)
+        if m:
+            n = int(m.group(1))
+            if 0 < n < 500:
+                declared_samples = n
+
     ctx["declared_samples"] = declared_samples
-    print(f"📊 Nº amostras declaradas (robusto): {declared_samples}")
+    print(f"📊 Nº de amostras declaradas detetadas (robusto): {declared_samples}")
+
+    return ctx
+
 
 
 def parse_xylella_tables(result_json, context, req_id=None) -> List[Dict[str, Any]]:
@@ -1408,6 +1399,7 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
 
 
