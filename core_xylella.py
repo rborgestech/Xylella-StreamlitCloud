@@ -341,10 +341,7 @@ def extract_context_from_text(full_text: str):
     datas (colheita/envio) e nº de amostras declaradas).
     """
     ctx: dict = {}
-    lines = full_text.splitlines()
-    flat  = re.sub(r"[ \t\r\n]+", " ", full_text)
 
-    declared_samples = 0
     # Zona demarcada
     m_zona = re.search(
         r"Zona\s+demarcada\s*:?\s*(.+?)(?=\s+Entidade\s*:|\s+T[ée]cnico\s+respons[aá]vel|\s+Data\s+de|\s+Datas?\s+de\s+recolha|$)",
@@ -1228,4 +1225,3 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
-
