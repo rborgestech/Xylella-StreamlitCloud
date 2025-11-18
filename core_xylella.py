@@ -407,7 +407,8 @@ def extract_context_from_text(full_text: str):
     # Entidade (limpa, sem ______, CAIXA X, etc.)
     # -----------------------------
     entidade = ""
-    m_ent = re.search(r"Entidade\s*:\s*(.+)", full_text, re.I)
+    #m_ent = re.search(r"Entidade\s*:\s*(.+)", full_text, re.I)
+    m_ent = re.search(r"Entidade\s*(?::|-)\s*(.+)", full_text, re.I)
     if m_ent:
         entidade = m_ent.group(1)
         entidade = entidade.split("\n")[0]              # só 1ª linha
@@ -427,7 +428,8 @@ def extract_context_from_text(full_text: str):
     # -----------------------------
     tecnico = None
     m_tecnico = re.search(
-        r"T[ée]cnico\s+respons[aá]vel\s*:\s*(.+?)(?:\n|$|Data\s+(?:do|de)\s+envio|Data\s+(?:de\s+)?colheita|Datas?\s+de\s+recolha)",
+        #r"T[ée]cnico\s+respons[aá]vel\s*:\s*(.+?)(?:\n|$|Data\s+(?:do|de)\s+envio|Data\s+(?:de\s+)?colheita|Datas?\s+de\s+recolha)",
+        T[ée]cnico\s+respons[aá]vel\s*(?::|-)\s*(.+?)(?:\n|$|Data\s+(?:do|de)\s+envio|Data\s+(?:de\s+)?colheita|Datas?\s+de\s+recolha)
         full_text,
         re.I | re.S,
     )
@@ -1436,6 +1438,7 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
 
 
