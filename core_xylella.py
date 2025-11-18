@@ -407,7 +407,6 @@ def extract_context_from_text(full_text: str):
     # Entidade (limpa, sem ______, CAIXA X, etc.)
     # -----------------------------
     entidade = ""
-    #m_ent = re.search(r"Entidade\s*:\s*(.+)", full_text, re.I)
     m_ent = re.search(r"Entidade\s*(?::|-)\s*(.+)", full_text, re.I)
     if m_ent:
         entidade = m_ent.group(1)
@@ -417,10 +416,10 @@ def extract_context_from_text(full_text: str):
         entidade = re.sub(r"\bCaixa\s*\d+\b", "", entidade, flags=re.I)
         entidade = re.sub(r"\s+", " ", entidade).strip()
         entidade = re.sub(r"[;,.\-]+$", "", entidade).strip()
-
-    if entidade:
-        entidade = re.sub(r"_+", "", entidade).strip()
-
+    
+        if entidade:
+            entidade = re.sub(r"_+", "", entidade).strip()
+    
     ctx["entidade"] = entidade
 
     # -----------------------------
@@ -1438,6 +1437,7 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
 
 
