@@ -213,13 +213,10 @@ def detect_requisicoes(full_text: str):
 def detect_document_type(full_text: str) -> str:
     """
     Decide se o PDF é ICNF ou DGAV com base nos cabeçalhos oficiais.
-
     - ICNF → 'Prospeção de: Xylella fastidiosa em Zonas Demarcadas'
     - DGAV → 'PROGRAMA NACIONAL DE PROSPEÇÃO DE PRAGAS DE QUARENTENA'
     """
- """
-    Decide se o PDF é ICNF ou DGAV com base nos cabeçalhos e padrões reais.
-    """
+
     txt = full_text.upper()
 
     # 1) Formato novo ICNF – como o ficheiro que enviaste
@@ -1446,6 +1443,7 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
 
 
