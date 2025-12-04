@@ -217,21 +217,31 @@ def detect_document_type(full_text: str) -> str:
     - ICNF → 'Prospeção de: Xylella fastidiosa em Zonas Demarcadas'
     - DGAV → 'PROGRAMA NACIONAL DE PROSPEÇÃO DE PRAGAS DE QUARENTENA'
     """
+ """
+    Decide se o PDF é ICNF ou DGAV com base nos cabeçalhos e padrões reais.
+    """
     txt = full_text.upper()
 
-    # ICNF – cabeçalho oficial: Prospeção de Xylella fastidiosa em Zonas Demarcadas
-    if "XYLELLA FASTIDIOSA" in txt and "ZONAS DEMARC" in txt and "PROSPEC" in txt:
+    # 1) Formato novo ICNF – como o ficheiro que enviaste
+    if "ENTIDADE:" in txt and "ICNF" in txt:
         return "ICNF"
 
-    # DGAV – cabeçalho oficial do programa nacional
+    if "/XF/ICNFC" in txt:
+        return "ICNF"
+
+    # 2) Cabeçalho antigo ICNF com Xylella em zonas demarcadas
+    if "XYLELLA FASTIDIOSA" in txt and "ZONA DEMARC" in txt and "PROSPEC" in txt:
+        return "ICNF"
+
+    # 3) DGAV – Programa Nacional
     if "PROGRAMA NACIONAL DE PROSPEC" in txt:
         return "DGAV"
 
-    # Fallback ICNF: referências /XF/ICNF sem menção a DGAV
+    # 4) Fallback: referências ICNF sem DGAV
     if "/XF/ICNF" in txt and "DGAV" not in txt:
         return "ICNF"
 
-    # Fallback por omissão → DGAV
+    # 5) Fallback por omissão
     return "DGAV"
 
 def split_if_multiple_requisicoes(full_text: str) -> List[str]:
@@ -1436,6 +1446,7 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
 
 
