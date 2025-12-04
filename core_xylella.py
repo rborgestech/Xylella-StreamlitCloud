@@ -67,6 +67,10 @@ HEADER_ZONAS_DEM_RE = re.compile(
     re.I,
 )
 
+HEADER_ICNF_NEW_RE = re.compile(
+    r"ZONA\s+DEMARCADA\s*:", re.I
+)
+
 # ───────────────────────────────────────────────
 # Utilitários genéricos
 # ───────────────────────────────────────────────
@@ -976,7 +980,10 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
     # 1) Detetar template pelo cabeçalho (NUNCA pela 'Entidade')
     # ------------------------------------------------------------
     is_dgav_pnpq = bool(HEADER_DGAV_PNPQ_RE.search(full_text))
-    is_zonas_dem = bool(HEADER_ZONAS_DEM_RE.search(full_text))
+    is_zonas_dem = (
+    bool(HEADER_ZONAS_DEM_RE.search(full_text))      # ICNF antigo
+    or bool(HEADER_ICNF_NEW_RE.search(full_text))    # ICNF moderno
+    )
 
     # ------------------------------------------------------------
     # 🟦 ZONAS DEMARCADAS (DGAV ou ICNF) — parser de linhas
@@ -1449,6 +1456,7 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
 
 
 
