@@ -67,6 +67,10 @@ HEADER_ZONAS_DEM_RE = re.compile(
     re.I,
 )
 
+HEADER_ICNF_NEW_RE = re.compile(
+    r"ZONA\s+DEMARCADA\s*:", re.I
+)
+
 # ───────────────────────────────────────────────
 # Utilitários genéricos
 # ───────────────────────────────────────────────
@@ -213,25 +217,32 @@ def detect_requisicoes(full_text: str):
 def detect_document_type(full_text: str) -> str:
     """
     Decide se o PDF é ICNF ou DGAV com base nos cabeçalhos oficiais.
-
     - ICNF → 'Prospeção de: Xylella fastidiosa em Zonas Demarcadas'
     - DGAV → 'PROGRAMA NACIONAL DE PROSPEÇÃO DE PRAGAS DE QUARENTENA'
     """
+
     txt = full_text.upper()
 
-    # ICNF – cabeçalho oficial: Prospeção de Xylella fastidiosa em Zonas Demarcadas
-    if "XYLELLA FASTIDIOSA" in txt and "ZONAS DEMARC" in txt and "PROSPEC" in txt:
+    # 1) Formato novo ICNF – como o ficheiro que enviaste
+    if "ENTIDADE:" in txt and "ICNF" in txt:
         return "ICNF"
 
-    # DGAV – cabeçalho oficial do programa nacional
+    if "/XF/ICNFC" in txt:
+        return "ICNF"
+
+    # 2) Cabeçalho antigo ICNF com Xylella em zonas demarcadas
+    if "XYLELLA FASTIDIOSA" in txt and "ZONA DEMARC" in txt and "PROSPEC" in txt:
+        return "ICNF"
+
+    # 3) DGAV – Programa Nacional
     if "PROGRAMA NACIONAL DE PROSPEC" in txt:
         return "DGAV"
 
-    # Fallback ICNF: referências /XF/ICNF sem menção a DGAV
+    # 4) Fallback: referências ICNF sem DGAV
     if "/XF/ICNF" in txt and "DGAV" not in txt:
         return "ICNF"
 
-    # Fallback por omissão → DGAV
+    # 5) Fallback por omissão
     return "DGAV"
 
 def split_if_multiple_requisicoes(full_text: str) -> List[str]:
@@ -273,38 +284,44 @@ def split_if_multiple_requisicoes(full_text: str) -> List[str]:
 def split_icnf_requisicoes(full_text: str) -> List[str]:
     """
     Divide o texto OCR em blocos distintos, um por requisição ICNF.
+    Delimitador robusto: 'Zona demarcada:' (consistente em todos os ICNF novos).
+    Mantém compatibilidade com o formato antigo.
     """
     text = full_text.replace("\r", "")
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{2,}", "\n", text)
 
-    pattern = re.compile(
+    # 1) Formato antigo ICNF (Prospeção Xylella)
+    pattern_old = re.compile(
         r"Prospe[cç][aã]o\s+de\s*:\s*Xylella\s+fastidiosa\s+em\s+Zonas\s+Demarcadas",
         re.I,
     )
-    marks = [m.start() for m in pattern.finditer(text)]
+    marks = [m.start() for m in pattern_old.finditer(text)]
+
+    # 2) Formato moderno ICNF – delimitador oficial
+    if not marks:
+        pattern_new = re.compile(
+            r"ZONA\s+DEMARCADA\s*:?",   # apanha : ou ausência dele
+            re.I,
+        )
+        marks = [m.start() for m in pattern_new.finditer(text)]
 
     if not marks:
         print("🔍 Nenhum cabeçalho ICNF encontrado — tratado como 1 requisição.")
         return [text]
 
+    # Garantir que o último bloco é fechado
     marks.append(len(text))
+
     blocos: List[str] = []
     for i in range(len(marks) - 1):
         start = marks[i]
-    
-        # incluir também algum texto após o cabeçalho seguinte
-        end = marks[i+1] + 300
-    
-        # não ultrapassar o texto total
-        if end > len(text):
-            end = len(text)
-    
+        end = marks[i + 1]
         bloco = text[start:end].strip()
-    
+
+        # Filtrar ruído (compatível com tua lógica anterior)
         if len(bloco) > 200:
             blocos.append(bloco)
-
 
     print(f"🟦 Detetadas {len(blocos)} requisições ICNF distintas.")
     return blocos or [text]
@@ -963,7 +980,10 @@ def parse_all_requisitions(result_json: Dict[str, Any], pdf_name: str, txt_path:
     # 1) Detetar template pelo cabeçalho (NUNCA pela 'Entidade')
     # ------------------------------------------------------------
     is_dgav_pnpq = bool(HEADER_DGAV_PNPQ_RE.search(full_text))
-    is_zonas_dem = bool(HEADER_ZONAS_DEM_RE.search(full_text))
+    is_zonas_dem = (
+    bool(HEADER_ZONAS_DEM_RE.search(full_text))      # ICNF antigo
+    or bool(HEADER_ICNF_NEW_RE.search(full_text))    # ICNF moderno
+    )
 
     # ------------------------------------------------------------
     # 🟦 ZONAS DEMARCADAS (DGAV ou ICNF) — parser de linhas
@@ -1436,6 +1456,8 @@ def process_folder_async(input_dir: str) -> str:
     print(f"✅ Processamento completo ({elapsed_time:.1f}s).")
 
     return str(zip_path)
+
+
 
 
 
